@@ -33,7 +33,7 @@ class HandlerTimer(private val h: Handler) : TimerPort {
     }
 }
 
-/** Every USB input (the spike's usbInput(), all of them). */
+/** Every USB input, by id and product name. */
 fun usbInputs(am: AudioManager): List<UsbInput> = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
     .filter { it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
     .map { UsbInput(it.id, it.productName?.toString().orEmpty().ifBlank { "USB microphone" }) }

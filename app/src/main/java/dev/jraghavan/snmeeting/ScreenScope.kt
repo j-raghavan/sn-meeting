@@ -3,22 +3,13 @@ package dev.jraghavan.snmeeting
 import android.app.Activity
 
 /**
- * Drops results that arrive after their screen is gone or was rebuilt: every async callback
- * goes through [deliver], which runs it only while [alive] and while the generation it was
- * issued in is still current.
+ * Drops results that arrive after their screen is gone: every async callback goes through
+ * [deliver], which runs it only while [alive].
  */
 class ScreenScope(private val alive: () -> Boolean) {
     constructor(activity: Activity) : this({ !activity.isDestroyed })
 
-    private var generation = 0
-
-    /** Call on a re-render that makes in-flight results for the old views meaningless. */
-    fun invalidate() { generation++ }
-
-    fun <T> deliver(f: (T) -> Unit): (T) -> Unit {
-        val g = generation
-        return { v -> if (alive() && g == generation) f(v) }
-    }
+    fun <T> deliver(f: (T) -> Unit): (T) -> Unit = { v -> if (alive()) f(v) }
 
     /** A short core call on [CoreJobs]; [done] only while this screen still wants it. */
     fun core(work: () -> String, done: (String) -> Unit) = CoreJobs.run(work, deliver(done))

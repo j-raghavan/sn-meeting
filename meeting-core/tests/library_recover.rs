@@ -239,12 +239,12 @@ fn the_live_recording_and_running_jobs_are_left_alone() {
         },
     )
     .unwrap();
-    app.set_job(id2, true);
+    let job = app.jobs.start(id2).unwrap(); // a job in flight, as run_job_json holds it
     assert_eq!(recover(&app, true)["recovered"], json!([]));
     // Once the service is reported dead, the recording is recovered too.
     assert_eq!(recover(&app, false)["recovered"], json!([ID0]));
     assert_eq!(app.liveness().recording, None);
-    app.set_job(id2, false);
+    drop(job);
     assert_eq!(recover(&app, false)["recovered"], json!([id2]));
 }
 

@@ -277,7 +277,6 @@ class SettingsActivity : Activity() {
         addView(ui.choiceRow(label, hint, selected, enabled) { if (!selected) pick(); render() })
     }
 
-    /** One provider role: a radio per provider with its key status, the model, and Test connection (F10-FR4/FR5). */
     /**
      * F10-FR4: a radio per provider with its key status (one without a key can't be chosen),
      * the model that will run and an optional override (empty = the key file's or the

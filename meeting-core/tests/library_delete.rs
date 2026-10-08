@@ -80,12 +80,12 @@ fn not_while_recording_or_transcribing() {
         json!({"error": "meeting is recording"})
     );
     app.finish_json(ID0, 10, "");
-    app.set_job(ID0, true);
+    let job = app.jobs.start(ID0).unwrap(); // a job in flight, as run_job_json holds it
     assert_eq!(
         parse(&app.delete_json(ID0)),
         json!({"error": "meeting is being transcribed"})
     );
-    app.set_job(ID0, false);
+    drop(job);
     assert_eq!(parse(&app.delete_json(ID0))["ok"], true);
 }
 

@@ -79,12 +79,6 @@ pub fn test_connection(role: &str, provider: &str) -> String {
     with_app(|app| app.test_connection(role, provider))
 }
 
-/// `test_connection` against an explicit `Core`, with the key file's (or default) model.
-/// Must not be called on a runtime thread.
-pub fn test_connection_with(core: &Core, role: &str, provider: &str) -> String {
-    test_connection_model(core, role, provider, None)
-}
-
 /// Test connection checking `model_override` instead of the key file's model when given
 /// (F10-FR4: Settings' override for this role and provider).
 pub fn test_connection_model(

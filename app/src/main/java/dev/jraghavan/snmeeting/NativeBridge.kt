@@ -22,7 +22,7 @@ object NativeBridge {
      */
     external fun nativeTestConnection(role: String, provider: String): String
 
-    // Settings (F10). The core owns settings.json; these are not wired into the UI until M7.
+    // Settings (F10). The core owns settings.json.
 
     /** `{settings, origin, effective, keys}`: what is stored, what will run, each key's status. */
     external fun nativeGetSettings(): String
@@ -31,7 +31,7 @@ object NativeBridge {
     external fun nativeSetSettings(json: String): String
 
     // Library (F3). The core serialises every sidecar write under one lock, so these may be
-    // called from any background thread (CoreJobs in practice). Not wired into the UI until M7.
+    // called from any background thread (CoreJobs in practice).
 
     /** Starts a meeting: `{id, firstSegmentPath, plan: {maxDurationMs, maxFileBytes}}`. */
     external fun nativeBeginMeeting(startedAtMs: Long, micJson: String, audioJson: String): String
@@ -71,7 +71,7 @@ object NativeBridge {
      *  flagged: [{id, index, flag}]}`. Measure each listed file and close it. */
     external fun nativeRecover(serviceAlive: Boolean): String
 
-    // Providers (F5). Not wired into the UI until M7.
+    // Providers (F5): long jobs, run on LongJobs' lane.
 
     /**
      * Transcribes the segments not yet done, then summarises. Blocking for minutes: call it on
@@ -91,7 +91,7 @@ object NativeBridge {
     /** Stops the meeting's running job: `{cancelled: bool}`. Returns at once, from any thread. */
     external fun nativeCancel(id: String): String
 
-    // Templates (F11). Not wired into the UI until M7.
+    // Templates (F11).
 
     /** Every template, built-ins first: `[{id, name, description, …, origin, builtin,
      *  customised, problem, path}]`; origin is `builtin`, `customised` or `yours`. */

@@ -55,13 +55,15 @@ pub fn assert_no_key(text: &str) {
     }
 }
 
-/// `api::test_connection_with` off the async runtime (it blocks on the core's own runtime),
+/// `api::test_connection_model` (no override) off the async runtime (it blocks on the core's own runtime),
 /// with the key-leak assertion on the raw JSON.
 pub async fn call(core: &Core, role: &'static str, provider: &'static str) -> Value {
     let core = core.clone();
-    let out = tokio::task::spawn_blocking(move || api::test_connection_with(&core, role, provider))
-        .await
-        .unwrap();
+    let out = tokio::task::spawn_blocking(move || {
+        api::test_connection_model(&core, role, provider, None)
+    })
+    .await
+    .unwrap();
     assert_no_key(&out);
     serde_json::from_str(&out).unwrap()
 }

@@ -12,7 +12,12 @@ import java.util.concurrent.atomic.AtomicBoolean
  * the order they were queued (nativeInit before the first Test connection), and each result is
  * delivered on [post]'s thread.
  */
-class Jobs(private val worker: Executor, private val post: (Runnable) -> Unit) {
+class Jobs(
+    private val worker: Executor,
+    private val post: (Runnable) -> Unit,
+    /** Where a swallowed failure is noted: its class only, never a message (it may hold a path). */
+    private val log: (String) -> Unit = {},
+) {
     fun run(work: () -> String, done: (String) -> Unit) {
         worker.execute {
             // A missing or broken libmeeting.so throws an Error from NativeBridge's initialiser;
@@ -32,6 +37,7 @@ class Jobs(private val worker: Executor, private val post: (Runnable) -> Unit) {
             work()
         } catch (t: Throwable) {
             // A broken core can't be reported from here; the next call that replies will say so.
+            log("a core call failed: ${t.javaClass.simpleName}")
         }
     }
 
@@ -46,7 +52,7 @@ object CoreJobs {
     private val jobs by lazy {
         val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-core").apply { isDaemon = true } }
         val main = Handler(Looper.getMainLooper())
-        Jobs(worker) { main.post(it) }
+        Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) }
     }
     private val initQueued = AtomicBoolean(false)
 
@@ -132,7 +138,7 @@ object LongJobs {
     val lane by lazy {
         val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-jobs").apply { isDaemon = true } }
         val main = Handler(Looper.getMainLooper())
-        JobLane(Jobs(worker) { main.post(it) })
+        JobLane(Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) })
     }
 }
 
@@ -145,7 +151,7 @@ object PreviewJobs {
     private val jobs by lazy {
         val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-preview").apply { isDaemon = true } }
         val main = Handler(Looper.getMainLooper())
-        Jobs(worker) { main.post(it) }
+        Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) }
     }
 
     fun run(work: () -> String, done: (String) -> Unit) = jobs.run(work, done)

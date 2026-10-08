@@ -132,17 +132,6 @@ impl App {
         live
     }
 
-    /// Mark a job run outside the registry as running (`true`) or finished; recovery and
-    /// delete leave a running job's meeting alone. Registry jobs are counted without it.
-    pub fn set_job(&self, id: &str, running: bool) {
-        let mut st = self.state();
-        if running {
-            st.live.jobs.insert(id.to_owned());
-        } else {
-            st.live.jobs.remove(id);
-        }
-    }
-
     /// The library over the current settings' folders, current first.
     pub fn library(&self) -> Library<'_> {
         self.library_of(&self.state().settings)

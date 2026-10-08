@@ -4,17 +4,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ScreenScopeTest {
-    @Test fun resultsForAGoneOrRebuiltScreenAreDropped() {
+    @Test fun resultsForAGoneScreenAreDropped() {
         var alive = true
         val scope = ScreenScope { alive }
         val got = mutableListOf<String>()
-        val first = scope.deliver<String> { got += it }
-        scope.invalidate()
-        val second = scope.deliver<String> { got += it }
-        first("old"); second("new")
+        val deliver = scope.deliver<String> { got += it }
+        deliver("now")
         alive = false
-        second("late")
-        assertEquals(listOf("new"), got)
+        deliver("late")
+        assertEquals(listOf("now"), got)
     }
 }
 

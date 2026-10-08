@@ -9,6 +9,7 @@ class JobsTest {
     private val jobs = Jobs(
         worker = { r -> log += "worker"; r.run() },
         post = { r -> log += "post"; r.run() },
+        log = { log += "log: $it" },
     )
 
     @Test
@@ -24,5 +25,11 @@ class JobsTest {
         var got = ""
         jobs.run({ throw UnsatisfiedLinkError("dlopen failed") }) { got = it }
         assertEquals("{\"error\":\"core unavailable: UnsatisfiedLinkError\"}", got)
+    }
+
+    @Test
+    fun aFailedFireAndForgetCallIsLoggedByClassOnly() {
+        jobs.exec { throw IllegalStateException("/storage/emulated/0/secret path") }
+        assertEquals(listOf("worker", "log: a core call failed: IllegalStateException"), log)
     }
 }

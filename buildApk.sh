@@ -151,9 +151,9 @@ report_sizes() {
 mb() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1048576 }'; }
 
 # =========================================================
-# audio_recording_state — F1-FR7 until RecordingService exists (M6): the spike records from
-# MainActivity, so look for our package among AudioService's recordings. Reads `dumpsys audio`
-# on stdin and prints yes / no / unknown.
+# audio_recording_state — F1-FR7's second check, after RecordingService: our package among
+# AudioService's active recordings (a recording whose service listing was missed). Reads
+# `dumpsys audio` on stdin and prints yes / no / unknown.
 #
 # AOSP's RecordingActivityMonitor dumps "RecordActivityMonitor dump time: …", then per client
 # "riid <n>; active <bool>" and an indented "session:… -- pack:<package> …" line, then an event
