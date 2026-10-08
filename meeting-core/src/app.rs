@@ -173,6 +173,10 @@ impl App {
     /// `nativeFinishMeeting`; an empty `note` means none. The recording is over either way,
     /// so the meeting stops being live even if the sidecar can't be updated.
     pub fn finish_json(&self, id: &str, duration_ms: i64, note: &str) -> String {
+        if duration_ms < 0 {
+            // A rejected call changes nothing: the recording stays live (F3-FR2).
+            return error_json("durationMs must be >= 0");
+        }
         let _w = self.write_lock();
         let mut st = self.state();
         if st.live.recording.as_deref() == Some(id) {

@@ -153,9 +153,9 @@ fn finish_notes_why_and_happens_once() {
         json!({"error": "durationMs must be >= 0"})
     );
     assert_eq!(
-        app.liveness().recording,
-        None,
-        "the recording is over even if finish failed"
+        app.liveness().recording.as_deref(),
+        Some(ID0),
+        "a rejected call changes nothing"
     );
     app.finish_json(ID0, 61_000, "  mic\ndisconnected  ");
     let sc = read_sidecar(&e.export(), ID0);
@@ -243,4 +243,21 @@ fn unknown_bad_and_unreadable_meetings() {
         json!({"error": "meeting is not recording"})
     );
     assert!(!dir.join("meeting-20261007-111111.json").exists());
+}
+
+#[test]
+fn a_rejected_finish_keeps_the_meeting_live() {
+    let e = Env::new();
+    let app = e.app();
+    let id = begin(&app, T0)["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        parse(&app.finish_json(&id, -1, "")),
+        json!({"error": "durationMs must be >= 0"})
+    );
+    assert_eq!(app.liveness().recording.as_deref(), Some(id.as_str()));
+    let again = begin(&app, T0 + 60_000);
+    assert_eq!(again["error"], format!("already recording {id}"));
+    assert_eq!(parse(&app.recover_json(true))["recovered"], json!([]));
+    assert_eq!(parse(&app.finish_json(&id, 1000, "")), json!({"ok": true}));
+    assert_eq!(app.liveness().recording, None);
 }
