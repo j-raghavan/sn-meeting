@@ -109,8 +109,15 @@ pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, Settings
         return Err(outside());
     }
     check_forbidden(&canon_parts)?;
-    let test = full.join(".sn-meeting-write-test");
-    std::fs::File::create(&test)
+    // A probe name of its own per check, created new, so two checks of one folder never
+    // remove each other's probe (N7). Older builds used the bare name: tidy that away.
+    let legacy = full.join(".sn-meeting-write-test");
+    let _ = std::fs::remove_file(&legacy);
+    let test = crate::atomic::tmp_path(&legacy);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&test)
         .and_then(|_| std::fs::remove_file(&test))
         .map_err(|e| err(F, format!("the folder isn't writable: {}", e.kind())))?;
     Ok(parts.join("/"))

@@ -154,6 +154,33 @@ fn the_folder_must_be_creatable_and_writable() {
 }
 
 #[test]
+fn checks_of_one_folder_at_once_never_trip_over_each_other() {
+    // N7: each check probes with a name of its own; with one shared name, one check's remove
+    // could take another's probe ("the folder isn't writable: entity not found").
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("Notes")).unwrap();
+    let root = std::sync::Arc::new(root.path().to_path_buf());
+    let threads: Vec<_> = (0..8)
+        .map(|_| {
+            let root = root.clone();
+            std::thread::spawn(move || {
+                for _ in 0..200 {
+                    assert_eq!(check(&root, "Notes"), Ok("Notes".into()));
+                }
+            })
+        })
+        .collect();
+    for t in threads {
+        t.join().unwrap();
+    }
+    assert_eq!(
+        std::fs::read_dir(root.join("Notes")).unwrap().count(),
+        0,
+        "no probe left"
+    );
+}
+
+#[test]
 fn a_missing_storage_root_is_reported() {
     let d = tempfile::tempdir().unwrap();
     assert_eq!(
