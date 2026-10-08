@@ -1,0 +1,122 @@
+package dev.jraghavan.snmeeting.record
+
+import dev.jraghavan.snmeeting.model.Begun
+import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.SegmentAdded
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class SegmentedRecorderTest {
+    private val log = mutableListOf<String>()
+    private var now = 1_000L
+    private var free = 10_000_000_000L
+    private var stopOk = true
+    private var nextOk = true
+    private var startFails = false
+    private var beginReply: CoreResult<Begun>? = null
+    private val rejected = mutableSetOf<AudioSpec>()
+    private lateinit var events: RecorderEvents
+    private val id = "meeting-20261008-100000"
+    private val first = "/s/EXPORT/sn-meeting/$id-01.m4a"
+    private val plan = Begun(id, first, 900_000, 13_499_997)
+    private var ended: Pair<String?, String>? = null
+
+    private val core = object : RecorderCore {
+        override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) {
+            log += "begin $micJson $audioJson"; done(beginReply ?: CoreResult.Ok(plan))
+        }
+        override fun addSegment(id: String, path: String, startOffsetMs: Long, done: (CoreResult<SegmentAdded>) -> Unit) {
+            log += "add ${path.substringAfterLast('-')} @$startOffsetMs"; done(CoreResult.Ok(SegmentAdded(1, path)))
+        }
+        override fun closeSegment(id: String, index: Int, path: String, measure: Boolean, fallbackMs: Long) {
+            log += "close $index ${path.substringAfterLast('-')} measure=$measure ~$fallbackMs"
+        }
+        override fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit) {
+            log += "finish $durationMs '$note' discard=$discard"; done()
+        }
+    }
+    private val rec = object : RecorderPort {
+        override fun accepts(spec: AudioSpec, source: InputSource, deviceId: Int) = spec !in rejected
+        override fun start(spec: AudioSpec, source: InputSource, deviceId: Int, path: String, maxFileBytes: Long, maxDurationMs: Int, events: RecorderEvents) {
+            if (startFails) throw IllegalStateException("prepare failed")
+            log += "start ${path.substringAfterLast('-')} $source dev=$deviceId bytes=$maxFileBytes ms=$maxDurationMs"
+            this@SegmentedRecorderTest.events = events
+        }
+        override fun setNext(path: String): Boolean { log += "next ${path.substringAfterLast('-')} $nextOk"; return nextOk }
+        override fun stop(): Boolean { log += "stop $stopOk"; return stopOk }
+    }
+    private val storage = object : StoragePort {
+        override fun usableBytes(path: String) = free
+        override fun delete(path: String) { log += "delete ${path.substringAfterLast('-')}" }
+    }
+    private val clock = object : ClockPort { override fun elapsedMs() = now; override fun wallMs() = 0L }
+    private val sr = SegmentedRecorder(core, rec, storage, clock, object : SegmentedRecorder.Listener {
+        override fun onRecording(id: String, startElapsedMs: Long) { log += "recording" }
+        override fun onSegmentStarted(index: Int) {}
+        override fun onEnded(id: String?, message: String) { ended = id to message }
+    })
+    private val usb = MicOption(MicKind.USB, "USB", 7)
+
+    private fun startUsb() { sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB)); log.clear() }
+
+    @Test fun usbBeginsWithItsSpecAndASizeCap() { // F2-FR4, F2-FR5
+        sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals("""begin {"kind":"usb","name":"USB"} {"codec":"aac-lc","sampleRateHz":44100,"bitrateBps":96000,"channels":1}""", log[0])
+        // 15 min at 96 kbps = 10.8 MB (< the plan's 13.5 MB cap); MAX_DURATION 10 % past the plan.
+        assertEquals("start 01.m4a MIC dev=7 bytes=10800000 ms=990000", log[1])
+        assertEquals(SegmentedRecorder.Phase.RECORDING, sr.phase)
+    }
+
+    @Test fun bluetoothFallsBackTo48k() { // F2-FR4
+        rejected += AudioSpec.BLUETOOTH
+        sr.start(MicOption(MicKind.BLUETOOTH, "Jabra", null), 9, InputSource.VOICE_COMMUNICATION, listOf(AudioSpec.BLUETOOTH, AudioSpec.BLUETOOTH_FALLBACK))
+        assertEquals("""begin {"kind":"bluetooth","name":"Jabra"} {"codec":"aac-lc","sampleRateHz":16000,"bitrateBps":48000,"channels":1}""", log[0])
+        assertEquals("start 01.m4a VOICE_COMMUNICATION dev=9 bytes=5400000 ms=990000", log[1])
+    }
+
+    @Test fun noAcceptedSpecBeginsNothing() {
+        rejected += AudioSpec.USB
+        sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals(emptyList<String>(), log)
+        assertEquals(null to SegmentedRecorder.CANT_START, ended)
+    }
+
+    @Test fun aRefusedBeginShowsTheCoreReason() {
+        beginReply = CoreResult.Err("already recording meeting-x")
+        sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals(null to "already recording meeting-x", ended)
+    }
+
+    @Test fun aRecorderThatWontStartIsDiscarded() {
+        startFails = true
+        sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals(listOf("close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log.drop(1))
+        assertEquals(null to SegmentedRecorder.CANT_START, ended)
+    }
+
+    @Test fun stopFinalisesWithTheMeasuredDuration() {
+        startUsb(); now += 60_000; sr.stop(); sr.stop()
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~60000", "finish 60000 '' discard=false"), log)
+        assertEquals(id to "Saved", ended)
+        assertEquals(SegmentedRecorder.Phase.ENDED, sr.phase)
+    }
+
+    @Test fun stopWhileBeginningLeavesNothingLive() {
+        var pending: ((CoreResult<Begun>) -> Unit)? = null
+        val slow = object : RecorderCore by core {
+            override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) { pending = done }
+        }
+        val r = SegmentedRecorder(slow, rec, storage, clock, object : SegmentedRecorder.Listener {
+            override fun onRecording(id: String, startElapsedMs: Long) { log += "recording" }
+            override fun onSegmentStarted(index: Int) {}
+            override fun onEnded(id: String?, message: String) { log += "ended $message" }
+        })
+        r.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB)); r.stop()
+        pending!!(CoreResult.Ok(plan))
+        assertEquals(listOf("ended Recording cancelled", "close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log)
+    }
+
+    @Test fun segmentPathsSitBesideTheFirst() {
+        assertEquals("/d/m-12.m4a", SegmentedRecorder.segmentPath("/d/m-01.m4a", "m", 12))
+    }
+}
