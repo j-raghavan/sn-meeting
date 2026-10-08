@@ -132,7 +132,7 @@ pub struct NewTodo {
 }
 
 /// Parse the model's text (unknown fields ignored, F5-FR9), cap every field, drop empty items
-/// and null any `due` that is not a real `YYYY-MM-DD`. A reply wrapped in a code fence (any
+/// (a to-do with no letter or digit is empty) and null any `due` that is not a real `YYYY-MM-DD`. A reply wrapped in a code fence (any
 /// case) or in prose is read from its outermost `{` to its last `}`; a `null` list is empty.
 pub fn parse(text: &str) -> Result<Extraction, String> {
     let t = text.trim();
@@ -152,7 +152,8 @@ pub fn parse(text: &str) -> Result<Extraction, String> {
         .filter_map(|t| {
             let text = cap(&one_line(&t.text), MAX_ITEM);
             let owner = t.owner.map(|o| cap(&one_line(&o), MAX_OWNER));
-            (!text.is_empty()).then(|| NewTodo {
+            // Only emoji or punctuation: nothing to merge by (F5-FR5), so not a to-do.
+            (!normalise(&text).is_empty()).then(|| NewTodo {
                 text,
                 owner: owner.filter(|o| !o.is_empty()),
                 due: t.due.as_deref().and_then(valid_due),

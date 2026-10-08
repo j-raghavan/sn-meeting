@@ -214,3 +214,17 @@ fn fenced_or_prose_wrapped_and_null_lists_parse() {
     );
     assert!(e.is_err(), "a null inside a list is still invalid: {e:?}");
 }
+
+#[test]
+fn todos_with_no_words_are_dropped_when_parsed() {
+    // A to-do that is only emoji or punctuation has no identity to merge by (F5-FR5), so it is
+    // never stored; one with a word in it is kept as written.
+    let reply = json!({"summary": "s", "todos": [
+        {"text": "✅", "owner": null, "due": null},
+        {"text": "...", "owner": null, "due": null},
+        {"text": "🎉 — !", "owner": null, "due": null},
+        {"text": "🎉 Ship it", "owner": null, "due": null}
+    ]});
+    let e = parse(&reply.to_string()).unwrap();
+    assert_eq!(e.todos, vec![todo("🎉 Ship it", None, None)]);
+}
