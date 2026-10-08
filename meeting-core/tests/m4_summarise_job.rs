@@ -374,3 +374,35 @@ fn summarise_again_is_not_offered_before_transcription() {
     );
     assert_eq!(fx.meeting()["status"], "recorded");
 }
+
+#[test]
+fn a_cancelled_or_undatable_summary_fails_summarising() {
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    fx.run(Job::Transcribe);
+    fx.reset();
+    fx.summary(anthropic(SUMMARY).set_delay(Duration::from_secs(20)));
+    let (app, id) = (fx.app.clone(), fx.id.clone());
+    let h = std::thread::spawn(move || app.run_job_json(&id, Job::Summarise));
+    for _ in 0..100 {
+        if fx.app.liveness().jobs.contains(&fx.id) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        parse(&fx.app.cancel_json(&fx.id)),
+        json!({"cancelled": true})
+    );
+    let m = parse(&h.join().unwrap())["meeting"].clone();
+    assert_eq!(
+        (m["failedAt"].as_str(), m["error"].as_str()),
+        (Some("summarising"), Some("Cancelled"))
+    );
+    let mut sc = read_sidecar(&fx.dir, &fx.id);
+    sc.started_at = "yesterday".into();
+    meeting::sidecar::write(&fx.dir, &sc).unwrap();
+    let m = fx.run(Job::Summarise)["meeting"].clone();
+    assert_eq!(m["error"], "The meeting's start time can't be read");
+}
