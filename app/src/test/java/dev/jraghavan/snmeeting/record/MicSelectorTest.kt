@@ -72,4 +72,16 @@ class MicSelectorTest {
         assertEquals("Turn on Bluetooth to use Jabra", MicSelector.pick(emptyList(), BtSnapshot.NONE, MicChoice.Bluetooth("Jabra")).reason)
         assertEquals(MicSelector.NONE, MicSelector.pick(emptyList(), BtSnapshot.NONE, MicChoice.Usb("x")).reason)
     }
+
+    @Test fun settingsListsAutomaticTheConnectedMicsAndTheRememberedOne() { // F10-FR2
+        val options = MicSelector.pick(usb, jabra).options
+        val rows = MicSelector.settingsRows(options, MicChoice.Auto)
+        assertEquals(listOf("Automatic", "USB — USB-Audio - USB Audio", "Bluetooth — Jabra"), rows.map { it.label })
+        assertEquals(listOf(true, false, false), rows.map { it.selected })
+        val gone = MicSelector.settingsRows(options.take(1), MicChoice.Bluetooth("Jabra"))
+        assertEquals("Bluetooth — Jabra", gone.last().label)
+        assertEquals("Not connected now; used whenever it is", gone.last().hint)
+        assertEquals(listOf(false, false, true), gone.map { it.selected })
+        assertEquals(3, MicSelector.settingsRows(options, MicChoice.Usb("USB-Audio - USB Audio")).size)
+    }
 }

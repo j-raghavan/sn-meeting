@@ -65,4 +65,22 @@ object MicSelector {
         if (bt.hfpConnected.isNotEmpty() && !bt.scoAvailableOffCall) return "${bt.hfpConnected.first()} isn't available as a microphone"
         return NONE
     }
+
+    /** One Settings row (F10-FR2): the same choice as tapping Home's mic card, stored in one place. */
+    data class Row(val label: String, val hint: String, val choice: MicChoice, val selected: Boolean)
+
+    /** Automatic, every mic available now, and the remembered one when it isn't connected. */
+    fun settingsRows(options: List<MicOption>, stored: MicChoice): List<Row> {
+        val rows = mutableListOf(Row("Automatic", "USB first, then Bluetooth", MicChoice.Auto, stored == MicChoice.Auto))
+        options.forEach { rows += Row(it.label, "Connected now", it.choice, it.choice == stored) }
+        if (stored != MicChoice.Auto && options.none { it.choice == stored }) {
+            val label = when (stored) {
+                is MicChoice.Usb -> "USB — ${stored.name}"
+                is MicChoice.Bluetooth -> "Bluetooth — ${stored.name}"
+                MicChoice.Auto -> ""
+            }
+            rows += Row(label, "Not connected now; used whenever it is", stored, true)
+        }
+        return rows
+    }
 }

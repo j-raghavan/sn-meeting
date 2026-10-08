@@ -2,24 +2,44 @@ package dev.jraghavan.snmeeting
 
 import android.app.Activity
 import android.content.Intent
+import android.media.AudioManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.view.Gravity
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import dev.jraghavan.snmeeting.model.CoreJson
+import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.record.BluetoothState
+import dev.jraghavan.snmeeting.record.BtSnapshot
+import dev.jraghavan.snmeeting.record.MicKind
+import dev.jraghavan.snmeeting.record.MicSelector
+import dev.jraghavan.snmeeting.record.usbInputs
 import org.json.JSONObject
 
 /**
  * Settings (spec F10) in the Inkwell style (F9): microphone, save folder, the transcribe and
- * summarise providers with Test connection, and templates. Choices still live in [MockSettings]
- * (memory only) until the core owns settings.json; Test connection is real and runs in the core.
+ * summarise providers with Test connection, and templates. The core owns settings.json: each
+ * choice is a merge patch through nativeSetSettings, saved at once (no Save button), and the
+ * page shows the core's reply. Sections not yet read from the core still use [MockSettings].
  */
 class SettingsActivity : Activity() {
 
     private lateinit var ui: Inkwell
+    private lateinit var scope: ScreenScope
+    private val handler = Handler(Looper.getMainLooper())
+    private var page: ScrollView? = null
+
+    /** The core's settings, or null until they arrive. */
+    private var settings: SettingsView? = null
+    /** The core's last refusal, by settings field ("" for none), shown under its section. */
+    private val errors = mutableMapOf<String, String>()
+    private var bt: BluetoothState? = null
 
     /**
      * The last Test connection result per "role/provider" (F10-FR5: shown until the next test),
@@ -36,22 +56,42 @@ class SettingsActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
+        scope = ScreenScope(this)
+        CoreJobs.init(filesDir.absolutePath)
         render()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Mics come and go while the screen is open (F10-FR2).
+        bt = BluetoothState(this, handler) { render() }.also { it.open() }
+    }
+
+    override fun onStop() {
+        bt?.close(); bt = null
+        super.onStop()
     }
 
     override fun onResume() {
         super.onResume()
-        render() // the default template may have changed in Templates
-        CoreJobs.init(filesDir.absolutePath)
-        CoreJobs.run({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
+        // Key files may have been added and the default template changed in Templates.
+        scope.core({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
     }
 
+    /** nativeGetSettings / nativeSetSettings reply: the new settings, or a refusal by field. */
     private fun applySettings(json: String) {
-        val s = CoreJson.obj(json, SettingsView::from).getOrNull() ?: return
-        if (isDestroyed) return
-        segmentMs = s.segmentMsDebug
+        when (val r = CoreJson.obj(json, SettingsView::from)) {
+            is CoreResult.Ok -> {
+                settings = r.value; errors.clear()
+                segmentMs = r.value.segmentMsDebug
+            }
+            is CoreResult.Err -> errors[r.field ?: ""] = r.message
+        }
         render()
     }
+
+    /** One change, saved at once. */
+    private fun patch(json: String) = scope.core({ NativeBridge.nativeSetSettings(json) }) { applySettings(it) }
 
     /** F2-FR5 / F2-AC3: one-minute segments, to check rollover on the device. */
     private fun segmentLength(card: LinearLayout) {
@@ -64,7 +104,39 @@ class SettingsActivity : Activity() {
 
     private fun setSegmentMs(ms: Long?) {
         segmentMs = ms
-        CoreJobs.run({ NativeBridge.nativeSetSettings(SettingsPatch.segmentMs(ms)) }) { applySettings(it) }
+        patch(SettingsPatch.segmentMs(ms))
+    }
+
+    /** F10-FR2: Automatic, or a specific mic; the same choice as tapping Home's mic card. */
+    private fun micSection(column: LinearLayout) {
+        val s = settings
+        ui.section(column, "Microphone").apply {
+            if (s == null) return@apply addView(ui.note("Reading settings…", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(10)) })
+            val am = getSystemService(AudioManager::class.java)
+            val options = MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, s.mic).options
+            MicSelector.settingsRows(options, s.mic).forEachIndexed { i, row ->
+                if (i > 0) addView(ui.hairline())
+                choice(row.label, row.hint, row.selected) { patch(SettingsPatch.mic(row.choice)) }
+            }
+            if (options.none { it.kind == MicKind.BLUETOOTH }) {
+                addView(ui.note("Paired Bluetooth headsets appear here when connected.", 13f).apply {
+                    setPadding(0, ui.dim(4), 0, ui.dim(10))
+                })
+            }
+            errors["mic"]?.let { addView(error(it)) }
+        }
+    }
+
+    /** The core's reason a change was refused, under the field it concerns. */
+    private fun error(message: String): TextView = ui.note(message, 13f, ui.ink).apply { setPadding(0, ui.dim(4), 0, ui.dim(10)) }
+
+    /** Rebuilds the page, keeping the scroll position (one redraw per change). */
+    private fun show(column: LinearLayout) {
+        val y = page?.scrollY ?: 0
+        val p = ui.page(column)
+        page = p
+        setContentView(p)
+        if (y > 0) p.post { p.scrollTo(0, y) }
     }
 
     override fun finish() {
@@ -81,15 +153,8 @@ class SettingsActivity : Activity() {
             addView(ui.body("Settings", 30f, bold = true).apply { gravity = Gravity.CENTER })
         }
 
-        ui.section(column, "Microphone").apply {
-            choice("Automatic", "USB first, then Bluetooth", MockSettings.mic == "auto") { MockSettings.mic = "auto" }
-            addView(ui.hairline())
-            choice("USB — USB-Audio - USB Audio", "Connected now", MockSettings.mic == "usb") { MockSettings.mic = "usb" }
-            addView(ui.hairline())
-            addView(ui.note("Paired Bluetooth headsets appear here when connected.", 13f).apply {
-                setPadding(0, ui.dim(10), 0, ui.dim(10))
-            })
-        }
+        micSection(column)
+        errors[""]?.let { column.addView(error(it)) }
 
         ui.section(column, "Save to").apply {
             choice("EXPORT/sn-meeting", "Synced to your computer by Supernote Partner", MockSettings.folder == "EXPORT/sn-meeting") {
@@ -141,7 +206,7 @@ class SettingsActivity : Activity() {
 
         column.addView(ui.spacer(ui.dim(36)))
         column.addView(ui.closingMark())
-        setContentView(ui.page(column))
+        show(column)
     }
 
     /**
@@ -190,7 +255,7 @@ class SettingsActivity : Activity() {
     }
 
     private fun LinearLayout.choice(label: String, hint: String?, selected: Boolean, enabled: Boolean = true, pick: () -> Unit) {
-        addView(ui.choiceRow(label, hint, selected, enabled) { pick(); render() })
+        addView(ui.choiceRow(label, hint, selected, enabled) { if (!selected) pick(); render() })
     }
 
     /** One provider role: a radio per provider with its key status, the model, and Test connection (F10-FR4/FR5). */
