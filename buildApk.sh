@@ -16,6 +16,13 @@ set -euo pipefail
 #   ./buildApk.sh --debug         # debug build
 #   ./buildApk.sh --no-gates      # skip scripts/gates.sh
 #   ./buildApk.sh --install       # build, then install on the Supernote
+#   ./buildApk.sh --install --device 10.0.0.22:5555   # a specific adb serial
+#
+# adb over Wi-Fi (F1-FR6): the Supernote has one USB-C port, so a USB mic and an adb cable
+# can't both be plugged in. Switch adb to Wi-Fi once per boot:
+#   adb tcpip 5555                   # with the cable in
+#   adb connect <device-ip>:5555     # then unplug; <device-ip> is its Wi-Fi address
+#   ./buildApk.sh --install --device <device-ip>:5555
 # =========================================================
 
 PKG_ID="dev.jraghavan.snmeeting"
@@ -35,6 +42,11 @@ write_color_output() {
 }
 
 die() { write_color_output "$1" "Red"; exit 1; }
+
+# adb on the chosen device. ${arr[@]+"${arr[@]}"} expands to nothing for an empty array; bash
+# 3.2 (macOS) errors on a bare "${arr[@]}" under `set -u`.
+ADB_DEVICE=()
+adb_dev() { adb ${ADB_DEVICE[@]+"${ADB_DEVICE[@]}"} "$@"; }
 
 # =========================================================
 # select_jdk — Gradle needs JDK 17–21. If the JDK it would use (JAVA_HOME, else java on PATH)
@@ -131,6 +143,7 @@ main() {
             --debug)    variant="debug" ;;
             --install)  install=1 ;;
             --no-gates) gates=0 ;;
+            --device)   [[ $# -ge 2 ]] || die "--device needs an adb serial"; ADB_DEVICE=(-s "$2"); shift ;;
             -h|--help)  sed -n '5,/^# ====/p' "${BASH_SOURCE[0]}" | sed '$d; s/^# \{0,1\}//'; exit 0 ;;
             *) die "Unknown arg: $1 (see --help)" ;;
         esac
@@ -154,11 +167,12 @@ main() {
 
     if [[ "$install" == "1" ]]; then
         command -v adb >/dev/null 2>&1 || die "adb not found"
-        adb install -r "$apk" || die "adb install failed"
-        adb shell pm grant "$PKG_ID" android.permission.RECORD_AUDIO
-        adb shell appops set "$PKG_ID" MANAGE_EXTERNAL_STORAGE allow
-        adb shell mkdir -p /storage/emulated/0/EXPORT/sn-meeting
-        adb shell am start -n "$PKG_ID/.MainActivity"
+        adb_dev install -r "$apk" || die "adb install failed (see --help for adb over Wi-Fi)"
+        adb_dev shell pm grant "$PKG_ID" android.permission.RECORD_AUDIO
+        adb_dev shell appops set "$PKG_ID" MANAGE_EXTERNAL_STORAGE allow
+        adb_dev shell mkdir -p /storage/emulated/0/EXPORT/sn-meeting
+        adb_dev shell am start -n "$PKG_ID/.MainActivity"
+        write_color_output "Installed and launched $PKG_ID" "Green"
     fi
 }
 
