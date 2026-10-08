@@ -120,7 +120,11 @@ fn key_error_json(p: Provider, e: &KeyError) -> String {
             ),
         ),
         KeyError::NotFound { .. } => ("no_key", format!("Add {file} to MyStyle/SnCopilot")),
-        other => ("key_file_error", format!("{} key file: {other}", p.id())),
+        // Scrubbed as well: KeyError text comes from the user's file (INV2, F4-FR6).
+        other => (
+            "key_file_error",
+            crate::scrub::scrub(&format!("{} key file: {other}", p.id()), &[]),
+        ),
     };
     json!({
         "ok": false, "status": status, "ms": 0, "provider": p.id(),

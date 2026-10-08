@@ -200,3 +200,20 @@ async fn bad_roles_and_providers_are_errors() {
         );
     }
 }
+
+#[tokio::test]
+async fn a_one_line_key_file_does_not_leak() {
+    let d = tempfile::tempdir().unwrap();
+    let c = core_for("http://127.0.0.1:9", d.path(), 5000);
+    for body in [
+        format!("provider=openai key={OA} model=m"),
+        format!("provider=openai\u{2028}key={OA}\u{2028}model=m"),
+        format!("provider={OA}\nkey={OA}\nmodel=m"),
+        format!("provider=openai\nkey={OA}"),
+    ] {
+        std::fs::write(d.path().join("copilot-key-openai.txt"), &body).unwrap();
+        // call() asserts no fixture key in the reply.
+        let r = call(&c, "summarise", "openai").await;
+        assert_eq!(r["status"], "key_file_error", "{body:?}");
+    }
+}

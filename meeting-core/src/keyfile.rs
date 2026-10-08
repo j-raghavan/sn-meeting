@@ -124,6 +124,19 @@ fn js_trim(s: &str) -> &str {
     s.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}')
 }
 
+/// The `provider=` value as it may appear in an error: only a plausible provider id is echoed.
+/// A one-line file (`provider=openai key=sk-… model=m`, or U+2028 separators, which JS trim
+/// strips but does not split on) or `provider=<key>` would otherwise put the key in the message.
+fn echoable(found: &str) -> String {
+    let plausible = (1..=32).contains(&found.len())
+        && found.bytes().all(|b| b.is_ascii_lowercase() || b == b'-');
+    if plausible {
+        found.to_owned()
+    } else {
+        "<invalid>".to_owned()
+    }
+}
+
 /// F4-FR1: parse one file's text for `provider` (keyFiles.ts:104-162).
 pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
     let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
@@ -153,7 +166,7 @@ pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
     if found != provider.id() {
         return Err(KeyError::ProviderMismatch {
             expected: provider.id(),
-            found: found.to_owned(),
+            found: echoable(found),
         });
     }
     let key = field("key")?;

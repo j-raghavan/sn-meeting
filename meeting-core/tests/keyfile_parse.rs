@@ -42,7 +42,10 @@ const PARITY: &[(&str, Provider, Result<(&str, &str), &str>)] = &[
     ("", O, Err("missing required field: provider")),
     // `provider=` must be the canonical id: no aliases, case-sensitive; checked before key
     ("provider=claude\nkey=k\nmodel=m", A, Err("provider=\"claude\" mismatches filename suffix (expected canonical \"anthropic\")")),
-    ("provider=OpenAI\nkey=k\nmodel=m", O, Err("provider=\"OpenAI\" mismatches filename suffix (expected canonical \"openai\")")),
+    // Only a plausible id ([a-z-]{1,32}) is echoed; anything else could be the key itself.
+    ("provider=OpenAI\nkey=k\nmodel=m", O, Err("provider=\"<invalid>\" mismatches filename suffix (expected canonical \"openai\")")),
+    ("provider=openai key=sk-1 model=m", O, Err("provider=\"<invalid>\" mismatches filename suffix (expected canonical \"openai\")")),
+    ("provider=sk-proj-SECRET9\nkey=k\nmodel=m", O, Err("provider=\"<invalid>\" mismatches filename suffix (expected canonical \"openai\")")),
     ("provider=openai\nmodel=m", A, Err("provider=\"openai\" mismatches filename suffix (expected canonical \"anthropic\")")),
 ];
 
