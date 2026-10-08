@@ -41,6 +41,15 @@ fn audio(prompt: &str) -> AudioIn {
         bytes: b"\x00\x00\x00\x18ftypM4A fake-aac".to_vec(),
         file_name: FILE.into(),
         prompt: prompt.into(),
+        duration_ms: Some(20_000),
+    }
+}
+
+/// F5-FR13: a segment this long that comes back with no text is a failure to retry.
+fn long(prompt: &str) -> AudioIn {
+    AudioIn {
+        duration_ms: Some(45_000),
+        ..audio(prompt)
     }
 }
 
@@ -83,6 +92,53 @@ async fn openai_sends_only_model_and_file_and_ignores_unknown_reply_fields() {
     assert!(b[1].contains("name=\"prompt\"") && b[1].contains("Priya, Supernote"));
     for r in &reqs {
         assert!(!r.url.as_str().contains(OA));
+    }
+}
+
+#[tokio::test]
+async fn an_empty_reply_for_a_long_segment_is_retryable() {
+    let s = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"text": " \n"})))
+        .mount(&s)
+        .await;
+    let k = key(Provider::OpenAi);
+    let e = transcribe(&http(), &ep(&s.uri()), &k, "m", long(""))
+        .await
+        .unwrap_err();
+    assert_eq!(e.kind, CallFail::Retryable);
+    assert_eq!(e.detail, "OpenAI returned no text for 45 s of audio");
+    let quarter = AudioIn {
+        duration_ms: Some(900_000),
+        ..audio("")
+    };
+    let e = transcribe(&http(), &ep(&s.uri()), &k, "m", quarter)
+        .await
+        .unwrap_err();
+    assert_eq!(e.detail, "OpenAI returned no text for 15 min of audio");
+    // Gemini: empty, blocked or cut off is retryable for a long segment; fine for a short one.
+    for (parts, finish) in [
+        (json!([{"text": ""}]), "STOP"),
+        (json!([]), "SAFETY"),
+        (json!([{"text": "half a sent"}]), "MAX_TOKENS"),
+    ] {
+        let s = MockServer::start().await;
+        let reply = json!({"candidates": [{"content": {"parts": parts, "role": "model"}, "finishReason": finish}]});
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(reply))
+            .mount(&s)
+            .await;
+        let k = key(Provider::Gemini);
+        let e = transcribe(&http(), &ep(&s.uri()), &k, "g", long(""))
+            .await
+            .unwrap_err();
+        assert_eq!(e.kind, CallFail::Retryable, "{finish}");
+        assert!(e.detail.starts_with("Gemini returned no"), "{}", e.detail);
+        assert!(
+            transcribe(&http(), &ep(&s.uri()), &k, "g", audio(""))
+                .await
+                .is_ok()
+        );
     }
 }
 

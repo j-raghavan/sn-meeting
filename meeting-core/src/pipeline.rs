@@ -142,6 +142,7 @@ pub async fn transcribe(
                         bytes: bytes.clone(),
                         file_name: file.clone(),
                         prompt: vocabulary.clone(),
+                        duration_ms: seg.duration_ms,
                     };
                     providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio)
                 };

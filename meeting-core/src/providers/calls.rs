@@ -69,6 +69,21 @@ pub struct AudioIn {
     pub file_name: String,
     /// The template's vocabulary as a hint (F5-FR1). Empty sends model + file only.
     pub prompt: String,
+    /// The segment's measured length, when known: past [`LONG_SEGMENT_MS`] an empty, blocked
+    /// or cut-off reply is a failure to retry, not silence (F5-FR13).
+    pub duration_ms: Option<u64>,
+}
+
+/// A segment longer than this that comes back with no text is a failure, not silence.
+pub const LONG_SEGMENT_MS: u64 = 30_000;
+
+/// "45 s", "15 min".
+fn length_label(ms: u64) -> String {
+    if ms >= 60_000 {
+        format!("{} min", ms / 60_000)
+    } else {
+        format!("{} s", ms / 1000)
+    }
 }
 
 /// What a segment with no speech is stored as (EC6).
@@ -82,7 +97,9 @@ only the transcript as plain text. If there is no speech, output nothing.";
 
 /// F5-FR1: one segment's text. OpenAI: `POST {openai}/audio/transcriptions`, multipart
 /// `model` + `file` (+ `prompt` when there is vocabulary). Gemini: `generateContent` with the
-/// audio inline (base64) and `GEMINI_TRANSCRIBE_SYSTEM`. Empty text is `NO_SPEECH`.
+/// audio inline (base64) and `GEMINI_TRANSCRIBE_SYSTEM`. Empty text is `NO_SPEECH`, except
+/// for a segment longer than [`LONG_SEGMENT_MS`], where an empty, blocked or cut-off reply is a
+/// retryable failure (F5-FR13).
 pub async fn transcribe(
     http: &Http,
     ep: &Endpoints,
@@ -90,6 +107,12 @@ pub async fn transcribe(
     model: &str,
     audio: AudioIn,
 ) -> Result<String, CallError> {
+    let name = provider_name(key.provider);
+    let long = audio.duration_ms.filter(|ms| *ms > LONG_SEGMENT_MS);
+    let nothing = |ms: u64, what: &str| {
+        let d = format!("{name} returned {what} for {} of audio", length_label(ms));
+        CallError::new(CallFail::Retryable, d)
+    };
     let reply = match key.provider {
         Provider::OpenAi => {
             let client = OpenAIConfig::new(key.expose())
@@ -121,7 +144,13 @@ pub async fn transcribe(
                 )],
             };
             let req = CompletionRequest::new(msg).preamble(system);
-            client.completion(model).call(req).await.map(|r| r.text())
+            match (client.completion(model).call(req).await, long) {
+                // Blocked or cut off: the text is not the whole segment (F5-FR13).
+                (Ok(r), Some(ms)) if r.stop() != StopReason::Stop => {
+                    return Err(nothing(ms, "no complete text"));
+                }
+                (r, _) => r.map(|r| r.text()),
+            }
         }
         Provider::Anthropic => {
             return Err(CallError::new(
@@ -132,7 +161,10 @@ pub async fn transcribe(
     };
     let text = reply.map_err(|e| classify_call(key.provider, model, &e, &[key.expose()]))?;
     let text = text.trim();
-    Ok(if text.is_empty() { NO_SPEECH } else { text }.to_owned())
+    match long {
+        Some(ms) if text.is_empty() => Err(nothing(ms, "no text")),
+        _ => Ok(if text.is_empty() { NO_SPEECH } else { text }.to_owned()),
+    }
 }
 
 /// The longest reply text kept; a structured summary of a long meeting is ~10 KB.

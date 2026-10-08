@@ -109,6 +109,10 @@ async fn segments_are_stored_in_order_with_markers_and_stamps() {
     segment(&s, 2, Duration::ZERO, " ").await;
     segment(&s, 3, Duration::ZERO, "third").await;
     let fx = meeting();
+    // A short segment with no speech (a long one is retried: see below).
+    let mut sc = read_sidecar(&fx.dir, &fx.id);
+    sc.segments[1].duration_ms = Some(20_000);
+    meeting::sidecar::write(&fx.dir, &sc).unwrap();
     assert_eq!(
         run(&fx, &s.uri(), &Cancel::default()).await.unwrap(),
         Phase::Transcribed
@@ -134,6 +138,30 @@ async fn segments_are_stored_in_order_with_markers_and_stamps() {
     );
     assert!(v["error"].is_null());
     assert!(!v.to_string().contains(OA));
+}
+
+#[tokio::test]
+async fn a_long_segment_with_no_text_fails_after_one_retry() {
+    // F5-FR13: 10 minutes of audio with no text back is not "(no speech detected)".
+    let s = MockServer::start().await;
+    segment(&s, 1, Duration::ZERO, "first").await;
+    segment(&s, 2, Duration::ZERO, "").await;
+    let fx = meeting();
+    assert_eq!(
+        run(&fx, &s.uri(), &Cancel::default()).await.unwrap(),
+        Phase::Failed(FailedAt::Transcribing)
+    );
+    assert_eq!(
+        sent(&s).await,
+        [1, 2, 2],
+        "retried once, segment 3 not sent"
+    );
+    let v = sidecar(&fx);
+    assert_eq!(v["error"], "OpenAI returned no text for 10 min of audio");
+    assert!(
+        v["segments"][1]["text"].is_null(),
+        "nothing stored: Transcribe resumes here"
+    );
 }
 
 #[tokio::test]
