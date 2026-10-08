@@ -1,5 +1,7 @@
 package dev.jraghavan.snmeeting.model
 
+import java.text.Normalizer
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Where a template's effective version comes from (F11-FR3); the list's chip. */
@@ -58,5 +60,39 @@ data class TemplateChoice(val current: TemplateRow?, val note: String?, val opti
         }
 
         const val GENERAL = "general"
+    }
+}
+
+/** F11-FR5: what the editor sends to nativeSaveTemplate / nativePreviewTemplate. */
+data class TemplateDraft(
+    val id: String, val name: String, val description: String, val vocabulary: String,
+    val sections: List<String>, val instructions: String, val layout: String,
+) {
+    fun json(): String = JSONObject()
+        .put("id", id).put("name", name.trim()).put("description", description.trim())
+        .put("vocabulary", JSONArray(vocabularyList()))
+        .put("sections", JSONArray(sections))
+        .put("instructions", instructions).put("layout", layout)
+        .toString()
+
+    /** "Priya, Arjun , Supernote" → [Priya, Arjun, Supernote]. */
+    fun vocabularyList(): List<String> = vocabulary.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+
+    companion object {
+        fun of(t: TemplateRow) = TemplateDraft(t.id, t.name, t.description, t.vocabulary.joinToString(", "), t.sections, t.instructions, t.layout)
+
+        /** The core's refusal as the editor shows it under the field: "Line 12: …" when it has a line. */
+        fun errorText(e: CoreResult.Err): String {
+            val line = e.line ?: return e.message
+            return if (e.message.contains("line $line")) e.message else "Line $line: ${e.message}"
+        }
+
+        /** A template id (kebab-case a-z 0-9, at most 64) from a name, unique among [taken]. */
+        fun slug(name: String, taken: Collection<String>): String {
+            val ascii = Normalizer.normalize(name, Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+            val base = ascii.lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').take(56).trim('-').ifEmpty { "my-template" }
+            if (base !in taken) return base
+            return (2..999).asSequence().map { "$base-$it" }.first { it !in taken }
+        }
     }
 }

@@ -25,4 +25,30 @@ class TemplatesTest {
         assertEquals("Its template is gone, so General is used", c.note)
         assertNull(TemplateChoice.of(null, "deleted", rows).note) // Settings' default: the core already falls back
     }
+
+    @Test fun draftJsonAndVocabulary() {
+        val d = TemplateDraft("retro", " Retro ", "d", "Priya, Arjun ,, Supernote", listOf("Wins"), "Summarise.", "{{ title }}")
+        assertEquals(listOf("Priya", "Arjun", "Supernote"), d.vocabularyList())
+        val o = org.json.JSONObject(d.json())
+        assertEquals("Retro", o.getString("name"))
+        assertEquals(3, o.getJSONArray("vocabulary").length())
+        assertEquals("Wins", o.getJSONArray("sections").getString(0))
+        assertEquals("{{ title }}", o.getString("layout"))
+        assertEquals("Priya", TemplateDraft.of(row("x").copy(vocabulary = listOf("Priya"))).vocabulary)
+    }
+
+    @Test fun errorsReadAsLineN() {
+        assertEquals("Line 12: The ~ operator isn't allowed", TemplateDraft.errorText(CoreResult.Err("The ~ operator isn't allowed", "layout", 12)))
+        assertEquals("Template error on line 3: oops", TemplateDraft.errorText(CoreResult.Err("Template error on line 3: oops", "layout", 3)))
+        assertEquals("The name must be 1–60 characters on one line", TemplateDraft.errorText(CoreResult.Err("The name must be 1–60 characters on one line", "name", null)))
+    }
+
+    @Test fun slugs() {
+        assertEquals("weekly-retro", TemplateDraft.slug("Weekly Retro!", emptyList()))
+        assertEquals("cafe-sync", TemplateDraft.slug("Café  sync", emptyList()))
+        assertEquals("my-template", TemplateDraft.slug("会议", emptyList()))
+        assertEquals("standup-2", TemplateDraft.slug("Standup", listOf("standup")))
+        assertEquals("general-3", TemplateDraft.slug("General", listOf("general", "general-2")))
+        assertEquals(56, TemplateDraft.slug("a".repeat(100), emptyList()).length)
+    }
 }
