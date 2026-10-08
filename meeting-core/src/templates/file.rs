@@ -127,6 +127,32 @@ pub fn parse(text: &str) -> Result<Template, TemplateError> {
     Ok(t)
 }
 
+/// The file text for a template (what Save writes; editable on the desktop). `parse` reads it
+/// back to the same template once validated.
+pub fn to_file(t: &Template) -> String {
+    let list = |v: &[String]| v.iter().map(|s| quoted(s)).collect::<Vec<_>>().join(", ");
+    format!(
+        "---\nid: {}\nname: {}\ndescription: {}\nvocabulary: [{}]\nsections: [{}]\n---\n\
+         # Instructions\n{}\n# Layout\n{}",
+        t.id,
+        quoted(&t.name),
+        quoted(&t.description),
+        list(&t.vocabulary),
+        list(&t.sections),
+        t.instructions.trim(),
+        t.layout
+    )
+}
+
+/// `v` as written in front matter: quoted only when reading it back would change it.
+fn quoted(v: &str) -> String {
+    if v.trim() != v || unquote(v) != v {
+        format!("\"{v}\"")
+    } else {
+        v.to_owned()
+    }
+}
+
 fn unquote(v: &str) -> &str {
     ['"', '\'']
         .iter()
@@ -184,6 +210,13 @@ pub fn validate(t: &Template) -> Result<(), TemplateError> {
             );
             return Err(err(e, None, Some(field)));
         }
+    }
+    if t.instructions
+        .lines()
+        .any(|l| matches!(l.trim_end(), "# Layout" | "# Instructions"))
+    {
+        let e = "The instructions can't contain a # Layout or # Instructions line";
+        return Err(err(e, None, Some("instructions")));
     }
     let n = t.instructions.trim().chars().count();
     if n == 0 || n > MAX_INSTRUCTIONS {

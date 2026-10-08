@@ -7,7 +7,7 @@ mod file;
 mod render;
 pub use file::{
     MAX_DESCRIPTION, MAX_FILE_BYTES, MAX_INSTRUCTIONS, MAX_LAYOUT, MAX_LIST_ITEM, MAX_LIST_ITEMS,
-    MAX_NAME, TemplateError, parse, validate,
+    MAX_NAME, TemplateError, parse, to_file, validate,
 };
 pub use render::{
     Context, CtxPara, CtxProviders, CtxSection, CtxTodo, FUEL, MAX_OUTPUT, RenderError,
@@ -17,7 +17,17 @@ pub use render::{
 pub const DEFAULT_ID: &str = "general";
 
 /// The built-ins, compiled in (F11-FR2).
-pub const BUILTINS: [(&str, &str); 1] = [("general", include_str!("../../templates/general.md"))];
+pub const BUILTINS: [(&str, &str); 6] = [
+    ("general", include_str!("../../templates/general.md")),
+    ("standup", include_str!("../../templates/standup.md")),
+    ("one-on-one", include_str!("../../templates/one-on-one.md")),
+    (
+        "client-call",
+        include_str!("../../templates/client-call.md"),
+    ),
+    ("interview", include_str!("../../templates/interview.md")),
+    ("lecture", include_str!("../../templates/lecture.md")),
+];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Template {
