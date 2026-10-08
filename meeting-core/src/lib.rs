@@ -5,6 +5,7 @@ pub mod atomic;
 pub mod jobs;
 pub mod keyfile;
 pub mod library;
+pub mod pipeline;
 pub mod providers;
 pub mod runtime;
 pub mod scrub;

@@ -164,6 +164,19 @@ impl Library<'_> {
         Ok((f.dir, sc))
     }
 
+    /// One read-modify-write of `id`'s sidecar: `f` changes it (given the meeting's folder) and
+    /// it is written back only when `f` succeeds. Callers hold `App::write_lock` around it.
+    pub fn update<T>(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut Sidecar, &Path) -> Result<T, LibError>,
+    ) -> Result<T, LibError> {
+        let (dir, mut sc) = self.load_for_write(id)?;
+        let out = f(&mut sc, &dir)?;
+        sidecar::write(&dir, &sc)?;
+        Ok(out)
+    }
+
     /// F3-FR1: create the sidecar (`recording`) in the current folder and return the id, the
     /// first segment's path and the recorder's plan. `started_at_ms` is the shell's wall clock
     /// at Record. A second meeting in the same second gets a `b`..`z` suffix; ids already used
@@ -296,11 +309,11 @@ impl Library<'_> {
     }
 }
 
-pub(crate) fn phase(sc: &Sidecar) -> Phase {
+pub fn phase(sc: &Sidecar) -> Phase {
     Phase::from_parts(sc.status, sc.failed_at)
 }
 
-pub(crate) fn set_phase(sc: &mut Sidecar, p: Phase) {
+pub fn set_phase(sc: &mut Sidecar, p: Phase) {
     (sc.status, sc.failed_at) = p.parts();
 }
 
