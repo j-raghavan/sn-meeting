@@ -82,12 +82,21 @@ struct Raw {
     title: Option<String>,
     #[serde(default)]
     summary: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     decisions: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     todos: Vec<RawTodo>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_empty")]
     sections: Vec<RawSection>,
+}
+
+/// A list the model sent as `null` reads as empty.
+fn null_as_empty<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
 }
 
 #[derive(Deserialize)]
@@ -122,16 +131,15 @@ pub struct NewTodo {
     pub due: Option<String>,
 }
 
-/// Parse the model's text (unknown fields ignored, F5-FR9; a ```json fence tolerated), cap
-/// every field, drop empty items and null any `due` that is not a real `YYYY-MM-DD`.
+/// Parse the model's text (unknown fields ignored, F5-FR9), cap every field, drop empty items
+/// and null any `due` that is not a real `YYYY-MM-DD`. A reply wrapped in a code fence (any
+/// case) or in prose is read from its outermost `{` to its last `}`; a `null` list is empty.
 pub fn parse(text: &str) -> Result<Extraction, String> {
     let t = text.trim();
-    let t = t
-        .strip_prefix("```json")
-        .or_else(|| t.strip_prefix("```"))
-        .and_then(|x| x.strip_suffix("```"))
-        .unwrap_or(t)
-        .trim();
+    let t = match (t.find('{'), t.rfind('}')) {
+        (Some(a), Some(b)) if a < b => &t[a..=b],
+        _ => t,
+    };
     let invalid = |e: String| format!("The summary wasn't valid: {e}");
     let v: Value = serde_json::from_str(t).map_err(|e| invalid(e.to_string()))?;
     if !v.is_object() {

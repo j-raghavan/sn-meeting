@@ -191,3 +191,26 @@ fn replies_are_validated_and_capped() {
         assert!(err.starts_with("The summary wasn't valid"), "{bad}: {err}");
     }
 }
+
+#[test]
+fn fenced_or_prose_wrapped_and_null_lists_parse() {
+    let reply =
+        r#"{"title": "Sync", "summary": "s", "decisions": null, "todos": null, "sections": null}"#;
+    let want = parse(reply).unwrap();
+    assert_eq!(
+        (want.decisions.len(), want.todos.len(), want.sections.len()),
+        (0, 0, 0)
+    );
+    for wrapped in [
+        format!("```JSON\n{reply}\n```"),
+        format!("```Json {reply} ```"),
+        format!("Here is the summary:\n\n{reply}\n\nLet me know if you need more."),
+        format!("Sure! ```json\n{reply}\n``` Done."),
+    ] {
+        assert_eq!(parse(&wrapped).unwrap(), want, "{wrapped}");
+    }
+    let e = parse(
+        r#"{"summary": "s", "todos": [{"text": "a", "owner": null, "due": null}], "decisions": [null, "d"]}"#,
+    );
+    assert!(e.is_err(), "a null inside a list is still invalid: {e:?}");
+}
