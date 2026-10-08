@@ -1,14 +1,64 @@
 //! F11-FR4: rendering a layout with minijinja. Templates are untrusted text: the engine has no
-//! loader (no filesystem or network), runs on a fuel budget with a recursion limit, and its
-//! output is capped. A layout only reads the context built here from the sidecar.
-use minijinja::{AutoEscape, Environment, UndefinedBehavior, Value, escape_formatter};
+//! loader (no filesystem or network), runs on a fuel budget with a recursion limit, and writes
+//! into a capped buffer. Constructs that build large values in memory are refused before
+//! compiling (`guard`), and so are the filters that multiply their input (F11-FR7). A layout
+//! only reads the context built here from the sidecar.
+use minijinja::{
+    AutoEscape, Environment, Error, ErrorKind, UndefinedBehavior, Value, escape_formatter,
+};
 use serde::Serialize;
+use std::io;
 
 /// Enough for a 3-hour transcript through the standard layout many times over; stops a runaway
 /// loop in a hostile layout.
 pub const FUEL: u64 = 2_000_000;
 pub const RECURSION_LIMIT: usize = 64;
 pub const MAX_OUTPUT: usize = 2 * 1024 * 1024;
+/// `join`'s separator: long enough for ", " or " · ", too short to multiply a list by much.
+pub const MAX_JOIN_SEPARATOR: usize = 16;
+
+/// Built-in filters whose output can be many times their input (`replace`, `indent`, `format`,
+/// and the splitters that let `join` pad every character), or that build big lists (`batch`,
+/// `slice` take a count). A layout using one fails as an unknown filter.
+const REFUSED_FILTERS: [&str; 10] = [
+    "replace", "indent", "format", "split", "lines", "list", "batch", "slice", "chain", "zip",
+];
+
+/// The output, refusing to grow past [`MAX_OUTPUT`].
+#[derive(Default)]
+struct Capped {
+    buf: Vec<u8>,
+    overflowed: bool,
+}
+
+impl io::Write for Capped {
+    fn write(&mut self, b: &[u8]) -> io::Result<usize> {
+        if self.buf.len() + b.len() > MAX_OUTPUT {
+            self.overflowed = true;
+            return Err(io::Error::other("output too large"));
+        }
+        self.buf.extend_from_slice(b);
+        Ok(b.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// `join` with a short separator. A string is printed as it is, not joined per character.
+fn join(v: &Value, sep: Option<&str>) -> Result<String, Error> {
+    let sep = sep.unwrap_or("");
+    if sep.chars().count() > MAX_JOIN_SEPARATOR {
+        let e = format!("join's separator is limited to {MAX_JOIN_SEPARATOR} characters");
+        return Err(Error::new(ErrorKind::InvalidOperation, e));
+    }
+    if let Some(s) = v.as_str() {
+        return Ok(s.to_owned());
+    }
+    let items: Vec<String> = v.try_iter()?.map(|i| i.to_string()).collect();
+    Ok(items.join(sep))
+}
 
 /// A render failure. `line` is 1-based in the layout.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,6 +74,11 @@ fn env() -> Environment<'static> {
     e.set_fuel(Some(FUEL));
     e.set_recursion_limit(RECURSION_LIMIT);
     e.set_keep_trailing_newline(true);
+    for f in REFUSED_FILTERS {
+        e.remove_filter(f);
+    }
+    e.add_filter("join", join);
+    e.remove_global("namespace");
     // A null value (an untitled meeting, a to-do with no owner) prints as nothing, like a
     // missing one, rather than "none".
     e.set_formatter(|out, state, v| {
@@ -50,15 +105,22 @@ pub fn render(layout: &str, ctx: &Context) -> Result<String, RenderError> {
             line,
         }
     };
-    let out = e.template_from_str(layout).and_then(|t| t.render(ctx));
-    let out = out.map_err(to_err)?;
-    if out.len() > MAX_OUTPUT {
+    super::guard::check(layout)?;
+    let mut out = Capped::default();
+    let r = e
+        .template_from_str(layout)
+        .and_then(|t| t.render_captured_to(ctx, &mut out).map(|_| ()));
+    if out.overflowed {
         return Err(RenderError {
             message: "Template error: the output is larger than 2 MB".into(),
             line: None,
         });
     }
-    Ok(out)
+    r.map_err(to_err)?;
+    String::from_utf8(out.buf).map_err(|_| RenderError {
+        message: "Template error: the output is not text".into(),
+        line: None,
+    })
 }
 
 /// The layout variables (F11-FR4), built in code from the sidecar.

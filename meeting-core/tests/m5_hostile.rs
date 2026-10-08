@@ -254,3 +254,58 @@ fn vocabulary_is_the_transcription_hint() {
         "{system}"
     );
 }
+
+/// Layouts that allocate far past the 2 MB output cap before any output is checked: string
+/// repetition, concatenation in a loop of `set`s, and filters that multiply their input.
+const GREEDY: [&str; 6] = [
+    "{% set a = 'x' * 1000000 %}{% set a = a ~ a %}{% set a = a ~ a %}{% set a = a ~ a %}\
+     {% set a = a ~ a %}{% set a = a ~ a %}{% set a = a ~ a %}",
+    "{% for i in range(3) %}{{ 'x' * 100000000 }}{% endfor %}",
+    "{{ summary + summary + summary }}",
+    "{{ 'aaaaaaaaaa'|replace('a', 'aaaaaaaaaa')|replace('a', 'aaaaaaaaaa')|replace('a', 'aaaaaaaaaa') }}",
+    "{{ summary|join('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') }}",
+    "{% macro m() %}{{ summary }}{{ summary }}{% endmacro %}{{ m() }}",
+];
+
+#[test]
+fn a_layout_cannot_allocate_without_bound() {
+    let fx = fixture("openai");
+    let mut t = parse(&fx.app.get_template_json("general"));
+    for layout in GREEDY {
+        t["layout"] = json!(layout);
+        let started = std::time::Instant::now();
+        let r = parse(&fx.app.save_template_json(&t.to_string()));
+        assert_eq!(r["field"], "layout", "{layout}: {r}");
+        assert!(r["line"].as_u64().is_some(), "{layout}: {r}");
+        let preview = parse(&fx.app.preview_template_json(&t.to_string()));
+        assert_eq!(preview["field"], "layout", "{layout}: {preview}");
+        // Refused before rendering, so long before anything large is built.
+        assert!(started.elapsed() < Duration::from_millis(500), "{layout}");
+    }
+    // The ordinary layouts still work.
+    assert!(parse(&fx.app.get_template_json("standup"))["problem"].is_null());
+}
+
+#[test]
+fn a_hostile_user_file_lists_as_invalid_without_crashing() {
+    let fx = fixture("openai");
+    let dir = fx.e.root.path().join(USER_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut tpl = meeting::templates::builtins().remove(0);
+    tpl.id = "hostile".into();
+    tpl.name = "Hostile".into();
+    tpl.layout = GREEDY[0].into();
+    std::fs::write(dir.join("hostile.md"), meeting::templates::to_file(&tpl)).unwrap();
+    let rows: Vec<Value> = serde_json::from_str(&fx.app.list_templates_json()).unwrap();
+    let row = rows.iter().find(|r| r["id"] == "hostile").expect("listed");
+    assert_eq!(row["origin"], "yours");
+    let problem = row["problem"].as_str().unwrap_or_default();
+    assert!(
+        problem.starts_with("This file has an error on line "),
+        "{row}"
+    );
+    assert_eq!(
+        parse(&fx.app.set_template_json(&fx.id, "hostile"))["error"],
+        "template not found"
+    );
+}

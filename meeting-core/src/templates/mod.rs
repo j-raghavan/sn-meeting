@@ -4,6 +4,7 @@
 use serde::Serialize;
 
 mod file;
+mod guard;
 mod render;
 mod store;
 pub use file::{
