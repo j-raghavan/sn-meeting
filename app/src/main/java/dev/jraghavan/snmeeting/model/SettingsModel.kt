@@ -106,3 +106,19 @@ data class TestResult(val ok: Boolean, val status: String?, val ms: Long?, val m
         fun from(o: JSONObject) = TestResult(o.bool("ok") ?: false, o.str("status"), o.long("ms"), o.str("model"), o.bool("model_found"), o.strOr("detail", ""))
     }
 }
+
+/** F10-FR3: the save-folder presets; anything else is Custom. Paths are relative to internal storage. */
+object SaveFolders {
+    data class Preset(val path: String, val hint: String?)
+
+    val PRESETS = listOf(
+        Preset("EXPORT/sn-meeting", "Synced to your computer by Supernote Partner"),
+        Preset("Document/Meetings", null),
+    )
+
+    fun isCustom(folder: String) = PRESETS.none { it.path == folder }
+
+    /** "EXPORT/sn-meeting and Document/Old": where older meetings stay listed from. */
+    fun previous(folders: List<String>): String? =
+        if (folders.isEmpty()) null else "Meetings in ${folders.joinToString(" and ")} stay listed."
+}

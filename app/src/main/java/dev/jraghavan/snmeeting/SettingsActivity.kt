@@ -13,6 +13,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
 import dev.jraghavan.snmeeting.record.BluetoothState
@@ -40,6 +41,8 @@ class SettingsActivity : Activity() {
     /** The core's last refusal, by settings field ("" for none), shown under its section. */
     private val errors = mutableMapOf<String, String>()
     private var bt: BluetoothState? = null
+    /** The Custom… folder field is open. */
+    private var editingFolder = false
 
     /**
      * The last Test connection result per "role/provider" (F10-FR5: shown until the next test),
@@ -82,6 +85,7 @@ class SettingsActivity : Activity() {
     private fun applySettings(json: String) {
         when (val r = CoreJson.obj(json, SettingsView::from)) {
             is CoreResult.Ok -> {
+                if (r.value.saveFolder != settings?.saveFolder) editingFolder = false
                 settings = r.value; errors.clear()
                 segmentMs = r.value.segmentMsDebug
             }
@@ -127,6 +131,39 @@ class SettingsActivity : Activity() {
         }
     }
 
+    /**
+     * F10-FR3: EXPORT/sn-meeting, Document/Meetings or a folder typed relative to internal
+     * storage. The core validates it (inside storage, writable, not a keys or templates folder)
+     * and its reason shows under the field.
+     */
+    private fun saveSection(column: LinearLayout) {
+        val s = settings ?: return
+        ui.section(column, "Save to").apply {
+            SaveFolders.PRESETS.forEachIndexed { i, p ->
+                if (i > 0) addView(ui.hairline())
+                choice(p.path, p.hint, s.saveFolder == p.path) { editingFolder = false; patch(SettingsPatch.saveFolder(p.path)) }
+            }
+            addView(ui.hairline())
+            val custom = SaveFolders.isCustom(s.saveFolder)
+            // Always opens the field, even when a custom folder is already chosen.
+            addView(ui.choiceRow("Custom…", if (custom) s.saveFolder else "A folder inside internal storage", custom || editingFolder) {
+                editingFolder = true; render()
+            })
+            if (editingFolder) {
+                val field = ui.field(if (custom) s.saveFolder else "")
+                addView(field, ui.fullWidth().apply { topMargin = ui.dim(4) })
+                addView(ui.note("Relative to internal storage, e.g. Document/Work meetings", 12f, ui.textMuted), ui.wrap().apply { topMargin = ui.dim(4) })
+                addView(ui.pill("Use this folder", size = 15f) {
+                    val path = field.text.toString().trim()
+                    if (path.isNotEmpty()) patch(SettingsPatch.saveFolder(path))
+                }, ui.wrap().apply { topMargin = ui.dim(10); bottomMargin = ui.dim(6) })
+            }
+            errors["saveFolder"]?.let { addView(error(it)) }
+            val note = listOfNotNull("Applies to new meetings.", SaveFolders.previous(s.previousFolders)).joinToString(" ")
+            addView(ui.note(note, 13f).apply { setPadding(0, ui.dim(4), 0, ui.dim(10)) })
+        }
+    }
+
     /** The core's reason a change was refused, under the field it concerns. */
     private fun error(message: String): TextView = ui.note(message, 13f, ui.ink).apply { setPadding(0, ui.dim(4), 0, ui.dim(10)) }
 
@@ -156,18 +193,7 @@ class SettingsActivity : Activity() {
         micSection(column)
         errors[""]?.let { column.addView(error(it)) }
 
-        ui.section(column, "Save to").apply {
-            choice("EXPORT/sn-meeting", "Synced to your computer by Supernote Partner", MockSettings.folder == "EXPORT/sn-meeting") {
-                MockSettings.folder = "EXPORT/sn-meeting"
-            }
-            addView(ui.hairline())
-            choice("Document/Meetings", null, MockSettings.folder == "Document/Meetings") { MockSettings.folder = "Document/Meetings" }
-            addView(ui.hairline())
-            choice("Custom…", "A folder inside internal storage", MockSettings.folder == "custom") { MockSettings.folder = "custom" }
-            addView(ui.note("Applies to new meetings. Older meetings stay where they are and stay listed.", 13f).apply {
-                setPadding(0, ui.dim(4), 0, ui.dim(10))
-            })
-        }
+        saveSection(column)
 
         providerSection(column, "Transcription", MockSettings.transcribeChoices, MockSettings.transcribe,
             "Anthropic can't transcribe audio, so it is offered for summaries only.") { MockSettings.transcribe = it }

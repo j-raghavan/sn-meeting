@@ -123,4 +123,12 @@ class CoreModelsTest {
         assertEquals(listOf("Priya"), t.vocabulary)
         assertNull(t.problem)
     }
+
+    @Test fun saveFolders() {
+        assertTrue(SaveFolders.isCustom("Notes/Meetings"))
+        assertEquals(false, SaveFolders.isCustom("EXPORT/sn-meeting"))
+        assertNull(SaveFolders.previous(emptyList()))
+        assertEquals("Meetings in EXPORT/sn-meeting stay listed.", SaveFolders.previous(listOf("EXPORT/sn-meeting")))
+        assertEquals("""{"saveFolder":"Notes/Meetings"}""", SettingsPatch.saveFolder("Notes/Meetings"))
+    }
 }
