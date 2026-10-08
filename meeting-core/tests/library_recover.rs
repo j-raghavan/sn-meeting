@@ -99,6 +99,21 @@ fn missing_and_empty_segments_are_flagged_never_deleted() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_segment_that_cant_be_checked_is_not_flagged_missing() {
+    // S10: only "not found" is missing; any other error (here a symlink loop) leaves it alone.
+    let e = Env::new();
+    crashed_while_recording(&e);
+    let seg = e.export().join(format!("{ID0}-01.m4a"));
+    fs::remove_file(&seg).unwrap();
+    std::os::unix::fs::symlink(&seg, &seg).unwrap();
+    let r = recover(&e.app(), false);
+    assert_eq!(r["flagged"], json!([]), "{r}");
+    assert_eq!(r["measure"], json!([]));
+    assert!(read_sidecar(&e.export(), ID0).segments[0].flag.is_none());
+}
+
 #[test]
 fn transcribing_without_a_job_fails_and_keeps_its_text() {
     // F3-AC4.

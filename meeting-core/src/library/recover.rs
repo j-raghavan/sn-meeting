@@ -127,13 +127,15 @@ fn legacy_measures(id: &str, f: &super::Found) -> Vec<Measure> {
         .collect()
 }
 
-/// Flag missing or empty segment files; list open, present ones for measuring.
+/// Flag missing (not found) or empty segment files; list open, present ones for measuring.
 fn check_segments(id: &str, dir: &Path, sc: &mut Sidecar) -> (Vec<Flagged>, Vec<Measure>) {
     let (mut flagged, mut measure) = (Vec::new(), Vec::new());
     for (index, s) in sc.segments.iter_mut().enumerate() {
         let path = dir.join(&s.file);
         let found = match std::fs::metadata(&path) {
-            Err(_) => Some(SegmentFlag::Missing),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(SegmentFlag::Missing),
+            // Can't be checked now (permissions, a link loop): neither flagged nor measured.
+            Err(_) => continue,
             Ok(m) if m.len() == 0 => Some(SegmentFlag::Empty),
             Ok(_) => None,
         };

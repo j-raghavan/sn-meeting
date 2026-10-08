@@ -228,7 +228,9 @@ async fn a_missing_segment_is_marked_and_the_rest_transcribe() {
 }
 
 #[tokio::test]
-async fn a_segment_flagged_missing_is_not_sent_even_if_a_file_reappears() {
+async fn a_segment_flagged_missing_is_sent_once_its_file_is_back() {
+    // S10: the flag is re-checked: a file put back (copied in again over Partner) is sent and
+    // the flag cleared; one still gone reads "(audio missing)".
     let s = MockServer::start().await;
     segment(&s, 1, Duration::ZERO, "one").await;
     segment(&s, 2, Duration::ZERO, "two").await;
@@ -236,10 +238,16 @@ async fn a_segment_flagged_missing_is_not_sent_even_if_a_file_reappears() {
     let fx = meeting();
     let mut sc = read_sidecar(&fx.dir, &fx.id);
     sc.segments[1].flag = Some(meeting::sidecar::SegmentFlag::Missing);
+    sc.segments[2].flag = Some(meeting::sidecar::SegmentFlag::Missing);
     meeting::sidecar::write(&fx.dir, &sc).unwrap();
+    std::fs::remove_file(fx.dir.join(format!("{}-03.m4a", fx.id))).unwrap();
     run(&fx, &s.uri(), &Cancel::default()).await.unwrap();
-    assert_eq!(sent(&s).await, [1, 3]);
-    assert_eq!(sidecar(&fx)["segments"][1]["text"], "(audio missing)");
+    assert_eq!(sent(&s).await, [1, 2]);
+    let v = sidecar(&fx);
+    assert_eq!(v["segments"][1]["text"], "two");
+    assert!(v["segments"][1]["flag"].is_null(), "{v}");
+    assert_eq!(v["segments"][2]["text"], "(audio missing)");
+    assert_eq!(v["segments"][2]["flag"], "missing");
 }
 
 #[tokio::test]

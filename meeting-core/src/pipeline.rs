@@ -256,8 +256,9 @@ fn store(
                 .filter(|s| s.file == seg.file)
             {
                 s.text = Some(text);
+                // Sent: any old flag is gone (S10). Skipped: flagged, at 0 ms if unmeasured.
+                s.flag = flag;
                 if flag.is_some() {
-                    s.flag = flag;
                     s.duration_ms.get_or_insert(0);
                 }
             }
@@ -295,18 +296,20 @@ fn pending(sc: &Sidecar) -> Vec<Pending> {
 
 /// The segment's bytes; or, for one with no audio to send, the text it reads as: a missing
 /// file is "(audio missing)", an empty one "(no speech detected)" (a provider rejects a 0-byte
-/// file as corrupt, so it is never sent). Else the user-facing reason it can't be sent.
+/// file as corrupt, so it is never sent). Else the user-facing reason it can't be sent. The
+/// file is checked even when the segment is flagged.
 fn read_segment(dir: &Path, seg: &Pending, key: &ProviderKey) -> Result<Audio, String> {
     let n = seg.index + 1;
     let path: PathBuf = dir.join(&seg.file);
     let missing = Audio::Skip(AUDIO_MISSING, SegmentFlag::Missing);
     let empty = Audio::Skip(providers::NO_SPEECH, SegmentFlag::Empty);
-    let meta = match (seg.flag, std::fs::metadata(&path)) {
-        (Some(SegmentFlag::Missing), _) => return Ok(missing),
-        (Some(SegmentFlag::Empty), _) => return Ok(empty),
-        (None, Err(e)) if e.kind() == std::io::ErrorKind::NotFound => return Ok(missing),
-        (None, Err(e)) => return Err(format!("Segment {n} can't be read ({:?})", e.kind())),
-        (None, Ok(m)) => m,
+    // A flag is re-checked (S10): a file put back since it was flagged is sent, and the flag
+    // cleared when its text is stored.
+    let meta = match std::fs::metadata(&path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(missing),
+        Err(_) if seg.flag == Some(SegmentFlag::Missing) => return Ok(missing),
+        Err(e) => return Err(format!("Segment {n} can't be read ({:?})", e.kind())),
+        Ok(m) => m,
     };
     if meta.is_file() && meta.len() == 0 {
         return Ok(empty);
