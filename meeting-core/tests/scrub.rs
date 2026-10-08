@@ -51,9 +51,38 @@ fn idempotent() {
     assert_eq!(scrub(&once, &[]), once);
 }
 
+/// Every cut position near MAX_LEN, for each way a value can follow a marker: scrubbing twice
+/// equals scrubbing once, nothing exceeds MAX_LEN, and no piece of the unknown value survives.
 #[test]
-fn tiny_secrets_are_not_used() {
-    assert_eq!(scrub("a cat sat", &["a", "", "at"]), "a cat sat");
+fn idempotent_at_every_cut() {
+    let templates = [
+        "x-api-key: sk-unknown-VALUE-123 tail",
+        "Authorization: Bearer sk-unknown-VALUE-123 tail",
+        "authorization:Bearer sk-unknown-VALUE-123,tail",
+        "GET /m?pageSize=1&key=sk-unknown-VALUE-123&x=1",
+        r#"{"x-goog-api-key": "sk-unknown-VALUE-123"}"#,
+        "bearer sk-unknown-VALUE-123",
+    ];
+    for t in templates {
+        for at in MAX_LEN - 40..=MAX_LEN {
+            for pad in ["a", "a b "] {
+                let mut text = pad.repeat(at).chars().take(at).collect::<String>();
+                text.push_str(t);
+                text.push_str(&" z".repeat(20));
+                let once = scrub(&text, &[]);
+                assert_eq!(scrub(&once, &[]), once, "{t:?} at {at} pad {pad:?}");
+                assert!(once.chars().count() <= MAX_LEN, "{t:?} at {at}");
+                assert!(!once.contains("sk-u") && !once.contains("VALUE"), "{once}");
+            }
+        }
+    }
+}
+
+#[test]
+fn every_nonempty_secret_is_used() {
+    assert_eq!(scrub("a cat sat", &[""]), "a cat sat");
+    // A short key is still a key: callers pass key values only.
+    assert_eq!(scrub("key k9 here", &["k9"]), "key [redacted] here");
 }
 
 #[test]
@@ -62,7 +91,17 @@ fn truncates_after_redacting() {
     let text = format!("{}{KEY}{}", "a".repeat(MAX_LEN - 5), "b".repeat(50));
     let s = scrub(&text, &[KEY]);
     assert!(!s.contains("sk-proj"), "{s}");
-    assert_eq!(s.chars().count(), MAX_LEN + 1);
+    assert!(s.chars().count() <= MAX_LEN);
     assert!(s.ends_with('…'));
     assert_eq!(scrub(&"z".repeat(MAX_LEN), &[]), "z".repeat(MAX_LEN));
+    // A cut inside a word backs off to the space before it.
+    let words = "word ".repeat(100);
+    let cut = scrub(&words, &[]);
+    assert!(
+        cut.ends_with(" …") && cut.chars().count() <= MAX_LEN,
+        "{cut}"
+    );
+    // With no delimiter in reach, the cut is hard.
+    let blob = "x".repeat(MAX_LEN * 2);
+    assert_eq!(scrub(&blob, &[]), format!("{}…", "x".repeat(MAX_LEN - 1)));
 }
