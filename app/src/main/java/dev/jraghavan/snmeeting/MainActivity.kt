@@ -56,6 +56,14 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var rec: RecState = RecState.Idle(null, null)
     private var unobserve: (() -> Unit)? = null
+    private var unlisten: (() -> Unit)? = null
+
+    /** F6-FR4: lists re-read on resume, on recording transitions and when a job ends; ≤ 1/s. */
+    private val gate = RefreshGate(SystemClock::elapsedRealtime, { ms, r ->
+        val task = Runnable(r)
+        handler.postDelayed(task, ms)
+        ({ handler.removeCallbacks(task) })
+    }) { refreshLists() }
     private var bt: BluetoothState? = null
     /** settings.mic, read on resume (F2-FR8); Automatic until the core answers. */
     private var micChoice: MicChoice = MicChoice.Auto
@@ -135,13 +143,20 @@ class MainActivity : Activity() {
         super.onStart()
         getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, handler)
         bt = BluetoothState(this, handler) { if (!rec.busy) render() }.also { it.open() }
-        unobserve = RecordingService.hub.observe { rec = it; render() }
+        unobserve = RecordingService.hub.observe { next ->
+            val changed = next.javaClass != rec.javaClass
+            rec = next; render()
+            if (changed) gate.request() // a meeting began or ended: its row changes
+        }
+        unlisten = LongJobs.lane.onFinished { gate.request() }
         handler.post(tick)
     }
 
     override fun onStop() {
         handler.removeCallbacks(tick)
         unobserve?.invoke(); unobserve = null
+        unlisten?.invoke(); unlisten = null
+        gate.stop()
         bt?.close(); bt = null
         getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(deviceCallback)
         super.onStop()
@@ -152,7 +167,7 @@ class MainActivity : Activity() {
         ensurePermissions()
         render()
         recover()
-        refreshLists() // queued after recovery, so recovered meetings show their new status
+        gate.request() // queued after recovery, so recovered meetings show their new status
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
             CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
         }
