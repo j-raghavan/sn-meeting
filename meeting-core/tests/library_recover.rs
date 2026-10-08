@@ -177,9 +177,12 @@ fn other_meetings_are_untouched() {
     fs::write(dir.join(format!("{ID0}-01.m4a")), b"aac").unwrap();
     app.finish_json(ID0, 1000, "");
     let before = fs::read(dir.join(format!("{ID0}.json"))).unwrap();
+    // Legacy audio is only listed for measuring (D3); recovery itself writes nothing.
+    let spike = dir.join("meeting-20261007-211359.m4a");
     assert_eq!(
         recover(&app, false),
-        json!({"recovered": [], "measure": [], "flagged": []})
+        json!({"recovered": [], "flagged": [], "measure": [
+            {"id": "meeting-20261007-211359", "index": 0, "path": spike}]})
     );
     assert_eq!(fs::read(dir.join(format!("{ID0}.json"))).unwrap(), before);
     assert!(!dir.join("meeting-20261007-211359.json").exists());

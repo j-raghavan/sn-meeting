@@ -24,6 +24,13 @@ class RecovererTest {
         assertEquals(listOf("c"), r.noAudio)
     }
 
+    @Test fun legacyAudioIsMeasuredInSegmentOrder() { // D3: no sidecar yet; closing writes one
+        val reply = """{"recovered":[],"measure":[{"id":"meeting-20261007-211706","index":0,"path":"/p/meeting-20261007-211706-01.m4a"},
+            {"id":"meeting-20261007-211706","index":1,"path":"/p/meeting-20261007-211706-02.m4a"}],"flagged":[]}"""
+        recoverer(reply).run(serviceAlive = false)
+        assertEquals(listOf("meeting-20261007-211706/0=0", "meeting-20261007-211706/1=61234"), closed)
+    }
+
     @Test fun anErrorClosesNothing() {
         assertNull(recoverer("""{"error":"nativeInit has not run"}""").run(serviceAlive = true))
         assertEquals(true, alive)

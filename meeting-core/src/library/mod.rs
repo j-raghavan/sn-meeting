@@ -289,6 +289,9 @@ impl Library<'_> {
         if d == 0 && seg.flag.is_none() {
             seg.flag = Some(SegmentFlag::Empty);
         }
+        if sc.status == Status::Recorded {
+            measured(&mut sc, index);
+        }
         sidecar::write(&dir, &sc)?;
         Ok(())
     }
@@ -306,6 +309,31 @@ impl Library<'_> {
         }
         sidecar::write(&dir, &sc)?;
         Ok(())
+    }
+}
+
+/// A segment of a recorded meeting was measured (recovery, D3): a legacy segment inferred at
+/// offset 0 follows the one before it, and the meeting lasts at least to the end of its last
+/// measured segment (S13).
+fn measured(sc: &mut Sidecar, index: usize) {
+    if index > 0 && sc.segments[index].start_offset_ms == 0 {
+        let prev = &sc.segments[index - 1];
+        if let Some(d) = prev.duration_ms {
+            sc.segments[index].start_offset_ms = prev.start_offset_ms + d;
+        }
+    }
+    extend_duration(sc);
+}
+
+/// `duration_ms` = at least the end of the last segment with a duration.
+pub(crate) fn extend_duration(sc: &mut Sidecar) {
+    if let Some(end) = sc
+        .segments
+        .iter()
+        .rev()
+        .find_map(|s| s.duration_ms.map(|d| s.start_offset_ms + d))
+    {
+        sc.duration_ms = sc.duration_ms.max(end);
     }
 }
 

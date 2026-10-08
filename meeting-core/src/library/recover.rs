@@ -45,11 +45,14 @@ impl Library<'_> {
     /// job in flight becomes failed(transcribing), keeping every segment's text so a retry
     /// resumes. Recorded meetings' segments are then checked: a missing or empty file is
     /// flagged, an open one is listed for the shell to measure. The live meeting and running
-    /// jobs are left alone. Unreadable sidecars and legacy audio are not touched.
+    /// jobs are left alone. Unreadable sidecars are not touched; legacy audio (no sidecar) is
+    /// only listed for measuring.
     pub fn recover(&self, live: &Liveness) -> Recovery {
         let mut r = Recovery::default();
         for (id, f) in self.scan() {
             if !f.has_sidecar {
+                // D3: legacy audio is measured too; closing it writes its first sidecar.
+                r.measure.extend(legacy_measures(&id, &f));
                 continue;
             }
             let Ok(mut sc) = sidecar::read(&f.dir, &id) else {
@@ -105,6 +108,23 @@ impl Library<'_> {
         }
         r
     }
+}
+
+/// Every non-empty audio file of a meeting with no sidecar, by its index in the inferred one.
+fn legacy_measures(id: &str, f: &super::Found) -> Vec<Measure> {
+    f.audio
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (_, name))| {
+            let path = f.dir.join(name);
+            let len = std::fs::metadata(&path).map_or(0, |m| m.len());
+            (len > 0).then(|| Measure {
+                id: id.to_owned(),
+                index,
+                path: path.to_string_lossy().into_owned(),
+            })
+        })
+        .collect()
 }
 
 /// Flag missing or empty segment files; list open, present ones for measuring.

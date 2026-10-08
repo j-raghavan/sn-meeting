@@ -149,3 +149,57 @@ fn duplicate_numbers_list_once() {
         Some(Some(100))
     );
 }
+
+#[test]
+fn recovery_lists_legacy_audio_for_measuring_and_the_durations_stick() {
+    // D3: legacy audio listed with no duration ("—" on Home) until the shell measures it.
+    let e = Env::new();
+    let dir = e.folder("EXPORT/sn-meeting");
+    fs::write(dir.join(format!("{SPIKE_A}.m4a")), b"aac").unwrap();
+    for n in [1, 2] {
+        fs::write(dir.join(format!("{SPIKE_B}-{n:02}.m4a")), b"aac").unwrap();
+    }
+    fs::write(dir.join("meeting-20261001-080000.m4a"), b"").unwrap(); // nothing to measure
+    let app = e.app();
+    let r = parse(&app.recover_json(false));
+    let path = |n: &str| dir.join(n).to_string_lossy().into_owned();
+    assert_eq!(
+        r["measure"],
+        json!([
+            {"id": SPIKE_A, "index": 0, "path": path(&format!("{SPIKE_A}.m4a"))},
+            {"id": SPIKE_B, "index": 0, "path": path(&format!("{SPIKE_B}-01.m4a"))},
+            {"id": SPIKE_B, "index": 1, "path": path(&format!("{SPIKE_B}-02.m4a"))},
+        ])
+    );
+    assert!(
+        !dir.join(format!("{SPIKE_A}.json")).exists(),
+        "recovery writes nothing for legacy audio"
+    );
+    // The shell measures each file and closes it, which writes the first sidecar.
+    for (id, i, ms) in [
+        (SPIKE_A, 0, 120_000),
+        (SPIKE_B, 0, 900_000),
+        (SPIKE_B, 1, 300_000),
+    ] {
+        assert_eq!(parse(&app.close_segment_json(id, i, ms))["ok"], true);
+    }
+    let list = parse(&app.list_recent_json(5));
+    let row = |id: &str| {
+        list.as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row(SPIKE_A)["durationMs"], 120_000);
+    assert_eq!(row(SPIKE_B)["durationMs"], 1_200_000);
+    assert_eq!(row(SPIKE_B)["source"], "sidecar");
+    let sc = read_sidecar(&dir, SPIKE_B);
+    assert_eq!(
+        sc.segments[1].start_offset_ms, 900_000,
+        "a legacy segment follows the one before"
+    );
+    // Idempotent: nothing is left to measure.
+    assert_eq!(parse(&app.recover_json(false))["measure"], json!([]));
+}
