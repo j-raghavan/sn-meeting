@@ -119,4 +119,57 @@ class SegmentedRecorderTest {
     @Test fun segmentPathsSitBesideTheFirst() {
         assertEquals("/d/m-12.m4a", SegmentedRecorder.segmentPath("/d/m-01.m4a", "m", 12))
     }
+
+    @Test fun gaplessRollover() { // F2-FR5
+        startUsb()
+        events.onApproachingLimit(); events.onApproachingLimit() // the second is ignored
+        now += 900_050; events.onNextFileStarted()
+        events.onNextFileStarted() // nothing armed: ignored
+        now += 10_000; sr.stop()
+        assertEquals(listOf("next 02.m4a true", "close 0 01.m4a measure=true ~900050", "add 02.m4a @900050",
+            "stop true", "close 1 02.m4a measure=true ~10000", "finish 910050 '' discard=false"), log)
+        assertEquals(id to "Saved", ended)
+    }
+
+    @Test fun fallbackStopsAndRestarts() { // R1
+        nextOk = false; startUsb()
+        events.onApproachingLimit()
+        now += 990_000; events.onLimitReached()
+        assertEquals(listOf("next 02.m4a false", "stop true", "close 0 01.m4a measure=true ~990000",
+            "start 02.m4a MIC dev=7 bytes=10800000 ms=990000", "add 02.m4a @990000"), log)
+    }
+
+    @Test fun aFailedRestartEndsTheMeeting() {
+        startUsb(); startFails = true
+        now += 990_000; events.onLimitReached()
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~990000", "finish 990000 'recorder error' discard=false"), log)
+        assertEquals(id to "The recorder stopped — recording saved", ended)
+    }
+
+    @Test fun offsetsStayStrictlyIncreasing() {
+        startUsb(); events.onApproachingLimit(); events.onNextFileStarted() // a clock that hasn't moved
+        assertEquals("add 02.m4a @1", log.last())
+    }
+
+    @Test fun aSegmentTheCoreRefusesEndsTheMeeting() {
+        val refusing = object : RecorderCore by core {
+            override fun addSegment(id: String, path: String, startOffsetMs: Long, done: (CoreResult<SegmentAdded>) -> Unit) {
+                done(CoreResult.Err("segPath must be the next segment"))
+            }
+        }
+        val r = SegmentedRecorder(refusing, rec, storage, clock, object : SegmentedRecorder.Listener {
+            override fun onRecording(id: String, startElapsedMs: Long) {}
+            override fun onSegmentStarted(index: Int) {}
+            override fun onEnded(id: String?, message: String) { ended = id to message }
+        })
+        r.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        now += 5_000; events.onApproachingLimit(); events.onNextFileStarted()
+        assertEquals("finish 5000 'recorder error' discard=false", log.last())
+    }
+
+    @Test fun eventsAfterTheEndAreIgnored() {
+        startUsb(); sr.stop(); log.clear()
+        events.onApproachingLimit(); events.onLimitReached(); events.onError(1)
+        assertEquals(emptyList<String>(), log)
+    }
 }

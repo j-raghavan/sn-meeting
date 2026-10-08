@@ -43,6 +43,7 @@ class SegmentedRecorder(
     private var t0 = 0L
     private var index = 0
     private var lastOffset = 0L
+    private var armed: String? = null
 
     /** Segment `number` (1-based) beside the first: the core insists on exactly this path. */
     private fun pathFor(number: Int): String = segmentPath(begun.firstSegmentPath, begun.id, number)
@@ -70,7 +71,7 @@ class SegmentedRecorder(
         } catch (e: Exception) {
             return discard(CANT_START)
         }
-        t0 = clock.elapsedMs(); index = 0; lastOffset = 0
+        t0 = clock.elapsedMs(); index = 0; lastOffset = 0; armed = null
         phase = Phase.RECORDING
         listener.onRecording(b.id, t0)
         listener.onSegmentStarted(0)
@@ -80,16 +81,49 @@ class SegmentedRecorder(
     fun stop() = end(EndReason.USER)
 
     private val events = object : RecorderEvents {
-        // Rollover (F2-FR5) comes next; until then a segment ends at its limit.
-        override fun onApproachingLimit() = Unit
-        override fun onNextFileStarted() = Unit
-        override fun onLimitReached() = end(EndReason.RECORDER_ERROR)
+        override fun onApproachingLimit() {
+            if (phase != Phase.RECORDING || armed != null) return
+            val next = pathFor(index + 2)
+            if (rec.setNext(next)) armed = next // else the limit arrives and we stop + restart
+        }
+
+        override fun onNextFileStarted() {
+            val next = armed ?: return
+            if (phase != Phase.RECORDING) return
+            armed = null
+            beginNext(next, closePrevious = true)
+        }
+
+        override fun onLimitReached() {
+            if (phase != Phase.RECORDING) return
+            // Fallback (R1): stop + restart; each gap < 1 s, measured from offsets and durations.
+            rec.stop()
+            closeCurrent()
+            val next = pathFor(index + 2)
+            armed = null
+            try {
+                rec.start(spec, source, deviceId, next, segBytes, safetyDurationMs(begun), this)
+            } catch (e: Exception) {
+                return finish(EndReason.RECORDER_ERROR)
+            }
+            beginNext(next, closePrevious = false)
+        }
 
         override fun onError(what: Int) {
             end(EndReason.RECORDER_ERROR)
         }
 
         override fun onRoutedTo(deviceId: Int?) = Unit
+    }
+
+    private fun beginNext(next: String, closePrevious: Boolean) {
+        val offset = maxOf(clock.elapsedMs() - t0, lastOffset + 1) // the core needs strictly later
+        if (closePrevious) core.closeSegment(begun.id, index, pathFor(index + 1), measure = true, fallbackMs = offset - lastOffset)
+        index += 1; lastOffset = offset
+        core.addSegment(begun.id, next, offset) { r ->
+            if (r is CoreResult.Err) end(EndReason.RECORDER_ERROR) // the library would not know this file
+        }
+        listener.onSegmentStarted(index)
     }
 
     private fun end(reason: EndReason) {
