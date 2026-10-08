@@ -1,5 +1,7 @@
 //! Meetings core (`libmeeting.so`).
 pub mod api;
+pub mod providers;
+pub mod runtime;
 
 #[cfg(feature = "jni-bridge")]
 mod jni;

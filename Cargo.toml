@@ -12,8 +12,22 @@ rust-version = "1.95.0"
 authors = ["J-Raghavan"]
 
 [workspace.dependencies]
+# rig is pre-1.0: exact pin, upgrades are deliberate (C8). No default features: no derive, no
+# epub/pdf/image/websocket. `reqwest` + `rustls` give rig its bundled transport.
+rig-core = { version = "=0.44.0", default-features = false, features = ["reqwest", "rustls"] }
+# Direct dep only to name `ReqwestClient` and reach the re-exported reqwest 0.13 (one version in
+# the graph; no separate reqwest dep).
+rig-reqwest = { version = "=0.44.0", default-features = false, features = ["rustls"] }
+# Mozilla roots as DER for reqwest's `tls_certs_only`: avoids rustls-platform-verifier, which
+# panics on Android unless initialised from a JVM Context (R9).
+webpki-root-certs = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+thiserror = "2"
 jni = "0.22.4"
+wiremock = "0.6"
+tempfile = "3"
 
 [profile.release]
 # Keep panic = "unwind" (the default): the JNI edge catches panics (INV6/NFR4); "abort" would

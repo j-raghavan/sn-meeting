@@ -11,10 +11,21 @@ name = "meeting"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+rig-core = { workspace = true }
+rig-reqwest = { workspace = true }
+webpki-root-certs = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 jni = { workspace = true, optional = true }
 
 [features]
 default = []
 # Only the Android build enables this (buildApk.sh); host tests never see `jni` (INV5).
 jni-bridge = ["dep:jni"]
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros"] }
