@@ -38,22 +38,15 @@ class AndroidScoAudio(private val am: AudioManager) : ScoAudio {
  */
 class BluetoothState(private val ctx: Context, private val handler: Handler, private val onChange: () -> Unit) : BtPort {
     private val adapter: BluetoothAdapter? = ctx.getSystemService(BluetoothManager::class.java)?.adapter
-    private var headset: BluetoothHeadset? = null
-    private var a2dp: BluetoothA2dp? = null
+    /** S15: a proxy bound after close() is closed at once, and onChange isn't called. */
+    private val slots = ProxySlots<BluetoothProfile>({ profile, p -> adapter?.closeProfileProxy(profile, p) }) { handler.post(onChange) }
+    private val headset get() = slots[BluetoothProfile.HEADSET] as? BluetoothHeadset
+    private val a2dp get() = slots[BluetoothProfile.A2DP] as? BluetoothA2dp
     private var registered = false
 
     private val proxies = object : BluetoothProfile.ServiceListener {
-        override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) {
-            if (profile == BluetoothProfile.HEADSET) headset = proxy as BluetoothHeadset
-            if (profile == BluetoothProfile.A2DP) a2dp = proxy as BluetoothA2dp
-            handler.post(onChange)
-        }
-
-        override fun onServiceDisconnected(profile: Int) {
-            if (profile == BluetoothProfile.HEADSET) headset = null
-            if (profile == BluetoothProfile.A2DP) a2dp = null
-            handler.post(onChange)
-        }
+        override fun onServiceConnected(profile: Int, proxy: BluetoothProfile) = slots.connected(profile, proxy)
+        override fun onServiceDisconnected(profile: Int) = slots.disconnected(profile)
     }
 
     private val changes = object : BroadcastReceiver() {
@@ -79,9 +72,7 @@ class BluetoothState(private val ctx: Context, private val handler: Handler, pri
 
     override fun close() {
         if (registered) { ctx.unregisterReceiver(changes); registered = false }
-        headset?.let { adapter?.closeProfileProxy(BluetoothProfile.HEADSET, it) }
-        a2dp?.let { adapter?.closeProfileProxy(BluetoothProfile.A2DP, it) }
-        headset = null; a2dp = null
+        slots.close()
     }
 
     @SuppressLint("MissingPermission") // allowed() checks BLUETOOTH_CONNECT from API 31
