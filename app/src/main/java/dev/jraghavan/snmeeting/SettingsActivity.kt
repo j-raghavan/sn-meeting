@@ -6,7 +6,6 @@ import android.media.AudioManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -17,12 +16,12 @@ import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.TestResult
 import dev.jraghavan.snmeeting.record.BluetoothState
 import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicKind
 import dev.jraghavan.snmeeting.record.MicSelector
 import dev.jraghavan.snmeeting.record.usbInputs
-import org.json.JSONObject
 
 /**
  * Settings (spec F10) in the Inkwell style (F9): microphone, save folder, the transcribe and
@@ -235,41 +234,24 @@ class SettingsActivity : Activity() {
     }
 
     /**
-     * F10-FR5 / F1-FR9: Test connection runs in the core, off the UI thread. The result's
-     * `detail` stays on screen until the next test; it is never saved. The JSON never holds a key.
+     * F10-FR5 / F1-FR9: Test connection lists models with the key (no audio, no cost) on the
+     * job lane, one test per role at a time, so it never waits behind or delays a short call.
+     * The result stays on screen until the next test; it is never saved and never holds a key.
      */
     private fun testConnection(role: String, provider: String) {
         val key = "$role/$provider"
-        showResult(key, "Testing…")
         val dir = filesDir.absolutePath
-        CoreJobs.run({
+        val started = LongJobs.lane.run("test:$role", {
             // The process can restart straight into Settings; nativeInit is idempotent and cheap.
-            // If it fails, show why rather than the core's "nativeInit has not run".
             val init = NativeBridge.nativeInit(dir)
-            if (isError(init)) init else NativeBridge.nativeTestConnection(role, provider)
-        }) { json ->
-            Log.i("Meetings", json)
-            if (!isDestroyed) showResult(key, resultText(json))
-        }
+            if (CoreJson.ok(init) is CoreResult.Err) init else NativeBridge.nativeTestConnection(role, provider)
+        }) { json -> if (!isDestroyed) showResult(key, TestResult.line(json)) }
+        if (started) showResult(key, "Testing…")
     }
 
     private fun showResult(key: String, text: String) {
         results[key] = text
         resultViews[key]?.text = text
-    }
-
-    private fun isError(json: String): Boolean = try {
-        JSONObject(json).has("error")
-    } catch (e: Exception) {
-        true
-    }
-
-    /** The line to show: the result's `detail`, else the core's `error`. */
-    private fun resultText(json: String): String = try {
-        val o = JSONObject(json)
-        o.optString("detail").ifEmpty { o.optString("error").ifEmpty { json } }
-    } catch (e: Exception) {
-        json
     }
 
     /** The Rust core's version (F1-FR5); a cheap call, so it runs on the UI thread. */

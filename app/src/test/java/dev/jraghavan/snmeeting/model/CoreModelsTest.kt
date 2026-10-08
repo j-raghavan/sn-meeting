@@ -150,4 +150,10 @@ class CoreModelsTest {
         assertEquals("""{"transcribe":{"provider":"gemini"}}""", SettingsPatch.provider("transcribe", "gemini"))
         assertEquals("""{"transcribe":{"model":"whisper-1"}}""", SettingsPatch.model("transcribe", " whisper-1 "))
     }
+
+    @Test fun testConnectionLine() { // F10-FR5
+        assertEquals("Key rejected (401)", TestResult.line("""{"ok":false,"status":"key_rejected","ms":80,"provider":"openai","model":"m","model_found":null,"detail":"Key rejected (401)"}"""))
+        assertEquals("Connected", TestResult.line("""{"ok":true,"status":"connected","ms":80}"""))
+        assertEquals("Couldn't test: core unavailable: UnsatisfiedLinkError", TestResult.line("""{"error":"core unavailable: UnsatisfiedLinkError"}"""))
+    }
 }

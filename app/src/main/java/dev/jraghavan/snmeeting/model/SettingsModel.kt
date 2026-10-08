@@ -104,6 +104,12 @@ object SettingsPatch {
 data class TestResult(val ok: Boolean, val status: String?, val ms: Long?, val model: String?, val modelFound: Boolean?, val detail: String) {
     companion object {
         fun from(o: JSONObject) = TestResult(o.bool("ok") ?: false, o.str("status"), o.long("ms"), o.str("model"), o.bool("model_found"), o.strOr("detail", ""))
+
+        /** The line Settings shows: the core's detail ("Connected · 312 ms", "Key rejected (401)"), or why it couldn't test. */
+        fun line(json: String): String = when (val r = CoreJson.obj(json, ::from)) {
+            is CoreResult.Ok -> r.value.detail.ifEmpty { if (r.value.ok) "Connected" else "Not connected" }
+            is CoreResult.Err -> "Couldn't test: ${r.message}"
+        }
     }
 }
 
