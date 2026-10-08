@@ -18,6 +18,14 @@ class SettingsActivity : Activity() {
 
     private lateinit var ui: Inkwell
 
+    /**
+     * The last Test connection result per "role/provider" (F10-FR5: shown until the next test),
+     * and the view currently showing each. render() rebuilds every view, so results are kept
+     * here and re-applied, and a late result is written to whichever view is current.
+     */
+    private val results = mutableMapOf<String, String>()
+    private val resultViews = mutableMapOf<String, TextView>()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
@@ -36,6 +44,7 @@ class SettingsActivity : Activity() {
 
     /** Rebuilds the page after each choice; e-ink redraws once per tap, never animates. */
     private fun render() {
+        resultViews.clear()
         val column = ui.column().apply {
             addView(ui.header("Back"))
             addView(ui.spacer(ui.dim(28)))
@@ -103,19 +112,32 @@ class SettingsActivity : Activity() {
 
     /**
      * F10-FR5 / F1-FR9: Test connection runs in the core, off the UI thread. The result's
-     * `detail` stays on screen until the next test; nothing is stored. The JSON never holds a key.
+     * `detail` stays on screen until the next test; it is never saved. The JSON never holds a key.
      */
-    private fun testConnection(role: String, provider: String, result: TextView) {
-        result.text = "Testing…"
+    private fun testConnection(role: String, provider: String) {
+        val key = "$role/$provider"
+        showResult(key, "Testing…")
         val dir = filesDir.absolutePath
         CoreJobs.run({
             // The process can restart straight into Settings; nativeInit is idempotent and cheap.
-            NativeBridge.nativeInit(dir)
-            NativeBridge.nativeTestConnection(role, provider)
+            // If it fails, show why rather than the core's "nativeInit has not run".
+            val init = NativeBridge.nativeInit(dir)
+            if (isError(init)) init else NativeBridge.nativeTestConnection(role, provider)
         }) { json ->
             Log.i("Meetings", json)
-            if (!isDestroyed) result.text = resultText(json)
+            if (!isDestroyed) showResult(key, resultText(json))
         }
+    }
+
+    private fun showResult(key: String, text: String) {
+        results[key] = text
+        resultViews[key]?.text = text
+    }
+
+    private fun isError(json: String): Boolean = try {
+        JSONObject(json).has("error")
+    } catch (e: Exception) {
+        true
     }
 
     /** The line to show: the result's `detail`, else the core's `error`. */
@@ -149,7 +171,10 @@ class SettingsActivity : Activity() {
             addView(ui.hairline())
             val chosen = MockSettings.provider(current)
             val model = if (title == "Transcription") chosen.model else if (chosen.id == "openai") "gpt-4o-mini" else chosen.model
-            val result: TextView = ui.note("", 13f).apply { setPadding(0, 0, 0, ui.dim(6)) }
+            val role = if (title == "Transcription") "transcribe" else "summarise"
+            val resultKey = "$role/$current"
+            val result: TextView = ui.note(results[resultKey] ?: "", 13f).apply { setPadding(0, 0, 0, ui.dim(6)) }
+            resultViews[resultKey] = result
             addView(LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -160,8 +185,7 @@ class SettingsActivity : Activity() {
                     addView(ui.body(model, 16f), ui.wrap().apply { topMargin = ui.dim(4) })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 // F10-FR5: the core lists models with the key (no audio, no cost).
-                val role = if (title == "Transcription") "transcribe" else "summarise"
-                addView(ui.pill("Test connection", size = 15f) { testConnection(role, current, result) })
+                addView(ui.pill("Test connection", size = 15f) { testConnection(role, current) })
             })
             addView(result)
             if (footnote != null) addView(ui.note(footnote, 13f, ui.textMuted).apply { setPadding(0, 0, 0, ui.dim(10)) })
