@@ -91,6 +91,14 @@ class PresentersTest {
         assertEquals(null, job(Status.RECORDING))
     }
 
+    @Test fun transcribingWithNoJobHereOffersTranscribe() { // INV8, S3: a screen restored after a crash
+        val a = Actions.of(sc(Status.TRANSCRIBING, texts = listOf("a", null)), jobRunning = false, found, found)
+        assertEquals(Actions.Job.TRANSCRIBE, a.primary)
+        assertTrue(a.primaryEnabled)
+        assertEquals(null, a.progress)
+        assertFalse(a.canCancel)
+    }
+
     @Test fun progressAndCancel() {
         val a = Actions.of(sc(Status.TRANSCRIBING, texts = listOf("a", null, null)), true, found, found)
         assertEquals("Transcribing 2/3", a.progress)

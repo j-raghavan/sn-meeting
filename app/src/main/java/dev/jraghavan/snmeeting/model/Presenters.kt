@@ -130,8 +130,10 @@ data class Actions(
             }
             return when {
                 m.status == Status.RECORDING -> Actions(null, false, "Recording…", false, null, false)
-                m.status == Status.TRANSCRIBING ->
-                    Actions(null, false, transcribing(m), jobRunning, "You can leave this screen; it carries on.", false)
+                m.status == Status.TRANSCRIBING && jobRunning ->
+                    Actions(null, false, transcribing(m), true, "You can leave this screen; it carries on.", false)
+                // No job here (a screen restored after the process died): resume it (INV8).
+                m.status == Status.TRANSCRIBING -> offer(Job.TRANSCRIBE, transcribeKey, "Transcription was interrupted.")
                 jobRunning -> Actions(null, false, "Summarising…", true, "You can leave this screen; it carries on.", false)
                 m.status == Status.RECORDED || (m.status == Status.FAILED && m.failedAt != FailedAt.SUMMARISING) ->
                     offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.")
