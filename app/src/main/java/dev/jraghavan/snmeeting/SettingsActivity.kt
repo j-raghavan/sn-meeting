@@ -258,7 +258,7 @@ class SettingsActivity : Activity() {
             val init = NativeBridge.nativeInit(dir)
             if (CoreJson.ok(init) is CoreResult.Err) init else NativeBridge.nativeTestConnection(role, provider)
         }) { json -> if (!isDestroyed) showResult(key, TestResult.line(json)) }
-        if (started) showResult(key, "Testing…")
+        if (started) showResult(key, "Checking…")
     }
 
     private fun showResult(key: String, text: String) {
