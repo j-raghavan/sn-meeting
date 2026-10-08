@@ -264,3 +264,28 @@ fn unicode_forms_match() {
     assert!(s.todos[0].done);
     assert_eq!(s.todos[0].owner.as_deref(), Some("me"));
 }
+
+#[test]
+fn todos_are_capped_by_dropping_the_oldest_done_ones() {
+    // N6: at most 300 per meeting; open ones are never dropped.
+    let mut s = sc();
+    let mut ids = counter();
+    let batch = |from: usize, n: usize| {
+        (from..from + n)
+            .map(|i| todo(&format!("task {i}"), None, None))
+            .collect()
+    };
+    merge(&mut s, x(None, batch(0, 200)), "t1", &mut ids);
+    for t in s.todos.iter_mut().take(150) {
+        t.done = true; // task 0..149 done
+    }
+    merge(&mut s, x(None, batch(200, 150)), "t2", &mut ids);
+    assert_eq!(s.todos.len(), summarise::MAX_TODOS);
+    // 350 merged: the 50 oldest done ones went, every open one stayed.
+    assert_eq!(s.todos[0].text, "task 50");
+    assert_eq!(s.todos.iter().filter(|t| !t.done).count(), 200);
+    // More open ones than the cap: all kept, every done one dropped.
+    merge(&mut s, x(None, batch(350, 150)), "t3", &mut ids);
+    assert!(s.todos.iter().all(|t| !t.done));
+    assert_eq!(s.todos.len(), 350);
+}

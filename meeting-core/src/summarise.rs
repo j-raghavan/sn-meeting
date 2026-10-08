@@ -233,10 +233,14 @@ pub fn new_todo_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()[..16].to_owned()
 }
 
+/// The most to-dos one meeting keeps (N6): past it the oldest done ones go; open ones never.
+pub const MAX_TODOS: usize = 300;
+
 /// F5-FR5: merge, never replace. A returned TODO matching a stored one by normalised text
 /// keeps its id, `done`, `firstSeen` and wording, and takes a new owner/due only when one is
-/// given; a new one gets `new_id()` and `first_seen`. TODOs not returned are kept. The title is
-/// taken unless the user named the meeting; summary, decisions and sections are replaced.
+/// given; a new one gets `new_id()` and `first_seen`. TODOs not returned are kept, up to
+/// [`MAX_TODOS`]. The title is taken unless the user named the meeting; summary, decisions and
+/// sections are replaced.
 pub fn merge(
     sc: &mut Sidecar,
     x: Extraction,
@@ -285,6 +289,13 @@ pub fn merge(
             }),
         }
     }
+    // N6: the list is oldest first; drop done ones from the front until within the cap.
+    let mut excess = sc.todos.len().saturating_sub(MAX_TODOS);
+    sc.todos.retain(|t| {
+        let drop = excess > 0 && t.done;
+        excess -= usize::from(drop);
+        !drop
+    });
 }
 
 #[cfg(test)]
