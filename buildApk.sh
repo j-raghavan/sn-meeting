@@ -166,7 +166,9 @@ audio_recording_state() {
         /RecordActivityMonitor/ { insec = 1; seen = 1; state = "?"; next }
         insec && (tolower($0) ~ /event log/ || /^[A-Z]/) { insec = 0 }
         !insec { next }
-        /^[ \t]*riid / { state = ($0 ~ /active true/) ? "on" : "off"; next }
+        # riid -1 is the AOSP "invalid" id, for clients it could not track: counted as
+        # recording whatever its active flag says, so the guard asks rather than passes.
+        /^[ \t]*riid / { state = ($0 ~ /active true/ || $0 ~ /^[ \t]*riid -1[^0-9]/) ? "on" : "off"; next }
         {
             i = index($0, pkg)
             if (i && substr($0, i + length(pkg), 1) !~ /[A-Za-z0-9._]/ && state != "off") active = 1

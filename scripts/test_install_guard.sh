@@ -53,6 +53,12 @@ $ours$events")"
 check "inactive riid, our package"   no      "$(state "$IDLE_SERVICES" "$header
 riid 9; active false
 $ours$events")"
+check "riid -1, our package"         yes     "$(state "$IDLE_SERVICES" "$header
+riid -1; active false
+$ours$events")"
+check "riid -12, our package"        no      "$(state "$IDLE_SERVICES" "$header
+riid -12; active false
+$ours$events")"
 check "no riid lines (older format)" yes     "$(state "$IDLE_SERVICES" "$header
 $ours")"
 check "only the event log names us"  no      "$(state "$IDLE_SERVICES" "$header$events")"
