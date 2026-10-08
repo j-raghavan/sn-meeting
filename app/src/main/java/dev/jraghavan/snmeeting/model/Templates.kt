@@ -96,3 +96,17 @@ data class TemplateDraft(
         }
     }
 }
+
+/** F11-FR5: which of Reset / Duplicate / Delete a template offers. */
+data class TemplateActions(val reset: Boolean, val delete: Boolean) {
+    companion object {
+        /** Reset for a built-in with a user file (customised, or a copy with an error); Delete for YOURS. */
+        fun of(t: TemplateRow) = TemplateActions(reset = t.builtin && t.path != null, delete = t.origin == TemplateOrigin.YOURS)
+
+        /** "Stand-up (copy)", kept within the 60-character name limit. */
+        fun copyName(name: String): String {
+            val suffix = " (copy)"
+            return name.take(60 - suffix.length).trimEnd() + suffix
+        }
+    }
+}

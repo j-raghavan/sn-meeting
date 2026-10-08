@@ -51,4 +51,14 @@ class TemplatesTest {
         assertEquals("general-3", TemplateDraft.slug("General", listOf("general", "general-2")))
         assertEquals(56, TemplateDraft.slug("a".repeat(100), emptyList()).length)
     }
+
+    @Test fun resetDuplicateDelete() {
+        assertEquals(TemplateActions(reset = true, delete = false), TemplateActions.of(row("standup", TemplateOrigin.CUSTOMISED).copy(path = "/s/standup.md")))
+        assertEquals(TemplateActions(reset = false, delete = false), TemplateActions.of(row("general")))
+        // A built-in whose user copy has an error: reset deletes the broken file.
+        assertEquals(true, TemplateActions.of(row("lecture", problem = "Your copy has an error on line 3; using the built-in").copy(path = "/s/lecture.md")).reset)
+        assertEquals(TemplateActions(reset = false, delete = true), TemplateActions.of(row("retro", TemplateOrigin.YOURS).copy(path = "/s/retro.md")))
+        assertEquals("Stand-up (copy)", TemplateActions.copyName("Stand-up"))
+        assertEquals(60, TemplateActions.copyName("n".repeat(60)).length)
+    }
 }

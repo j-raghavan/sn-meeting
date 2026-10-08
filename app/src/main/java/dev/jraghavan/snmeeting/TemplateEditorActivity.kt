@@ -11,6 +11,7 @@ import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.TemplateActions
 import dev.jraghavan.snmeeting.model.TemplateDraft
 import dev.jraghavan.snmeeting.model.TemplateOrigin
 import dev.jraghavan.snmeeting.model.TemplateRow
@@ -127,6 +128,10 @@ class TemplateEditorActivity : Activity() {
             }, ui.fullWidth())
             addView(status, ui.fullWidth().apply { topMargin = ui.dim(12) })
             addView(preview, ui.fullWidth())
+            if (t != null) {
+                addView(ui.spacer(ui.dim(28)))
+                addView(links(t), ui.fullWidth())
+            }
 
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(24)))
@@ -188,6 +193,65 @@ class TemplateEditorActivity : Activity() {
                     status.text = "Saved to MyStyle/Meetings/templates/${r.value.id}.md"
                 }
                 is CoreResult.Err -> showError(r)
+            }
+        }
+    }
+
+    /** Reset to built-in · Duplicate · Delete, as muted mono links (F11-FR5). */
+    private fun links(t: TemplateRow): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        val a = TemplateActions.of(t)
+        val links = mutableListOf<Pair<String, () -> Unit>>()
+        if (a.reset) links += "Reset to built-in" to { reset(t) }
+        links += "Duplicate" to { duplicate() }
+        if (a.delete) links += "Delete" to { delete(t) }
+        links.forEachIndexed { i, (label, action) ->
+            addView(ui.eyebrow(label, ui.textMuted).apply {
+                isClickable = true; setOnClickListener { action() }
+                setPadding(ui.dim(14), ui.dim(8), ui.dim(14), ui.dim(8))
+            })
+            if (i < links.size - 1) addView(ui.eyebrow("·", ui.textMuted))
+        }
+    }
+
+    /** F11-AC4: deletes the user copy; the built-in text is back. */
+    private fun reset(t: TemplateRow) {
+        InkDialog.confirm(this, "Reset ${t.name}?", "Your copy in MyStyle/Meetings/templates is deleted and the built-in text is used again.", "Reset") {
+            scope.core({ NativeBridge.nativeResetTemplate(t.id) }) { reply ->
+                (CoreJson.ok(reply) as? CoreResult.Err)?.let { return@core InkDialog.error(this, "Couldn't reset it", it.message) }
+                scope.core({ NativeBridge.nativeGetTemplate(t.id) }) { json ->
+                    CoreJson.obj(json, TemplateRow::from).getOrNull()?.let { saved = it; draft = TemplateDraft.of(it); render() }
+                    status.text = "Your copy was removed; the built-in is back."
+                }
+            }
+        }
+    }
+
+    /** A new user template from this one, as typed, under a new id; the editor moves to it. */
+    private fun duplicate() {
+        val name = TemplateActions.copyName(current().name)
+        val copy = current().copy(id = TemplateDraft.slug(name, ids), name = name)
+        scope.core({ NativeBridge.nativeSaveTemplate(copy.json()) }) { reply ->
+            when (val r = CoreJson.obj(reply, TemplateRow::from)) {
+                is CoreResult.Ok -> {
+                    saved = r.value; draft = TemplateDraft.of(r.value); ids = ids + r.value.id
+                    render()
+                    status.text = "Duplicated as ${r.value.name}"
+                }
+                is CoreResult.Err -> showError(r)
+            }
+        }
+    }
+
+    /** A YOURS template: its file is deleted (nativeResetTemplate deletes a user-only template). */
+    private fun delete(t: TemplateRow) {
+        InkDialog.confirm(this, "Delete ${t.name}?", "Its file in MyStyle/Meetings/templates is deleted. Meetings that used it use General meeting.", "Delete") {
+            scope.core({ NativeBridge.nativeResetTemplate(t.id) }) { reply ->
+                when (val r = CoreJson.ok(reply)) {
+                    is CoreResult.Ok -> finish()
+                    is CoreResult.Err -> InkDialog.error(this, "Couldn't delete it", r.message)
+                }
             }
         }
     }
