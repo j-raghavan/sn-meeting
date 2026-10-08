@@ -68,6 +68,17 @@ pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, Settings
     if !inside(probe) {
         return Err(outside());
     }
+    // Before creating anything: where the folder will really be is the existing part, resolved
+    // through any links, plus the parts still to create (a link Document → MyStyle/SnCopilot
+    // must not get MyStyle/SnCopilot/Meetings made).
+    let existing = probe.canonicalize().map_err(|_| outside())?;
+    let rest = full.strip_prefix(probe).map_err(|_| outside())?;
+    let target = existing.join(rest);
+    let target_parts: Vec<&str> = match target.strip_prefix(&canon_root) {
+        Ok(r) => r.iter().filter_map(|c| c.to_str()).collect(),
+        Err(_) => return Err(outside()),
+    };
+    check_forbidden(&target_parts)?;
     std::fs::create_dir_all(&full)
         .map_err(|e| err(F, format!("can't create the folder: {}", e.kind())))?;
     // ... and so must the folder itself, now that it exists (a link to a forbidden folder).

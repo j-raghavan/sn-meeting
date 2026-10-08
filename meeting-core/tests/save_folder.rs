@@ -213,3 +213,25 @@ fn moving_folders_remembers_the_old_ones_newest_first() {
         ["export/SN-meeting", "Custom/A", "Document/Meetings"].map(|f| root.path().join(f))
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_into_sncopilot_creates_nothing_there() {
+    use std::os::unix::fs::symlink;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    fs::create_dir_all(root.join("MyStyle/SnCopilot")).unwrap();
+    fs::create_dir_all(root.join("MyStyle/Meetings/templates")).unwrap();
+    symlink(root.join("MyStyle/SnCopilot"), root.join("Document")).unwrap();
+    symlink(root.join("MyStyle/Meetings"), root.join("Notes")).unwrap();
+    let refused = Err("can't save into MyStyle/SnCopilot or MyStyle/Meetings/templates".into());
+    assert_eq!(check(root, "Document/Meetings"), refused);
+    assert!(
+        !root.join("MyStyle/SnCopilot/Meetings").exists(),
+        "nothing created"
+    );
+    assert_eq!(check(root, "Notes/templates/new/deeper"), refused);
+    assert!(!root.join("MyStyle/Meetings/templates/new").exists());
+    // A link to a harmless part of MyStyle/Meetings is fine.
+    assert_eq!(check(root, "Notes/archive"), Ok("Notes/archive".into()));
+}
