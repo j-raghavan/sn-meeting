@@ -77,7 +77,12 @@ fn the_sources_build_clients_only_in_http_client() {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     sources(&base, &base, &mut files);
-    for nested in ["library/mod.rs", "settings/mod.rs", "providers.rs"] {
+    for nested in [
+        "library/mod.rs",
+        "settings/mod.rs",
+        "providers.rs",
+        "providers/calls.rs",
+    ] {
         assert!(
             files.iter().any(|(n, _)| n == nested),
             "scan missed {nested}"
@@ -133,4 +138,25 @@ fn struct_defaults_and_comments_are_not_flagged() {
     ] {
         assert_eq!(violations("app.rs", f), Vec::<String>::new(), "{f}");
     }
+}
+
+/// R8 / ADR D1: rig and reqwest are named only inside the providers module (`providers.rs`
+/// and its submodules), so swapping the provider library touches one module.
+#[test]
+fn only_the_providers_module_names_rig_or_reqwest() {
+    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut files = Vec::new();
+    sources(&base, &base, &mut files);
+    let outside: Vec<&String> = files
+        .iter()
+        .filter(|(n, _)| n != "providers.rs" && !n.starts_with("providers/"))
+        .filter(|(_, s)| {
+            let c = code(s);
+            ["rig_core", "rig_reqwest", "reqwest::"]
+                .iter()
+                .any(|w| c.contains(w))
+        })
+        .map(|(n, _)| n)
+        .collect();
+    assert!(outside.is_empty(), "{outside:?}");
 }

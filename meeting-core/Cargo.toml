@@ -29,4 +29,4 @@ jni-bridge = ["dep:jni"]
 [dev-dependencies]
 wiremock = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "test-util"] }
