@@ -16,6 +16,10 @@ pub struct Recovery {
     pub measure: Vec<Measure>,
     /// Segments newly found missing or empty: flagged (an open one closed at 0 ms), never deleted.
     pub flagged: Vec<Flagged>,
+    /// Recorded meetings with no segment at all, newly marked "No audio was recorded".
+    /// Additive: omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub no_audio: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -75,16 +79,26 @@ impl Library<'_> {
                 }
                 moved = true;
             }
+            let empty = sc.status == Status::Recorded
+                && sc.segments.is_empty()
+                && sc.error.as_deref() != Some(crate::pipeline::NO_AUDIO);
+            if empty {
+                sc.error = Some(crate::pipeline::NO_AUDIO.into());
+            }
             let (flagged, measure) = if sc.status == Status::Recorded {
                 check_segments(&id, &f.dir, &mut sc)
             } else {
                 (Vec::new(), Vec::new())
             };
-            if (moved || canonical || !flagged.is_empty()) && sidecar::write(&f.dir, &sc).is_err() {
+            let changed = moved || canonical || empty || !flagged.is_empty();
+            if changed && sidecar::write(&f.dir, &sc).is_err() {
                 continue; // not recovered after all; the next launch tries again
             }
             if moved {
-                r.recovered.push(id);
+                r.recovered.push(id.clone());
+            }
+            if empty {
+                r.no_audio.push(id);
             }
             r.flagged.extend(flagged);
             r.measure.extend(measure);

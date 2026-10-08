@@ -245,3 +245,40 @@ fn failed_without_failed_at_is_normalised() {
     assert_eq!(sa.failed_at, Some(meeting::status::FailedAt::Transcribing));
     assert_eq!(read_sidecar(&dir, &b).failed_at, None);
 }
+
+#[test]
+fn zero_segment_recording_is_flagged() {
+    let e = Env::new();
+    let app = e.app();
+    let id = begin(&app, T0)["id"].as_str().unwrap().to_owned();
+    app.finish_json(&id, 0, "");
+    let dir = e.export();
+    let mut sc = read_sidecar(&dir, &id);
+    sc.segments.clear();
+    meeting::sidecar::write(&dir, &sc).unwrap();
+    let r = recover(&app, false);
+    assert_eq!(r["noAudio"], json!([id]));
+    assert_eq!(
+        read_sidecar(&dir, &id).error.as_deref(),
+        Some("No audio was recorded")
+    );
+    assert!(
+        recover(&app, false).get("noAudio").is_none(),
+        "flagged once"
+    );
+    // Transcribe fails cleanly without sending anything.
+    let keys = e.data.path().join("no-keys");
+    fs::create_dir_all(&keys).unwrap();
+    fs::write(
+        keys.join("copilot-key-openai.txt"),
+        "provider=openai\nkey=sk-x\nmodel=m\n",
+    )
+    .unwrap();
+    let out = parse(&app.run_job_json(&id, meeting::app::Job::Transcribe));
+    let m = &out["meeting"];
+    assert_eq!(
+        (m["status"].as_str(), m["failedAt"].as_str()),
+        (Some("failed"), Some("transcribing"))
+    );
+    assert_eq!(m["error"], "No audio was recorded");
+}

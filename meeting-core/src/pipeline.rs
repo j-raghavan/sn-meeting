@@ -13,6 +13,9 @@ use std::sync::{Mutex, PoisonError};
 mod summary;
 pub use summary::{context, summarise};
 
+/// A meeting with no segment at all (a recording that never produced a file).
+pub const NO_AUDIO: &str = "No audio was recorded";
+
 /// OpenAI's per-file cap (C3). The recorder's plan keeps segments far below it (F2-FR5), so a
 /// bigger file is not sent at all.
 pub const MAX_AUDIO_BYTES: u64 = 25 * 1024 * 1024;
@@ -78,7 +81,7 @@ pub async fn transcribe(
             "no transcribe provider".into(),
         )));
     };
-    let (dir, pending, tid) = locked(lock, || {
+    let (dir, pending, tid, no_audio) = locked(lock, || {
         lib.update(id, |sc, dir| {
             let p = status::next(library::phase(sc), Event::StartTranscribe)?;
             library::set_phase(sc, p);
@@ -90,11 +93,15 @@ pub async fn transcribe(
                 model: model.clone(),
                 extra: Default::default(),
             });
-            Ok((dir.to_path_buf(), pending(sc), sc.template_id.clone()))
+            let none = sc.segments.is_empty();
+            Ok((dir.to_path_buf(), pending(sc), sc.template_id.clone(), none))
         })
     })
     .map_err(JobError::NotStarted)?;
     let fail = |msg: String| finish(lib, lock, id, Event::TranscribeFailed, Some(msg));
+    if no_audio {
+        return fail(NO_AUDIO.into());
+    }
     let vocabulary = vocabulary(plan, tid.as_deref().unwrap_or_default());
     for seg in pending {
         if cancel.is_cancelled() {
