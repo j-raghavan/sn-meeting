@@ -23,6 +23,9 @@ JDK="$(gradle_jdk_home)" || die "Gradle needs JDK 17–21. Install JDK 21 or set
 step "cargo fmt --check";            cargo fmt --check
 step "cargo clippy";                 cargo clippy --all-targets -- -D warnings
 step "cargo clippy (jni-bridge)";    cargo clippy --all-targets --features jni-bridge -- -D warnings
+# --all-targets unifies dev-dependency features into the library; build it alone too, as
+# buildApk.sh does, so a feature only dev-dependencies enable can't hide.
+step "cargo build (library alone)";  cargo build -p meeting-core --lib --features jni-bridge
 step "cargo test";                   cargo test -p meeting-core
 step "cargo llvm-cov (>= 97% lines)"
 cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex 'meeting-core/src/jni\.rs$'
