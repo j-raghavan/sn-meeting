@@ -7,6 +7,8 @@ pub mod providers;
 pub mod runtime;
 pub mod scrub;
 pub mod settings;
+pub mod sidecar;
+pub mod status;
 
 #[cfg(feature = "jni-bridge")]
 mod jni;
