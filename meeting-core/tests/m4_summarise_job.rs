@@ -438,3 +438,54 @@ fn a_template_chosen_mid_job_is_kept() {
     fx.run(Job::Summarise);
     assert_eq!(fx.meeting()["templateId"], "general");
 }
+
+#[test]
+fn the_fallback_note_is_added_once() {
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    let mut sc = read_sidecar(&fx.dir, &fx.id);
+    sc.template_id = Some("gone".into());
+    meeting::sidecar::write(&fx.dir, &sc).unwrap();
+    fx.run(Job::Transcribe);
+    let note = "Template gone was not found; used General meeting";
+    assert_eq!(fx.meeting()["note"], note);
+    // The meeting now names General; set the gone one again and summarise twice more.
+    for _ in 0..2 {
+        let mut sc = read_sidecar(&fx.dir, &fx.id);
+        sc.template_id = Some("gone".into());
+        meeting::sidecar::write(&fx.dir, &sc).unwrap();
+        fx.run(Job::Summarise);
+    }
+    assert_eq!(fx.meeting()["note"], note, "not repeated");
+}
+
+#[test]
+fn a_transcript_that_cant_be_saved_fails_summarising() {
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    // A directory where the transcript file goes: the atomic write can't replace it.
+    std::fs::create_dir_all(fx.dir.join(format!("{}.transcript.md", fx.id)).join("x")).unwrap();
+    let m = fx.run(Job::Transcribe)["meeting"].clone();
+    assert_eq!(
+        (m["status"].as_str(), m["failedAt"].as_str()),
+        (Some("failed"), Some("summarising"))
+    );
+    let err = m["error"].as_str().unwrap();
+    assert!(err.starts_with("The transcript can't be saved ("), "{err}");
+    assert!(m["title"].is_null(), "the merge was not written either");
+}
+
+#[test]
+fn a_bluetooth_mic_is_named_in_the_layout() {
+    let fx = fixture(&["openai", "anthropic"]);
+    let mut sc = read_sidecar(&fx.dir, &fx.id);
+    sc.mic = Some(
+        serde_json::from_value(json!({"kind": "bluetooth", "name": "Jabra Evolve2"})).unwrap(),
+    );
+    let tpl = &meeting::templates::builtins()[0];
+    let started = chrono::DateTime::parse_from_rfc3339(&sc.started_at).unwrap();
+    let ctx = meeting::pipeline::context(&sc, tpl, &started);
+    assert_eq!(ctx.mic, "Bluetooth — Jabra Evolve2");
+    sc.mic = None; // legacy audio
+    assert_eq!(meeting::pipeline::context(&sc, tpl, &started).mic, "");
+}
