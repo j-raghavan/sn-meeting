@@ -133,5 +133,6 @@ class TemplateEditorActivity : Activity() {
 
     companion object {
         const val EXTRA_ID = "template_id"
+        const val EXTRA_NEW = "template_new"
     }
 }
