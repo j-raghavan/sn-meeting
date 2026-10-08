@@ -19,6 +19,9 @@ const LEGAL: &[(Phase, Event, Phase)] = &[
     (P::Done, Event::SummariseFailed, P::Failed(S)),
     (P::Failed(T), Event::StartTranscribe, P::Transcribing),
     (P::Failed(S), Event::StartSummarise, P::Transcribed),
+    // F5-FR13: Transcribe again clears the segment texts and starts over.
+    (P::Transcribed, Event::TranscribeAgain, P::Transcribing),
+    (P::Done, Event::TranscribeAgain, P::Transcribing),
 ];
 
 #[test]
@@ -37,7 +40,7 @@ fn the_table_is_exhaustive() {
         }
     }
     assert_eq!(legal, LEGAL.len());
-    assert_eq!(Phase::ALL.len() * Event::ALL.len(), 63);
+    assert_eq!(Phase::ALL.len() * Event::ALL.len(), 70);
 }
 
 /// INV8: every phase has a job action, or is in progress and recovery leads to one.
@@ -70,15 +73,22 @@ fn parts_round_trip_and_failed_defaults_to_transcribing() {
 }
 
 /// F7-FR2: Transcribe for recorded and failed(transcribing); Summarise again for transcribed,
-/// done and failed(summarising); recording and transcribing are in progress.
+/// done and failed(summarising), with Transcribe again for transcribed and done (F5-FR13);
+/// recording and transcribing are in progress.
 #[test]
 fn the_meeting_screen_actions() {
     let want: [(Phase, Option<&[Action]>); 7] = [
         (P::Recording, None),
         (P::Recorded, Some(&[Action::Transcribe])),
         (P::Transcribing, None),
-        (P::Transcribed, Some(&[Action::SummariseAgain])),
-        (P::Done, Some(&[Action::SummariseAgain])),
+        (
+            P::Transcribed,
+            Some(&[Action::SummariseAgain, Action::TranscribeAgain]),
+        ),
+        (
+            P::Done,
+            Some(&[Action::SummariseAgain, Action::TranscribeAgain]),
+        ),
         (P::Failed(T), Some(&[Action::Transcribe])),
         (P::Failed(S), Some(&[Action::SummariseAgain])),
     ];
@@ -94,7 +104,7 @@ fn illegal_pairs_are_named() {
         .flat_map(|f| Event::ALL.iter().map(move |e| next(*f, *e)))
         .filter(Result::is_err)
         .count();
-    assert_eq!(illegal, 49);
+    assert_eq!(illegal, 54);
     let e = next(P::Done, Event::Stop).unwrap_err();
     assert_eq!(e.to_string(), "Stop is not allowed while Done");
 }

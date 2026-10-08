@@ -228,6 +228,11 @@ pub fn transcribe(id: &str) -> String {
     with_app(|app| app.run_job_json(id, crate::app::Job::Transcribe))
 }
 
+/// `nativeTranscribeAgain(id)` (F5-FR13): every segment again, then summarise. Blocking.
+pub fn transcribe_again(id: &str) -> String {
+    with_app(|app| app.run_job_json(id, crate::app::Job::TranscribeAgain))
+}
+
 /// `nativeSummarise(id)`: "Summarise again" (F5-FR8). Blocking.
 pub fn summarise(id: &str) -> String {
     with_app(|app| app.run_job_json(id, crate::app::Job::Summarise))

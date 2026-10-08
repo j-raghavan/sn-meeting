@@ -32,6 +32,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("deleteMeeting", api::delete_meeting("x")),
         ("recover", api::recover(true)),
         ("transcribe", api::transcribe("x")),
+        ("transcribeAgain", api::transcribe_again("x")),
         ("summarise", api::summarise("x")),
         ("cancel", api::cancel("x")),
         ("listTemplates", api::list_templates()),

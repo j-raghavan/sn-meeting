@@ -87,10 +87,12 @@ pub enum Event {
     /// TODOs merged and the transcript rendered (F5-FR5).
     SummariseOk,
     SummariseFailed,
+    /// "Transcribe again" from `transcribed` or `done` (F5-FR13): segment texts are cleared.
+    TranscribeAgain,
 }
 
 impl Event {
-    pub const ALL: [Event; 9] = [
+    pub const ALL: [Event; 10] = [
         Event::Stop,
         Event::RecoverNoService,
         Event::RecoverNoJob,
@@ -100,6 +102,7 @@ impl Event {
         Event::StartSummarise,
         Event::SummariseOk,
         Event::SummariseFailed,
+        Event::TranscribeAgain,
     ];
 }
 
@@ -126,6 +129,7 @@ pub fn next(from: Phase, event: Event) -> Result<Phase, Illegal> {
         (P::Done, E::StartSummarise) => P::Done,
         (P::Transcribed | P::Done, E::SummariseOk) => P::Done,
         (P::Transcribed | P::Done, E::SummariseFailed) => P::Failed(Summarising),
+        (P::Transcribed | P::Done, E::TranscribeAgain) => P::Transcribing,
         _ => return Err(Illegal { from, event }),
     };
     Ok(to)
@@ -136,6 +140,8 @@ pub fn next(from: Phase, event: Event) -> Result<Phase, Illegal> {
 pub enum Action {
     Transcribe,
     SummariseAgain,
+    /// F5-FR13.
+    TranscribeAgain,
 }
 
 /// `None` = in progress (a live service or job owns it). Play, rename and delete are always
@@ -144,8 +150,9 @@ pub fn job_actions(p: Phase) -> Option<&'static [Action]> {
     match p {
         Phase::Recording | Phase::Transcribing => None,
         Phase::Recorded | Phase::Failed(FailedAt::Transcribing) => Some(&[Action::Transcribe]),
-        Phase::Transcribed | Phase::Done | Phase::Failed(FailedAt::Summarising) => {
-            Some(&[Action::SummariseAgain])
+        Phase::Transcribed | Phase::Done => {
+            Some(&[Action::SummariseAgain, Action::TranscribeAgain])
         }
+        Phase::Failed(FailedAt::Summarising) => Some(&[Action::SummariseAgain]),
     }
 }

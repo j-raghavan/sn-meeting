@@ -605,3 +605,43 @@ fn rewriting_the_transcript_reports_what_stops_it() {
         Err("meeting not found".into())
     );
 }
+
+#[test]
+fn transcribe_again_replaces_the_texts_and_keeps_todos_and_titles() {
+    // F5-FR13.
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    fx.run(Job::Transcribe);
+    let todo = fx.meeting()["todos"][0]["id"].as_str().unwrap().to_owned();
+    fx.app.set_todo_done_json(&fx.id, &todo, true);
+    fx.app.rename_json(&fx.id, "My title");
+    fx.reset();
+    for n in 1..=2 {
+        let m = Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .and(body_string_contains(format!("-0{n}.m4a")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(json!({"text": format!("again {n}")})),
+            );
+        fx.rt.block_on(m.mount(&fx.s));
+    }
+    fx.summary(anthropic(SUMMARY));
+    let m = fx.run(Job::TranscribeAgain)["meeting"].clone();
+    assert_eq!(m["status"], "done", "{m}");
+    assert_eq!(m["segments"][0]["text"], "again 1");
+    assert_eq!(m["segments"][1]["text"], "again 2");
+    assert_eq!(m["title"], "My title");
+    assert_eq!(m["todos"].as_array().unwrap().len(), 1);
+    assert_eq!(m["todos"][0]["done"], true, "a ticked to-do stays ticked");
+    assert!(fx.transcript().contains("[0:15:00] again 2"));
+    assert_eq!(fx.requests("/v1/messages").len(), 1, "summarised again");
+}
+
+#[test]
+fn transcribe_again_is_only_offered_once_transcribed() {
+    let fx = fixture(&["openai", "anthropic"]);
+    assert_eq!(
+        fx.run(Job::TranscribeAgain),
+        json!({"error": "Transcribe again isn't available while recorded"})
+    );
+}

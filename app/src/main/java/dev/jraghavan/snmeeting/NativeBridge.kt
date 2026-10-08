@@ -81,6 +81,10 @@ object NativeBridge {
      */
     external fun nativeTranscribe(id: String): String
 
+    /** "Transcribe again" from transcribed or done: clears the segment texts (to-dos and titles
+     *  stay), transcribes every segment, then summarises. Blocking, same replies as [nativeTranscribe]. */
+    external fun nativeTranscribeAgain(id: String): String
+
     /** "Summarise again" on the stored transcript; blocking, same replies as [nativeTranscribe]. */
     external fun nativeSummarise(id: String): String
 

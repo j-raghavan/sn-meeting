@@ -18,6 +18,8 @@ pub enum Job {
     Transcribe,
     /// "Summarise again" on the stored transcript (F5-FR8).
     Summarise,
+    /// "Transcribe again" (F5-FR13): every segment again, then summarise.
+    TranscribeAgain,
 }
 
 impl Job {
@@ -25,6 +27,7 @@ impl Job {
         match self {
             Job::Transcribe => "Transcribe",
             Job::Summarise => "Summarise again",
+            Job::TranscribeAgain => "Transcribe again",
         }
     }
 }
@@ -80,7 +83,7 @@ impl App {
         let (s, _) = self.settings();
         let http = providers::http_client(jobs::CONNECT_TIMEOUT, self.core.https_only)?;
         let (transcribe, transcribe_fallback) = match job {
-            Job::Transcribe => {
+            Job::Transcribe | Job::TranscribeAgain => {
                 let (key, mut model, source) = self.pick(&s, Role::Transcribe)?;
                 // D2: the account's listing picks the model when none is chosen, and the
                 // fallback when the chosen one is refused (D1).
@@ -101,7 +104,7 @@ impl App {
         // again needs one (F7-FR2).
         let (summarise, summarise_problem) = match self.pick(&s, Role::Summarise) {
             Ok((k, m, _)) => (Some((k, m)), None),
-            Err(e) if job == Job::Transcribe => (None, Some(e)),
+            Err(e) if job != Job::Summarise => (None, Some(e)),
             Err(e) => return Err(e),
         };
         let summarise_fallback = summarise
@@ -141,6 +144,9 @@ impl App {
             match job {
                 Job::Transcribe => pipeline::transcribe(&lib, &self.write, id, &plan, cancel).await,
                 Job::Summarise => pipeline::summarise(&lib, &self.write, id, &plan, cancel).await,
+                Job::TranscribeAgain => {
+                    pipeline::transcribe_again(&lib, &self.write, id, &plan, cancel).await
+                }
             }
         });
         drop(guard);

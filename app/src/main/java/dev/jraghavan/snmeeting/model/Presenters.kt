@@ -120,8 +120,12 @@ data class SummaryCard(val summary: String?, val decisions: List<String>, val se
 data class Actions(
     val primary: Job?, val primaryEnabled: Boolean, val progress: String?, val canCancel: Boolean,
     val note: String?, val canDelete: Boolean,
+    /** F5-FR13: Transcribe again, beside Summarise again once there is a transcript. */
+    val secondary: Job? = null,
 ) {
-    enum class Job(val label: String) { TRANSCRIBE("Transcribe"), SUMMARISE("Summarise again") }
+    enum class Job(val label: String) {
+        TRANSCRIBE("Transcribe"), SUMMARISE("Summarise again"), TRANSCRIBE_AGAIN("Transcribe again"),
+    }
 
     companion object {
         /** "Transcribing 2/3": the segment in flight (1-based) over the total. */
@@ -150,8 +154,11 @@ data class Actions(
                 jobRunning -> Actions(null, false, "Summarising…", true, "You can leave this screen; it carries on.", false)
                 m.status == Status.RECORDED || (m.status == Status.FAILED && m.failedAt != FailedAt.SUMMARISING) ->
                     offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.")
-                m.status == Status.TRANSCRIBED || m.status == Status.DONE || m.status == Status.FAILED ->
-                    offer(Job.SUMMARISE, summariseKey, "Ticked to-dos stay ticked.")
+                m.status == Status.TRANSCRIBED || m.status == Status.DONE -> {
+                    val again = Job.TRANSCRIBE_AGAIN.takeIf { problem(transcribeKey) == null }
+                    offer(Job.SUMMARISE, summariseKey, "Ticked to-dos stay ticked.").copy(secondary = again)
+                }
+                m.status == Status.FAILED -> offer(Job.SUMMARISE, summariseKey, "Ticked to-dos stay ticked.")
                 else -> offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.") // an unknown status: start over
             }
         }
@@ -170,7 +177,7 @@ data class ProviderNotice(val message: String, val providers: List<String>) {
 
         fun of(job: Actions.Job, s: SettingsView): ProviderNotice? {
             val summarise = s.effectiveSummarise.provider.takeIf { s.keys[it]?.usable == true }
-            val transcribe = s.effectiveTranscribe.provider.takeIf { job == Actions.Job.TRANSCRIBE }
+            val transcribe = s.effectiveTranscribe.provider.takeIf { job != Actions.Job.SUMMARISE }
             val involved = listOfNotNull(transcribe, summarise).distinct()
             if (involved.isEmpty() || involved.all { s.noticeShown[it] == true }) return null
             val name = Format::providerName

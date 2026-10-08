@@ -91,6 +91,29 @@ pub async fn transcribe(
     plan: &JobPlan,
     cancel: &Cancel,
 ) -> Result<Phase, JobError> {
+    run_transcribe(lib, lock, id, plan, cancel, false).await
+}
+
+/// F5-FR13: "Transcribe again" from `transcribed` or `done`: every segment's text is cleared
+/// (to-dos, ticks and titles are kept), then it runs as [`transcribe`], summary included.
+pub async fn transcribe_again(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    plan: &JobPlan,
+    cancel: &Cancel,
+) -> Result<Phase, JobError> {
+    run_transcribe(lib, lock, id, plan, cancel, true).await
+}
+
+async fn run_transcribe(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    plan: &JobPlan,
+    cancel: &Cancel,
+    again: bool,
+) -> Result<Phase, JobError> {
     let Some((key, model)) = &plan.transcribe else {
         return Err(JobError::NotStarted(LibError::Invalid(
             "no transcribe provider".into(),
@@ -98,8 +121,18 @@ pub async fn transcribe(
     };
     let (dir, pending, tid, no_audio) = locked(lock, || {
         lib.update(id, |sc, dir| {
-            let p = status::next(library::phase(sc), Event::StartTranscribe)?;
+            let event = if again {
+                Event::TranscribeAgain
+            } else {
+                Event::StartTranscribe
+            };
+            let p = status::next(library::phase(sc), event)?;
             library::set_phase(sc, p);
+            if again {
+                for s in &mut sc.segments {
+                    s.text = None;
+                }
+            }
             sc.error = None;
             sc.template_id
                 .get_or_insert_with(|| plan.default_template.clone());

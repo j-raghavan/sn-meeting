@@ -255,6 +255,20 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTranscrib
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
 
+/// Blocking for minutes: "Transcribe again" on a job thread (F5-FR13).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTranscribeAgain<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::transcribe_again(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
 /// Blocking: "Summarise again" on a job thread.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSummarise<'local>(

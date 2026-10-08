@@ -111,6 +111,19 @@ class PresentersTest {
         assertFalse(a.canCancel)
     }
 
+    @Test fun transcribeAgainSitsBesideSummariseAgain() { // F5-FR13
+        for (st in listOf(Status.TRANSCRIBED, Status.DONE)) {
+            val a = Actions.of(sc(st, texts = listOf("a")), false, found, found)
+            assertEquals(Actions.Job.SUMMARISE, a.primary)
+            assertEquals(Actions.Job.TRANSCRIBE_AGAIN, a.secondary)
+        }
+        assertEquals(null, Actions.of(sc(Status.FAILED, FailedAt.SUMMARISING), false, found, found).secondary)
+        assertEquals(null, Actions.of(sc(Status.RECORDED), false, found, found).secondary)
+        assertEquals(null, Actions.of(sc(Status.DONE), true, found, found).secondary) // a job is running
+        assertEquals(null, Actions.of(sc(Status.DONE), false, missing, found).secondary) // no transcribe key
+        assertEquals("Transcribe again", Actions.Job.TRANSCRIBE_AGAIN.label)
+    }
+
     @Test fun progressAndCancel() {
         val a = Actions.of(sc(Status.TRANSCRIBING, texts = listOf("a", null, null)), true, found, found)
         assertEquals("Transcribing 2/3", a.progress)

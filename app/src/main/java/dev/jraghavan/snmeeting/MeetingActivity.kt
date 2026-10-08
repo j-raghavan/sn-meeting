@@ -255,7 +255,16 @@ class MeetingActivity : Activity() {
         a.primary?.let { job ->
             val pill = ui.pill(job.label, filled = a.primaryEnabled) { if (a.primaryEnabled) confirmThenStart(job) }
             if (!a.primaryEnabled) { pill.setTextColor(ui.textMuted); pill.isClickable = false }
-            addView(pill, ui.wrap())
+            val row = LinearLayout(this@MeetingActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                addView(pill, ui.wrap())
+                // F5-FR13: a white pill beside the main action.
+                a.secondary?.let { again ->
+                    addView(ui.pill(again.label) { confirmAgain(again) }, ui.wrap().apply { marginStart = ui.dim(16) })
+                }
+            }
+            addView(row, ui.wrap())
         }
         a.progress?.let { label ->
             val chip = ui.chip(label)
@@ -264,6 +273,13 @@ class MeetingActivity : Activity() {
             if (a.canCancel) addView(ui.pill("Cancel", size = 15f) { cancel() }, ui.wrap().apply { topMargin = ui.dim(12) })
         }
         a.note?.let { addView(ui.note(it, 15f).apply { gravity = Gravity.CENTER }, ui.wrap().apply { topMargin = ui.dim(12) }) }
+    }
+
+    /** Transcribe again replaces the transcript, so it is asked first; to-dos and the title stay. */
+    private fun confirmAgain(job: Actions.Job) {
+        InkDialog.confirm(this, "Transcribe again?",
+            "Every segment is sent again and the transcript replaced, then it is summarised again. To-dos, ticks and the title stay.",
+            job.label) { confirmThenStart(job) }
     }
 
     /** Security: the first job to a provider names it once, and nothing is sent without OK. */
@@ -280,7 +296,11 @@ class MeetingActivity : Activity() {
     /** Runs on the job lane; the result is already in the sidecar, so the screen just re-reads it. */
     private fun start(job: Actions.Job) {
         val started = LongJobs.lane.run(id, {
-            if (job == Actions.Job.TRANSCRIBE) NativeBridge.nativeTranscribe(id) else NativeBridge.nativeSummarise(id)
+            when (job) {
+                Actions.Job.TRANSCRIBE -> NativeBridge.nativeTranscribe(id)
+                Actions.Job.TRANSCRIBE_AGAIN -> NativeBridge.nativeTranscribeAgain(id)
+                Actions.Job.SUMMARISE -> NativeBridge.nativeSummarise(id)
+            }
         }) { json ->
             if (isDestroyed) return@run
             // Not started at all (busy, no key, not offered now): say why. A job that ran and
