@@ -2,9 +2,14 @@
 //! job (F5-FR7). Part of the providers module: no rig or reqwest type leaves it (R8). Every
 //! detail is scrubbed with the key and never formats a transport error with its URL (rig's
 //! Gemini wire puts `?key=` in the URL).
-use super::{ConnStatus, classify_http, classify_transport};
-use crate::keyfile::Provider;
+use super::{ConnStatus, Endpoints, classify_http, classify_transport, rig_http};
+use crate::keyfile::{Provider, ProviderKey};
 use crate::scrub::scrub;
+use rig_core::completion::CompletionRequest;
+use rig_core::message::{AudioMediaType, Message, UserContent};
+use rig_core::providers::gemini::GeminiConfig;
+use rig_core::providers::openai::OpenAIConfig;
+use rig_core::transcription::TranscriptionRequestBuilder;
 use rig_core::{ProviderError, http_client};
 use rig_reqwest::reqwest;
 use serde::Serialize;
@@ -54,6 +59,79 @@ impl CallError {
             detail: detail.into(),
         }
     }
+}
+
+/// One audio segment to transcribe, read from disk by the caller.
+pub struct AudioIn {
+    pub bytes: Vec<u8>,
+    /// The segment's file name; OpenAI infers the format from its extension.
+    pub file_name: String,
+    /// The template's vocabulary as a hint (F5-FR1). Empty sends model + file only.
+    pub prompt: String,
+}
+
+/// What a segment with no speech is stored as (EC6).
+pub const NO_SPEECH: &str = "(no speech detected)";
+
+/// Gemini audio goes through `generateContent` with this instruction, not rig's
+/// `.transcription()`, whose fixed prompt asks to translate and which drops the vocabulary.
+pub const GEMINI_TRANSCRIBE_SYSTEM: &str = "Transcribe the speech in this audio verbatim, in the \
+language it is spoken. Never translate it. Do not summarise, correct or add anything. Output \
+only the transcript as plain text. If there is no speech, output nothing.";
+
+/// F5-FR1: one segment's text. OpenAI: `POST {openai}/audio/transcriptions`, multipart
+/// `model` + `file` (+ `prompt` when there is vocabulary). Gemini: `generateContent` with the
+/// audio inline (base64) and `GEMINI_TRANSCRIBE_SYSTEM`. Empty text is `NO_SPEECH`.
+pub async fn transcribe(
+    http: &Http,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: &str,
+    audio: AudioIn,
+) -> Result<String, CallError> {
+    let reply = match key.provider {
+        Provider::OpenAi => {
+            let client = OpenAIConfig::new(key.expose())
+                .with_base_url(&ep.openai)
+                .connect(rig_http(http.clone()));
+            let mut b = TranscriptionRequestBuilder::new(audio.bytes).filename(audio.file_name);
+            if !audio.prompt.trim().is_empty() {
+                b = b.prompt(audio.prompt);
+            }
+            client
+                .transcription(model)
+                .call(b.build())
+                .await
+                .map(|r| r.text)
+        }
+        Provider::Gemini => {
+            let client = GeminiConfig::new(key.expose())
+                .with_base_url(&ep.gemini)
+                .connect(rig_http(http.clone()));
+            let mut system = GEMINI_TRANSCRIBE_SYSTEM.to_owned();
+            if !audio.prompt.trim().is_empty() {
+                system.push_str("\nNames and terms that may be spoken: ");
+                system.push_str(&audio.prompt);
+            }
+            let msg = Message::User {
+                content: vec![UserContent::audio_raw(
+                    audio.bytes,
+                    Some(AudioMediaType::M4A),
+                )],
+            };
+            let req = CompletionRequest::new(msg).preamble(system);
+            client.completion(model).call(req).await.map(|r| r.text())
+        }
+        Provider::Anthropic => {
+            return Err(CallError::new(
+                CallFail::Http,
+                "Anthropic can't transcribe audio",
+            ));
+        }
+    };
+    let text = reply.map_err(|e| classify_call(key.provider, &e, &[key.expose()]))?;
+    let text = text.trim();
+    Ok(if text.is_empty() { NO_SPEECH } else { text }.to_owned())
 }
 
 pub fn provider_name(p: Provider) -> &'static str {
