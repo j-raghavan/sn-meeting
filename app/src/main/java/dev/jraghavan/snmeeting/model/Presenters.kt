@@ -169,3 +169,32 @@ data class ProviderNotice(val message: String, val providers: List<String>) {
         }
     }
 }
+
+/** F7-FR3: the transcript as whole pages for e-ink, a [h:mm:ss] marker at each segment start. */
+object TranscriptPages {
+    data class Para(val marker: String?, val text: String)
+
+    const val PAGE_CHARS = 1800
+
+    fun paragraphs(segments: List<Segment>): List<Para> = segments.filter { !it.text.isNullOrBlank() }.flatMap { s ->
+        s.text!!.split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }
+            .mapIndexed { i, t -> Para(if (i == 0) Format.duration(s.startOffsetMs) else null, t) }
+    }
+
+    /** Greedy by characters, so pages are even in height; a long paragraph gets a page to itself. */
+    fun pages(paras: List<Para>, budget: Int = PAGE_CHARS): List<List<Para>> {
+        val out = mutableListOf<MutableList<Para>>()
+        var used = 0
+        for (p in paras) {
+            if (out.isEmpty() || (used + p.text.length > budget && out.last().isNotEmpty())) { out += mutableListOf<Para>(); used = 0 }
+            out.last() += p; used += p.text.length
+        }
+        return out
+    }
+
+    /** "Due Fri 9 Oct · Me" under a meeting's to-do; null when neither is known. */
+    fun todoMeta(t: Todo): String? = listOfNotNull(
+        t.due?.let { "Due " + Format.due(it) },
+        t.owner?.takeIf { it.isNotBlank() }?.replaceFirstChar { it.uppercase() },
+    ).joinToString("  ·  ").ifEmpty { null }
+}

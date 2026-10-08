@@ -138,4 +138,18 @@ class PresentersTest {
         assertEquals(listOf("openai"), audio.providers)
         assertTrue(audio.message.startsWith("The audio is sent to OpenAI using your key."))
     }
+
+    @Test fun transcriptPages() { // F7-FR3
+        val paras = TranscriptPages.paragraphs(sc(Status.DONE, texts = listOf("one\n\ntwo", null, "three")).segments)
+        assertEquals(listOf("0:00:00", null, "0:30:00"), paras.map { it.marker })
+        assertEquals(listOf(listOf("one", "two"), listOf("three")), TranscriptPages.pages(paras, budget = 6).map { p -> p.map { it.text } })
+        val long = TranscriptPages.Para(null, "x".repeat(5000))
+        assertEquals(2, TranscriptPages.pages(listOf(long, long)).size) // a long paragraph gets a page to itself
+        assertEquals(emptyList<List<TranscriptPages.Para>>(), TranscriptPages.pages(emptyList()))
+    }
+
+    @Test fun meetingTodoMeta() {
+        assertEquals("Due Fri 9 Oct  ·  Me", TranscriptPages.todoMeta(Todo("t", "x", "me", "2026-10-09", false)))
+        assertEquals(null, TranscriptPages.todoMeta(Todo("t", "x", null, null, true)))
+    }
 }

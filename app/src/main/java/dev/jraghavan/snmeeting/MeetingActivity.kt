@@ -22,6 +22,8 @@ import dev.jraghavan.snmeeting.model.Sidecar
 import dev.jraghavan.snmeeting.model.Status
 import dev.jraghavan.snmeeting.model.TemplateChoice
 import dev.jraghavan.snmeeting.model.TemplateRow
+import dev.jraghavan.snmeeting.model.Todo
+import dev.jraghavan.snmeeting.model.TranscriptPages
 import dev.jraghavan.snmeeting.play.MediaPlayerPort
 import dev.jraghavan.snmeeting.play.Playback
 import dev.jraghavan.snmeeting.play.SegmentPlaylist
@@ -42,6 +44,8 @@ class MeetingActivity : Activity() {
     private var templates: List<TemplateRow> = emptyList()
     private var pickingTemplate = false
     private var actions: Actions? = null
+    private lateinit var cards: MeetingCards
+    private var transcriptPage = 0
     private var progress: TextView? = null
 
     /** F7-FR2: while this meeting's job runs, the sidecar is re-read once a second for progress. */
@@ -81,6 +85,7 @@ class MeetingActivity : Activity() {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
         scope = ScreenScope(this)
+        cards = MeetingCards(this, ui)
         id = intent.getStringExtra(EXTRA_ID) ?: run { finish(); return }
         CoreJobs.init(filesDir.absolutePath)
         setContentView(ui.page(ui.column().apply { addView(ui.header("All meetings")) }))
@@ -306,11 +311,34 @@ class MeetingActivity : Activity() {
             addView(ui.spacer(ui.dim(24)))
             addView(actionsRow(actions!!))
 
+            val m = v.meeting
+            if (m.todos.isNotEmpty() || m.status == Status.DONE) {
+                addView(ui.spacer(ui.dim(36)))
+                addView(ui.eyebrowItalic("To-dos from this meeting"))
+                addView(ui.spacer(ui.dim(14)))
+                addView(cards.todos(m.todos, ::setDone))
+            }
+            val pages = TranscriptPages.pages(TranscriptPages.paragraphs(m.segments))
+            if (pages.isNotEmpty()) {
+                addView(ui.spacer(ui.dim(36)))
+                addView(ui.eyebrowItalic("Transcript"))
+                addView(ui.spacer(ui.dim(14)))
+                addView(cards.transcript(pages, transcriptPage) { transcriptPage = it })
+            }
+
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(32)))
             addView(ui.closingMark())
         }
         show(column)
+    }
+
+    /** F7-FR3: tick or untick; a ticked to-do stays ticked through later summaries (F5-FR5). */
+    private fun setDone(t: Todo) {
+        scope.core({ NativeBridge.nativeSetTodoDone(id, t.id, !t.done) }) { json ->
+            (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't change the to-do", it.message) }
+            load()
+        }
     }
 
     /** F7-FR5: an empty title returns the meeting to untitled; the next summary may name it. */
