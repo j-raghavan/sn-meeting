@@ -51,6 +51,9 @@ pub fn http_client(connect_timeout: Duration, https_only: bool) -> Result<reqwes
     reqwest::Client::builder()
         .tls_certs_only(roots)
         .https_only(https_only)
+        // No system proxy lookup: on macOS hosts it can stall the first build for seconds,
+        // and on Android it would only read environment variables an app never has.
+        .no_proxy()
         // Never follow a redirect: reqwest strips Authorization across origins, but not our
         // x-api-key / x-goog-api-key headers. A 3xx is reported as an HTTP error instead.
         .redirect(reqwest::redirect::Policy::none())
