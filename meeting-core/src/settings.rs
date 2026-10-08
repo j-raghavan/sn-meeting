@@ -29,8 +29,10 @@ pub type Extra = Map<String, Value>;
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub schema: u32,
-    /// F10-FR2 / F2-FR8.
-    pub mic: String,
+    /// F10-FR2 / F2-FR8. A bad value in the file reads as `auto` rather than discarding the
+    /// whole file; a bad value in a patch is an error.
+    #[serde(deserialize_with = "lenient_mic")]
+    pub mic: MicChoice,
     /// Relative to the storage root, `/`-separated (F10-FR3).
     pub save_folder: String,
     /// Earlier save folders, newest first; the library keeps listing them. Core-maintained.
@@ -50,7 +52,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             schema: SCHEMA,
-            mic: "auto".into(),
+            mic: MicChoice::Auto,
             save_folder: DEFAULT_SAVE_FOLDER.into(),
             previous_folders: Vec::new(),
             transcribe: RoleSettings::default(),
@@ -61,6 +63,57 @@ impl Default for Settings {
             extra: Extra::new(),
         }
     }
+}
+
+/// The remembered mic: `"auto"` (USB first, then Bluetooth), `"usb:<device name>"` or
+/// `"bt:<device name>"`, on disk and over JNI (F10-FR2, F2-FR8). Chosen by device name.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+pub enum MicChoice {
+    #[default]
+    Auto,
+    Usb(String),
+    Bluetooth(String),
+}
+
+const MAX_MIC_NAME: usize = 200;
+
+impl TryFrom<String> for MicChoice {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, String> {
+        let named = |n: &str| {
+            let n = n.trim();
+            (!n.is_empty() && n.chars().count() <= MAX_MIC_NAME && !n.chars().any(char::is_control))
+                .then(|| n.to_owned())
+                .ok_or_else(|| "mic name is invalid".to_owned())
+        };
+        if s == "auto" {
+            Ok(MicChoice::Auto)
+        } else if let Some(n) = s.strip_prefix("usb:") {
+            Ok(MicChoice::Usb(named(n)?))
+        } else if let Some(n) = s.strip_prefix("bt:") {
+            Ok(MicChoice::Bluetooth(named(n)?))
+        } else {
+            Err("mic must be auto, usb:<name> or bt:<name>".to_owned())
+        }
+    }
+}
+
+impl From<MicChoice> for String {
+    fn from(m: MicChoice) -> String {
+        match m {
+            MicChoice::Auto => "auto".into(),
+            MicChoice::Usb(n) => format!("usb:{n}"),
+            MicChoice::Bluetooth(n) => format!("bt:{n}"),
+        }
+    }
+}
+
+fn lenient_mic<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MicChoice, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(v.as_str()
+        .and_then(|s| MicChoice::try_from(s.to_owned()).ok())
+        .unwrap_or_default())
 }
 
 /// One role's choice. `provider: null` = "first provider with a key", resolved on every read.
@@ -374,6 +427,12 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
     let mut patch = obj.clone();
     patch.remove("schema");
     patch.remove("previousFolders");
+    if let Some(m) = patch.get("mic").filter(|m| !m.is_null()) {
+        let m = m
+            .as_str()
+            .ok_or_else(|| err("mic", "mic must be a string"))?;
+        MicChoice::try_from(m.to_owned()).map_err(|e| err("mic", e))?;
+    }
     let mut v = serde_json::to_value(current).map_err(|e| SettingsError {
         field: None,
         message: e.to_string(),

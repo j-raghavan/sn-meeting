@@ -121,7 +121,7 @@ fn a_stray_tmp_from_an_interrupted_save_is_ignored() {
     let d = tempfile::tempdir().unwrap();
     let p = settings::path_in(d.path());
     let s = Settings {
-        mic: "usb:USB Audio".into(),
+        mic: meeting::settings::MicChoice::Usb("USB Audio".into()),
         ..Settings::default()
     };
     settings::save(&p, &s).unwrap();
