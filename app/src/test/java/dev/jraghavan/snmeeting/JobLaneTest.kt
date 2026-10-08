@@ -24,4 +24,25 @@ class JobLaneTest {
         queued.removeAt(0).run()
         assertEquals(listOf("m1"), ended)
     }
+
+    @Test fun cancellingAQueuedJobTakesItOffTheLane() { // N9
+        val queued = mutableListOf<Runnable>()
+        val lane = JobLane(Jobs({ queued += it }, { it.run() }))
+        val ended = mutableListOf<String>()
+        lane.onFinished { ended += it }
+        val ran = mutableListOf<String>()
+        lane.run("m1", { ran += "m1"; "{}" }) {}
+        var done2 = false
+        lane.run("m2", { ran += "m2"; "{}" }) { done2 = true }
+        queued.removeAt(0).run() // m1 starts and ends; m2 waits behind it
+        assertFalse("a started job is the core's to cancel", lane.cancelQueued("m1"))
+        assertTrue(lane.cancelQueued("m2"))
+        assertFalse(lane.isRunning("m2"))
+        assertEquals(listOf("m1", "m2"), ended)
+        queued.removeAt(0).run()
+        assertEquals(listOf("m1"), ran) // m2 never ran
+        assertFalse(done2)
+        assertFalse(lane.cancelQueued("m2"))
+        assertTrue("its key is free again", lane.run("m2", { "{}" }) {})
+    }
 }

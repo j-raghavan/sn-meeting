@@ -71,19 +71,49 @@ object CoreJobs {
  * ends (Home refreshes, F6-FR4).
  */
 class JobLane(private val jobs: Jobs) {
-    private val running = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    /** One per queued or running job; a cancelled one that hasn't started never runs (N9). */
+    private class Ticket {
+        var started = false
+        var cancelled = false
+    }
+
+    private val tickets = HashMap<String, Ticket>()
     private val listeners = LinkedHashSet<(String) -> Unit>()
 
-    fun isRunning(key: String) = key in running
+    fun isRunning(key: String) = synchronized(tickets) { key in tickets }
 
     /** Refuses a second job for the same key (one job per meeting): false then. Main thread. */
     fun run(key: String, work: () -> String, done: (String) -> Unit): Boolean {
-        if (!running.add(key)) return false
-        jobs.run(work) { r ->
-            running.remove(key)
+        val t = Ticket()
+        synchronized(tickets) {
+            if (key in tickets) return false
+            tickets[key] = t
+        }
+        jobs.run({
+            val go = synchronized(tickets) { if (!t.cancelled) t.started = true; t.started }
+            if (go) work() else CANCELLED
+        }) { r ->
+            if (t.cancelled) return@run // already off the lane, listeners told
+            synchronized(tickets) { if (tickets[key] === t) tickets.remove(key) }
             done(r)
             listeners.toList().forEach { it(key) }
         }
+        return true
+    }
+
+    /**
+     * N9: a job still waiting behind another is taken off the lane: it never runs and its
+     * [run] callback never fires; listeners hear it ended. False when there is no such job or it
+     * has already started (cancel that one in the core). Main thread.
+     */
+    fun cancelQueued(key: String): Boolean {
+        synchronized(tickets) {
+            val t = tickets[key] ?: return false
+            if (t.started) return false
+            t.cancelled = true
+            tickets.remove(key)
+        }
+        listeners.toList().forEach { it(key) }
         return true
     }
 
@@ -91,6 +121,10 @@ class JobLane(private val jobs: Jobs) {
     fun onFinished(l: (String) -> Unit): () -> Unit {
         listeners += l
         return { listeners -= l }
+    }
+
+    private companion object {
+        const val CANCELLED = """{"error":"Cancelled"}"""
     }
 }
 

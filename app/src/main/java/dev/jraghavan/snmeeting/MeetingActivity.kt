@@ -312,7 +312,9 @@ class MeetingActivity : Activity() {
         if (started) load()
     }
 
+    /** A job still waiting behind another is just taken off the lane (N9); a running one is the core's. */
     private fun cancel() {
+        if (LongJobs.lane.cancelQueued(id)) return load()
         scope.core({ NativeBridge.nativeCancel(id) }) { load() }
     }
 
