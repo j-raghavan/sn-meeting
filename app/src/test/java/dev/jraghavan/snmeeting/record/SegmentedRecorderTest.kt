@@ -185,4 +185,19 @@ class SegmentedRecorderTest {
         assertEquals(listOf("stop false", "delete 02.m4a", "close 1 02.m4a measure=false ~0", "finish 900100 '' discard=false"), log.takeLast(4))
         assertEquals(id to "Saved", ended)
     }
+
+    @Test fun micLossFinalisesWithTheNote() { // F2-FR3
+        startUsb(); now += 5_000; sr.onMicLost()
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~5000", "finish 5000 'mic disconnected' discard=false"), log)
+        assertEquals(id to "Microphone disconnected — recording saved", ended)
+        sr.onMicLost() // once only
+        assertEquals(3, log.size)
+    }
+
+    @Test fun routedToAnotherInputIsMicLoss() { // INV1
+        startUsb(); events.onRoutedTo(7); events.onRoutedTo(null)
+        assertEquals(emptyList<String>(), log)
+        events.onRoutedTo(1)
+        assertEquals("finish 0 'mic disconnected' discard=false", log.last())
+    }
 }

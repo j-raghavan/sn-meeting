@@ -8,6 +8,7 @@ import java.util.Locale
 /** Why a recording ended: the sidecar note (F2-FR3, EC5) and the line the UI shows. */
 enum class EndReason(val note: String, val message: String) {
     USER("", "Saved"),
+    MIC_LOST("mic disconnected", "Microphone disconnected — recording saved"),
     RECORDER_ERROR("recorder error", "The recorder stopped — recording saved"),
 }
 
@@ -80,6 +81,9 @@ class SegmentedRecorder(
     /** User Stop, notification Stop, service onDestroy. */
     fun stop() = end(EndReason.USER)
 
+    /** Pinned input removed, SCO lost, or audio routed elsewhere (INV1: never another mic). */
+    fun onMicLost() = end(EndReason.MIC_LOST)
+
     private val events = object : RecorderEvents {
         override fun onApproachingLimit() {
             if (phase != Phase.RECORDING || armed != null) return
@@ -112,7 +116,10 @@ class SegmentedRecorder(
             end(EndReason.RECORDER_ERROR)
         }
 
-        override fun onRoutedTo(deviceId: Int?) = Unit
+        /** F2-FR3: setPreferredDevice is only a preference; any other input is mic loss. */
+        override fun onRoutedTo(deviceId: Int?) {
+            if (deviceId != null && deviceId != this@SegmentedRecorder.deviceId) onMicLost()
+        }
     }
 
     private fun beginNext(next: String, closePrevious: Boolean) {
