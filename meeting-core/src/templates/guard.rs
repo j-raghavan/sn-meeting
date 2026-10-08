@@ -8,6 +8,9 @@ use super::render::RenderError;
 /// Statements a layout may use; `raw` blocks are skipped whole.
 const ALLOWED: [&str; 6] = ["if", "elif", "else", "endif", "for", "endfor"];
 
+/// Words after which a `[` starts a list literal rather than a subscript.
+const KEYWORDS: [&str; 9] = ["in", "if", "else", "and", "or", "not", "is", "elif", "for"];
+
 fn refuse(line: usize, what: &str) -> RenderError {
     RenderError {
         message: format!("Template error on line {line}: {what} isn't allowed in a layout"),
@@ -53,6 +56,9 @@ fn tag(
     stmt: bool,
 ) -> Result<usize, RenderError> {
     let mut first_word = stmt;
+    // Whether the last token was a value (a name, number, string or closing bracket): a `[`
+    // after one is a subscript, anywhere else it starts a list literal.
+    let mut after_value = false;
     while i < s.len() {
         let c = s[i];
         if s[i..].starts_with(close) {
@@ -60,6 +66,7 @@ fn tag(
         }
         match c {
             b'\n' => *line += 1,
+            c if c.is_ascii_whitespace() => {}
             b'\'' | b'"' => {
                 // A string literal, escapes included: its contents are data, not operators.
                 i += 1;
@@ -67,10 +74,14 @@ fn tag(
                     *line += usize::from(s[i] == b'\n');
                     i += if s[i] == b'\\' { 2 } else { 1 };
                 }
+                after_value = true;
             }
             b'~' => return Err(refuse(*line, "The ~ operator")),
             b'+' => return Err(refuse(*line, "The + operator")),
             b'*' => return Err(refuse(*line, "The * operator")),
+            b'{' => return Err(refuse(*line, "A { } literal")),
+            b'[' if !after_value => return Err(refuse(*line, "A [ ] literal")),
+            b')' | b']' => after_value = true,
             c if first_word && (c.is_ascii_alphabetic() || c == b'_') => {
                 let end = (i..s.len())
                     .find(|&j| !(s[j].is_ascii_alphanumeric() || s[j] == b'_'))
@@ -87,7 +98,16 @@ fn tag(
                 i = end;
                 continue;
             }
-            _ => {}
+            c if c.is_ascii_alphanumeric() || c == b'_' => {
+                let end = (i..s.len())
+                    .find(|&j| !(s[j].is_ascii_alphanumeric() || s[j] == b'_'))
+                    .unwrap_or(s.len());
+                let word = std::str::from_utf8(&s[i..end]).unwrap_or_default();
+                after_value = !KEYWORDS.contains(&word);
+                i = end;
+                continue;
+            }
+            _ => after_value = false,
         }
         i += 1;
     }
@@ -150,6 +170,17 @@ mod tests {
         assert_eq!(
             e.message,
             "Template error on line 1: {% with %} isn't allowed in a layout"
+        );
+        assert_eq!(line_of("{{ [summary]|length }}"), Some(1));
+        assert_eq!(line_of("{{ x\n|default([1]) }}"), Some(2));
+        assert_eq!(line_of("{% for t in [1, 2] %}{% endfor %}"), Some(1));
+        assert_eq!(line_of("{{ x if y else [z] }}"), Some(1));
+        assert_eq!(line_of("{{ {'k': 1} }}"), Some(1));
+        assert_eq!(line_of("{% if x in {'a': 1} %}{% endif %}"), Some(1));
+        // Subscripts are not literals.
+        assert_eq!(
+            check("{{ todos[0].text }}{{ (todos)[0] }}{{ x['k'] }}{{ 'ab'[1] }}"),
+            Ok(())
         );
         let e = check("{{ a ~ b }}").unwrap_err();
         assert_eq!(

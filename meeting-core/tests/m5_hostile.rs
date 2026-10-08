@@ -309,3 +309,74 @@ fn a_hostile_user_file_lists_as_invalid_without_crashing() {
         "template not found"
     );
 }
+
+/// The reviewers' constructions, at depth 40: each errors, or finishes inside 200 ms.
+fn deep_hostile() -> Vec<String> {
+    let rep = |s: &str| s.repeat(40);
+    let nest = |open: &str, close: &str| {
+        let mut s = "summary".to_owned();
+        for _ in 0..40 {
+            s = format!("{open}{s}{close}");
+        }
+        format!("{{{{ {s}|length }}}}")
+    };
+    vec![
+        format!("{{{{ summary{}|length }}}}", rep("|pprint")),
+        format!("{{{{ '\\\\'{} }}}}", rep("|pprint")),
+        nest("[", "]|string"),
+        nest("{'k': ", "}|string"),
+        format!("{{{{ 'ab'{}|length }}}}", rep("|sort|e")),
+        format!("{{{{ summary{}|length }}}}", rep("|map('pprint')|string")),
+        format!("{{{{ summary{}|length }}}}", rep("|unique|string")),
+        format!("{{{{ summary{}|length }}}}", rep("|urlencode")),
+        "{% for a in range(100000) %}{% for b in range(100000) %}{% endfor %}{% endfor %}x".into(),
+        "{{ range(100000)|join(',')|length }}".into(),
+        "{{ summary|center(1000000000) }}".into(),
+        format!("{{{{ transcript{}|length }}}}", rep("|join")),
+    ]
+}
+
+#[test]
+fn deep_hostile_layouts_error_or_finish_quickly() {
+    let ctx = meeting::templates::sample_context();
+    for l in deep_hostile() {
+        let t = std::time::Instant::now();
+        let r = meeting::templates::render(&l, &ctx);
+        assert!(
+            r.is_err() || t.elapsed() < Duration::from_millis(200),
+            "{l}: {:?} in {:?}",
+            r.map(|s| s.len()),
+            t.elapsed()
+        );
+    }
+    // The built-ins render the sample exactly as before (none uses a filter).
+    for t in meeting::templates::builtins() {
+        assert!(
+            meeting::templates::render(&t.layout, &ctx).is_ok(),
+            "{}",
+            t.id
+        );
+    }
+}
+
+#[test]
+fn a_pprint_user_file_lists_unusable() {
+    let fx = fixture("openai");
+    let dir = fx.e.root.path().join(USER_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut tpl = meeting::templates::builtins().remove(0);
+    tpl.id = "pp".into();
+    tpl.name = "PP".into();
+    tpl.layout = format!("{{{{ '\\\\'{} }}}}", "|pprint".repeat(27));
+    std::fs::write(dir.join("pp.md"), meeting::templates::to_file(&tpl)).unwrap();
+    let row = fx
+        .app
+        .templates
+        .list()
+        .into_iter()
+        .find(|e| e.template.id == "pp")
+        .expect("listed");
+    assert!(row.problem.is_some(), "{row:?}");
+    assert!(!row.usable());
+    assert!(parse(&fx.app.get_settings_json())["effective"]["defaultTemplate"] == "general");
+}
