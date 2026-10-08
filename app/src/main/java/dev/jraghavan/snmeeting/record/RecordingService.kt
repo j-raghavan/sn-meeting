@@ -27,22 +27,16 @@ import dev.jraghavan.snmeeting.model.MicChoice
 
 /**
  * F2-FR1: the foreground service (type microphone) that owns one recording. DEVICE-UNVERIFIED.
- * The logic lives in SegmentedRecorder / MicSelector / ExitGuard; this wires them to the
- * platform on a "recorder" HandlerThread and releases everything on every exit (INV7).
+ * The logic lives in RecordingSession / SegmentedRecorder / MicSelector / ExitGuard; this
+ * adapts them to the platform on a "recorder" HandlerThread (INV7: the session releases
+ * everything on every exit).
  */
 class RecordingService : Service() {
 
     private lateinit var thread: HandlerThread
     private lateinit var h: Handler
     private lateinit var am: AudioManager
-    private val guard = ExitGuard()
-    private var recorder: SegmentedRecorder? = null
-    /** The input the recording is pinned to (F2-FR3). */
-    private var pinnedId: Int? = null
-    private var sco: ScoLink? = null
-    private var bt: BluetoothState? = null
-    /** Between ＋ New and the mic being picked (waiting for the headset proxy). */
-    private var picking = false
+    private var session: RecordingSession? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -63,82 +57,48 @@ class RecordingService : Service() {
                 val choice = MicChoice.of(intent.getStringExtra(EXTRA_MIC))
                 h.post { begin(choice) }
             }
-            ACTION_STOP -> h.post {
-                val rec = recorder ?: return@post shutdown(RecState.Idle(if (picking) "Recording cancelled" else null, null))
-                hub.publish(RecState.Stopping)
-                rec.stop()
-            }
+            ACTION_STOP -> h.post { (session ?: RecordingSession(env).also { session = it }).stop() }
             else -> stopSelf(startId) // a restart with no intent can't resume a recording (F3-FR5)
         }
         return START_NOT_STICKY
     }
 
-    /**
-     * Opens Bluetooth and picks the mic once the headset proxy is bound (it arrives
-     * asynchronously), or after [BT_WAIT_MS]: a USB mic or a headset bound by then is offered.
-     */
     private fun begin(choice: MicChoice) {
-        if (recorder != null || picking) return
-        picking = true
+        if (session != null) return
         getSystemService(NotificationManager::class.java).cancel(END_NOTE_ID)
-        val state = BluetoothState(this, h) { if (bt?.ready == true) go(choice) }
-        bt = state
-        guard.hold("bluetooth") { state.close() }
-        state.open()
-        if (state.ready) go(choice) else h.postDelayed({ go(choice) }, BT_WAIT_MS)
+        RecordingSession(env).also { session = it }.begin(choice)
     }
 
-    private fun go(choice: MicChoice) {
-        if (!picking) return
-        picking = false
-        val pick = MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, choice)
-        val mic = pick.chosen ?: return shutdown(RecState.Idle(pick.reason, null))
-        hub.publish(RecState.Starting(mic.label))
-        val wake = WakeLease(AndroidWake(this)).also { it.begin(guard) } // F2-FR6: the screen may sleep
-        val rec = SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration), MediaRecorderAdapter(this, h), FileStorage, AndroidClock,
-            object : SegmentedRecorder.Listener {
-                override fun onRecording(id: String, startElapsedMs: Long) {
-                    hub.publish(RecState.Recording(id, mic.label, startElapsedMs))
-                    notify(notification(mic.label, startElapsedMs))
-                }
-                override fun onSegmentStarted(index: Int) = wake.renew()
-                override fun onEnded(id: String?, message: String) = shutdown(RecState.Idle(message, id))
-            })
-        recorder = rec
-        am.registerAudioDeviceCallback(devices, h); guard.hold("deviceCallback") { am.unregisterAudioDeviceCallback(devices) }
-        if (mic.kind == MicKind.USB) {
-            val id = mic.deviceId ?: return shutdown(RecState.Idle(MicSelector.NONE, null))
-            pinnedId = id
-            rec.start(mic, id, InputSource.MIC, listOf(AudioSpec.USB))
-            return
+    /** The platform behind RecordingSession's ports, all on the recorder thread. */
+    private val env = object : RecordingSession.Env {
+        override val timer: TimerPort by lazy { HandlerTimer(h) }
+        override fun usbInputs() = usbInputs(am)
+        override fun openBluetooth(onChange: () -> Unit): BtPort =
+            BluetoothState(this@RecordingService, h, onChange).also { it.open() }
+        override fun newRecorder(listener: SegmentedRecorder.Listener) =
+            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration), MediaRecorderAdapter(this@RecordingService, h), FileStorage, AndroidClock, listener)
+        override fun newSco(listener: ScoLink.Listener) = ScoLink(AndroidScoAudio(am), HandlerTimer(h), listener)
+        override fun wake(): WakePort = AndroidWake(this@RecordingService)
+        override fun watchDevices(): Cancel {
+            am.registerAudioDeviceCallback(devices, h)
+            return Cancel { am.unregisterAudioDeviceCallback(devices) }
         }
-        // F2-FR9: Bluetooth records only once SCO is up; nativeBeginMeeting waits for onReady.
-        val link = ScoLink(AndroidScoAudio(am), HandlerTimer(h), object : ScoLink.Listener {
-            override fun onReady(deviceId: Int) {
-                pinnedId = deviceId
-                rec.start(mic, deviceId, InputSource.VOICE_COMMUNICATION, listOf(AudioSpec.BLUETOOTH, AudioSpec.BLUETOOTH_FALLBACK))
+        override fun watchSco(): Cancel {
+            // The SCO state broadcast is sticky (ScoLink ignores its replay).
+            val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED).apply {
+                addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
             }
-            override fun onFailed(reason: String) = shutdown(RecState.Idle(reason, null))
-            override fun onLost() = rec.onMicLost()
-        })
-        sco = link
-        // Registered before open(): the SCO state broadcast is sticky (ScoLink ignores its replay).
-        val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED).apply {
-            addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+            registerReceiver(scoReceiver, filter, null, h)
+            return Cancel { unregisterReceiver(scoReceiver) }
         }
-        registerReceiver(scoReceiver, filter, null, h); guard.hold("scoReceiver") { unregisterReceiver(scoReceiver) }
-        guard.hold("sco") { link.close() } // stopBluetoothSco, then MODE_NORMAL (INV7)
-        link.open()
+        override fun publish(s: RecState) = hub.publish(s)
+        override fun showRecording(label: String, startElapsedMs: Long) = notify(notification(label, startElapsedMs))
+        override fun ended(end: RecState.Idle) = shutdown(end)
     }
 
-    /** F2-FR3, EC1, EC2: the pinned input going away ends the recording; nothing else is used. */
     private val devices = object : AudioDeviceCallback() {
-        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
-            if (removed.any { it.id == pinnedId }) recorder?.onMicLost()
-            sco?.onInputsChanged()
-        }
-
-        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { sco?.onInputsChanged() }
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { session?.onDevicesRemoved(removed.map { it.id }) }
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { session?.onDevicesAdded() }
     }
 
     /** EC10: SCO dropping or the headset disconnecting (out of range, battery). */
@@ -146,18 +106,16 @@ class RecordingService : Service() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
                 AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED ->
-                    sco?.onScoState(i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, ScoState.ERROR))
+                    session?.onScoState(i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, ScoState.ERROR))
                 BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED ->
-                    if (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == BluetoothProfile.STATE_DISCONNECTED) sco?.onHeadsetDisconnected()
+                    if (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == BluetoothProfile.STATE_DISCONNECTED) session?.onHeadsetDisconnected()
             }
         }
     }
 
-    /** The one exit: release everything, publish, leave the foreground, stop. */
+    /** The one exit, after the session released everything: leave the foreground, stop. */
     private fun shutdown(end: RecState.Idle) {
-        guard.releaseAll()
-        recorder = null; pinnedId = null; sco = null; bt = null; picking = false
-        hub.publish(end)
+        session = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).
         val reason = end.message?.let(EndReason::ofMessage)
@@ -169,10 +127,10 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         // Stopped by the system mid-recording: finalise what we can, then release (INV7).
-        val rec = recorder
-        h.post { rec?.stop(); guard.releaseAll() }
+        val s = session
+        h.post { s?.destroy() }
         thread.quitSafely()
-        if (rec != null) hub.publish(RecState.Idle(null, null))
+        if (s != null) hub.publish(RecState.Idle(null, null))
         running = false
         super.onDestroy()
     }
@@ -217,7 +175,6 @@ class RecordingService : Service() {
         private const val CHANNEL = "recording"
         private const val NOTE_ID = 1
         private const val END_NOTE_ID = 2
-        private const val BT_WAIT_MS = 1_500L
 
         /** For nativeRecover(serviceAlive) and Home's ＋ New / ■ Stop. */
         @Volatile var running = false

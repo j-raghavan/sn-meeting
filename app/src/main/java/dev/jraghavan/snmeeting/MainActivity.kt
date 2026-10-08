@@ -228,7 +228,7 @@ class MainActivity : Activity() {
     /** The mic a new meeting would use now, or why there is none (F2-FR2). */
     private fun pick(): MicPick {
         val am = getSystemService(AudioManager::class.java)
-        return MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, micChoice)
+        return MicSelector.pick(usbInputs(am), bt?.snapshot() ?: BtSnapshot.NONE, micChoice)
     }
 
     /** ＋ New starts the service; ■ Stop asks it to stop. The hub reports what happened. */

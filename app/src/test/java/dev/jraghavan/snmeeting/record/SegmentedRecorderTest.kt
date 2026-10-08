@@ -116,6 +116,15 @@ class SegmentedRecorderTest {
         assertEquals(listOf("ended Recording cancelled", "close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log)
     }
 
+    @Test fun aStopBeforeStartEndsItAndStartThenDoesNothing() { // B2: Stop while SCO connects
+        sr.stop()
+        assertEquals(SegmentedRecorder.Phase.ENDED, sr.phase)
+        sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals(emptyList<String>(), log)
+        assertEquals(null, ended)
+        assertEquals(SegmentedRecorder.Phase.ENDED, sr.phase)
+    }
+
     @Test fun segmentPathsSitBesideTheFirst() {
         assertEquals("/d/m-12.m4a", SegmentedRecorder.segmentPath("/d/m-01.m4a", "m", 12))
     }

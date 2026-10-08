@@ -36,7 +36,7 @@ class AndroidScoAudio(private val am: AudioManager) : ScoAudio {
  * broadcasts, each of which calls [onChange] on [handler]'s thread. API 30: BLUETOOTH is a normal
  * permission; from API 31 BLUETOOTH_CONNECT is checked and, if denied, Bluetooth reads as absent.
  */
-class BluetoothState(private val ctx: Context, private val handler: Handler, private val onChange: () -> Unit) {
+class BluetoothState(private val ctx: Context, private val handler: Handler, private val onChange: () -> Unit) : BtPort {
     private val adapter: BluetoothAdapter? = ctx.getSystemService(BluetoothManager::class.java)?.adapter
     private var headset: BluetoothHeadset? = null
     private var a2dp: BluetoothA2dp? = null
@@ -60,10 +60,9 @@ class BluetoothState(private val ctx: Context, private val handler: Handler, pri
         override fun onReceive(c: Context, i: Intent) = onChange()
     }
 
-    /** The headset proxy is bound (or never will be), so [snapshot] can list HFP headsets. */
-    val ready get() = headset != null || adapter == null || !allowed() || !adapter.isEnabled
+    override val ready get() = headset != null || adapter == null || !allowed() || !adapter.isEnabled
 
-        private fun allowed(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+    private fun allowed(): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
         ctx.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     fun open() {
@@ -78,7 +77,7 @@ class BluetoothState(private val ctx: Context, private val handler: Handler, pri
         registered = true
     }
 
-    fun close() {
+    override fun close() {
         if (registered) { ctx.unregisterReceiver(changes); registered = false }
         headset?.let { adapter?.closeProfileProxy(BluetoothProfile.HEADSET, it) }
         a2dp?.let { adapter?.closeProfileProxy(BluetoothProfile.A2DP, it) }
@@ -86,7 +85,8 @@ class BluetoothState(private val ctx: Context, private val handler: Handler, pri
     }
 
     @SuppressLint("MissingPermission") // allowed() checks BLUETOOTH_CONNECT from API 31
-    fun snapshot(am: AudioManager): BtSnapshot {
+    override fun snapshot(): BtSnapshot {
+        val am = ctx.getSystemService(AudioManager::class.java)
         val a = adapter ?: return BtSnapshot.NONE
         if (!allowed()) return BtSnapshot.NONE
         val on = a.isEnabled

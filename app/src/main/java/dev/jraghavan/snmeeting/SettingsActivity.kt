@@ -124,7 +124,7 @@ class SettingsActivity : Activity() {
         ui.section(column, "Microphone").apply {
             if (s == null) return@apply addView(ui.note("Reading settings…", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(10)) })
             val am = getSystemService(AudioManager::class.java)
-            val options = MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, s.mic).options
+            val options = MicSelector.pick(usbInputs(am), bt?.snapshot() ?: BtSnapshot.NONE, s.mic).options
             MicSelector.settingsRows(options, s.mic).forEachIndexed { i, row ->
                 if (i > 0) addView(ui.hairline())
                 choice(row.label, row.hint, row.selected) { patch(SettingsPatch.mic(row.choice)) }

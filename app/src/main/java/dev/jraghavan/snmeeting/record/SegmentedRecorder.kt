@@ -60,6 +60,7 @@ class SegmentedRecorder(
 
     /** [candidates] in order of preference; the first the encoder accepts is used (F2-FR4). */
     fun start(mic: MicOption, deviceId: Int, source: InputSource, candidates: List<AudioSpec>) {
+        if (phase == Phase.ENDED) return // stopped before it started (Stop while SCO connected)
         check(phase == Phase.IDLE) { "start twice" }
         this.deviceId = deviceId; this.source = source
         phase = Phase.BEGINNING
@@ -146,6 +147,7 @@ class SegmentedRecorder(
 
     private fun end(reason: EndReason) {
         when (phase) {
+            Phase.IDLE -> phase = Phase.ENDED // nothing began: a later start() does nothing
             Phase.BEGINNING -> { phase = Phase.ENDED; listener.onEnded(null, "Recording cancelled") }
             Phase.RECORDING -> {
                 val finalised = rec.stop()
