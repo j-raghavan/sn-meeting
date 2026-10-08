@@ -2,11 +2,21 @@ package dev.jraghavan.snmeeting
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
+import android.view.View
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.MeetingHeader
 import dev.jraghavan.snmeeting.model.MeetingView
+import dev.jraghavan.snmeeting.play.MediaPlayerPort
+import dev.jraghavan.snmeeting.play.Playback
+import dev.jraghavan.snmeeting.play.SegmentPlaylist
 
 /**
  * One meeting (spec F7) in the Inkwell style (F9), read from the core: the title (tap to
@@ -19,6 +29,22 @@ class MeetingActivity : Activity() {
     private lateinit var scope: ScreenScope
     private lateinit var id: String
     private var view: MeetingView? = null
+    private var page: ScrollView? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    // F7-FR1: playback outlives re-renders; the card shows its state.
+    private var playback: Playback? = null
+    private var playlist: SegmentPlaylist? = null
+    private var playPill: TextView? = null
+    private var position: TextView? = null
+
+    /** The position line, once a second while playing (NFR2). */
+    private val tick = object : Runnable {
+        override fun run() {
+            showPosition()
+            if (playback?.playing == true) handler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -34,6 +60,13 @@ class MeetingActivity : Activity() {
         load()
     }
 
+    override fun onStop() {
+        playback?.release() // leaving the screen stops the audio
+        handler.removeCallbacks(tick)
+        showPlayer()
+        super.onStop()
+    }
+
     override fun finish() {
         super.finish()
         overridePendingTransition(0, 0)
@@ -43,7 +76,7 @@ class MeetingActivity : Activity() {
     private fun load() {
         scope.core({ NativeBridge.nativeGetMeeting(id) }) { json ->
             when (val r = CoreJson.obj(json, MeetingView::from)) {
-                is CoreResult.Ok -> { view = r.value; render() }
+                is CoreResult.Ok -> { view = r.value; preparePlayback(r.value); render() }
                 is CoreResult.Err -> showGone(r.message)
             }
         }
@@ -56,6 +89,60 @@ class MeetingActivity : Activity() {
             addView(ui.spacer(ui.dim(48)))
             addView(ui.note("This meeting can't be opened: $message", 16f).apply { gravity = Gravity.CENTER })
         }))
+    }
+
+    /** A new playlist only when the segments changed (a recording that grew, a file gone). */
+    private fun preparePlayback(v: MeetingView) {
+        val next = SegmentPlaylist.of(v)
+        if (next.items == playlist?.items) return
+        playback?.release()
+        playlist = next
+        playback = Playback(next, MediaPlayerPort()) { showPlayer() }
+    }
+
+    /** Rebuilds the page, keeping the scroll position (one redraw). */
+    private fun show(column: LinearLayout) {
+        val y = page?.scrollY ?: 0
+        val p = ui.page(column)
+        page = p
+        setContentView(p)
+        if (y > 0) p.post { p.scrollTo(0, y) }
+    }
+
+    /** F7-FR1: play/pause through every segment as one recording, with position and total. */
+    private fun playerCard(): View = ui.card().apply {
+        addView(ui.eyebrow("Recording"))
+        val pill = ui.pill("▶  Play", size = 17f) { playback?.toggle() }
+        val pos = ui.body("", 18f).apply { setPadding(ui.dim(20), 0, 0, 0) }
+        playPill = pill; position = pos
+        addView(LinearLayout(this@MeetingActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dim(12), 0, 0)
+            addView(pill)
+            addView(pos)
+        })
+        showPlayer()
+    }
+
+    private fun showPlayer() {
+        val pb = playback ?: return
+        val pill = playPill ?: return
+        if (!pb.canPlay) {
+            ui.stylePill(pill, "▶  Play", filled = false)
+            pill.setTextColor(ui.textMuted); pill.isClickable = false
+            position?.text = "No audio to play"
+            return
+        }
+        ui.stylePill(pill, if (pb.playing) "❚❚  Pause" else "▶  Play", filled = pb.playing)
+        showPosition()
+        handler.removeCallbacks(tick)
+        if (pb.playing) handler.postDelayed(tick, 1000)
+    }
+
+    private fun showPosition() {
+        val pb = playback ?: return
+        position?.text = "${Format.duration(pb.positionMs())}  /  ${Format.duration(playlist?.totalMs ?: 0)}"
     }
 
     private fun render() {
@@ -76,11 +163,14 @@ class MeetingActivity : Activity() {
             h.mic?.let { addView(ui.note(it).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(6), 0, 0) }, ui.fullWidth()) }
             h.note?.let { addView(ui.note(it, 13f, ui.textMuted).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(2), 0, 0) }, ui.fullWidth()) }
 
+            addView(ui.spacer(ui.dim(32)))
+            addView(playerCard())
+
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(32)))
             addView(ui.closingMark())
         }
-        setContentView(ui.page(column))
+        show(column)
     }
 
     /** F7-FR5: an empty title returns the meeting to untitled; the next summary may name it. */
