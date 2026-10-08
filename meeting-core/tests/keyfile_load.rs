@@ -206,3 +206,54 @@ fn an_unlistable_dir_is_unreadable_not_missing() {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(got, Err(KeyError::Unreadable("permission denied".into())));
 }
+
+#[test]
+fn a_bad_canonical_falls_back_to_a_good_alias() {
+    let d = tempfile::tempdir().unwrap();
+    write(
+        d.path(),
+        "copilot-key-openai.txt",
+        "provider=openai\nkey=k0\n",
+    ); // no model
+    write(
+        d.path(),
+        "copilot-key-chatgpt.txt",
+        "provider=gemini\nkey=k1\nmodel=m",
+    ); // mismatch
+    write(
+        d.path(),
+        "copilot-key-gpt.txt",
+        "provider=openai\nkey=k2\nmodel=m",
+    );
+    let k = load(d.path(), Provider::OpenAi).unwrap();
+    assert_eq!(
+        (k.expose(), k.file_name().as_str()),
+        ("k2", "copilot-key-gpt.txt")
+    );
+}
+
+#[test]
+fn when_every_file_is_bad_the_canonical_error_is_reported() {
+    let d = tempfile::tempdir().unwrap();
+    write(
+        d.path(),
+        "copilot-key-chatgpt.txt",
+        "provider=openai\nmodel=m",
+    ); // no key
+    write(
+        d.path(),
+        "copilot-key-openai.txt",
+        "provider=openai\nkey=k0\n",
+    ); // no model
+    write(d.path(), "copilot-key-gpt.txt", &"#".repeat(70 * 1024)); // too large
+    assert_eq!(
+        load_unit(d.path(), Provider::OpenAi),
+        Err(KeyError::MissingField("model"))
+    );
+    // Without a canonical file, the lexically first alias's error.
+    fs::remove_file(d.path().join("copilot-key-openai.txt")).unwrap();
+    assert_eq!(
+        load_unit(d.path(), Provider::OpenAi),
+        Err(KeyError::MissingField("key"))
+    );
+}

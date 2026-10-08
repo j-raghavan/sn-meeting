@@ -181,7 +181,8 @@ pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
 }
 
 /// F4-FR2: find and parse `provider`'s file in `dir`. The canonical name wins over aliases;
-/// among aliases the lexically first name wins. DeepSeek files and directories are skipped.
+/// among aliases the lexically first name wins; a file that fails to read or parse gives way
+/// to the next. DeepSeek files and directories are skipped.
 pub fn load(dir: &Path, provider: Provider) -> Result<ProviderKey, KeyError> {
     let not_found = || KeyError::NotFound {
         provider: provider.id(),
@@ -206,13 +207,22 @@ pub fn load(dir: &Path, provider: Provider) -> Result<ProviderKey, KeyError> {
         })
         .collect();
     candidates.sort();
-    let Some((_, _, path)) = candidates.into_iter().next() else {
-        return Err(not_found());
-    };
-    let text = read_capped(&path)?;
-    let mut key = parse(&text, provider)?;
-    key.source = path;
-    Ok(key)
+    // sn-copilot parses every file and keeps the good ones, so a broken file never hides a
+    // working alias. If none parses, report the first one's error (the canonical file's, when
+    // there is one).
+    let mut first_error = None;
+    for (_, _, path) in candidates {
+        match read_capped(&path).and_then(|text| parse(&text, provider)) {
+            Ok(mut key) => {
+                key.source = path;
+                return Ok(key);
+            }
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(not_found))
 }
 
 /// Read at most `MAX_FILE_BYTES`, decoding lossily as sn-copilot's `decodeUtf8` does. Errors
