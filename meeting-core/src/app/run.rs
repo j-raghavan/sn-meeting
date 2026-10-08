@@ -94,7 +94,7 @@ impl App {
             summarise,
             summarise_problem,
             summarise_fallback,
-            default_template: s.default_template.clone(),
+            default_template: self.effective_default(&s),
             templates: self.templates.effective(),
             budgets: self.budgets,
         })

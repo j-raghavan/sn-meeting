@@ -294,7 +294,22 @@ fn a_missing_template_falls_back_to_general_with_a_note() {
     let mut sc = read_sidecar(&fx.dir, &fx.id);
     sc.note = Some("mic disconnected".into());
     meeting::sidecar::write(&fx.dir, &sc).unwrap();
-    fx.app.set_template_json(&fx.id, "gone");
+    // A YOURS template chosen for the meeting, then deleted.
+    let mut t = parse(&fx.app.get_template_json("standup"));
+    t["id"] = json!("gone");
+    assert_eq!(
+        parse(&fx.app.save_template_json(&t.to_string()))["origin"],
+        "yours"
+    );
+    assert_eq!(
+        parse(&fx.app.set_template_json(&fx.id, "gone")),
+        json!({"ok": true})
+    );
+    fx.app.reset_template_json("gone");
+    assert_eq!(
+        parse(&fx.app.set_template_json(&fx.id, "gone")),
+        json!({"error": "template not found"})
+    );
     let m = fx.run(Job::Transcribe)["meeting"].clone();
     assert_eq!(m["status"], "done");
     assert_eq!(m["templateId"], "general");

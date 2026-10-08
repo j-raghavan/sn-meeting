@@ -218,6 +218,10 @@ impl App {
 
     /// `nativeSetMeetingTemplate` (F7-FR2).
     pub fn set_template_json(&self, id: &str, template_id: &str) -> String {
+        // F11-FR6: only a template the next job could use (an id is checked by the library).
+        if settings::is_template_id(template_id) && !self.template_usable(template_id) {
+            return error_json("template not found");
+        }
         let _w = self.write_lock();
         reply(self.library().set_template(id, template_id).map(|()| ok()))
     }
@@ -242,6 +246,21 @@ impl App {
         }
         let lib = self.library_of(&st.settings);
         json!(lib.recover(&Self::live_of(&st, &self.jobs))).to_string()
+    }
+
+    /// Whether `id` is in the effective template set and usable by a job.
+    fn template_usable(&self, id: &str) -> bool {
+        self.templates.get(id).is_some_and(|e| e.usable())
+    }
+
+    /// The default template a job stamps: Settings' choice, or General when that template is
+    /// gone (a YOURS file deleted on the desktop).
+    pub fn effective_default(&self, s: &Settings) -> String {
+        if self.template_usable(&s.default_template) {
+            s.default_template.clone()
+        } else {
+            crate::templates::DEFAULT_ID.to_owned()
+        }
     }
 
     /// Every provider's key status, read fresh (the user may add a file at any time).
@@ -283,6 +302,7 @@ impl App {
                 "transcribe": effective(Role::Transcribe),
                 "summarise": effective(Role::Summarise),
                 "saveFolderPath": self.storage_root.join(&s.save_folder),
+                "defaultTemplate": self.effective_default(&s),
             },
             "keys": keys_json,
         })
@@ -295,6 +315,14 @@ impl App {
         let Ok(patch) = serde_json::from_str::<Value>(patch) else {
             return json!({"error": "settings must be JSON", "field": null}).to_string();
         };
+        // F10-FR6: the default must be one of the effective templates (a malformed id is
+        // reported by `settings::apply`).
+        if let Some(t) = patch.get("defaultTemplate").and_then(Value::as_str)
+            && settings::is_template_id(t)
+            && !self.template_usable(t)
+        {
+            return json!({"error": "template not found", "field": "defaultTemplate"}).to_string();
+        }
         {
             let mut st = self.state();
             let ks = |p| settings::key_status(&self.core.key_dir, p);

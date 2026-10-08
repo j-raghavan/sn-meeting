@@ -40,8 +40,8 @@ pub struct Settings {
     pub previous_folders: Vec<String>,
     pub transcribe: RoleSettings,
     pub summarise: RoleSettings,
-    /// F10-FR6: a template id ([`is_template_id`]). Whether that template exists is checked
-    /// against the effective templates in M5. A bad id in the file reads as the default.
+    /// F10-FR6: a template id ([`is_template_id`]); `App` checks a new choice against the
+    /// effective templates. A bad id in the file reads as the default.
     #[serde(deserialize_with = "lenient_template")]
     pub default_template: String,
     /// Security: the one-time "audio is sent to <provider>" notice, per provider.

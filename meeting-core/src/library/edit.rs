@@ -81,8 +81,7 @@ impl Library<'_> {
     }
 
     /// F7-FR2 / F11-FR6: the template the next Transcribe or Summarise again uses. The id
-    /// must be a template id; whether that template exists is checked against the effective
-    /// templates in M5.
+    /// must be a template id; `App` checks that it is in the effective set.
     pub fn set_template(&self, id: &str, template_id: &str) -> Result<(), LibError> {
         if !crate::settings::is_template_id(template_id) {
             return Err(invalid("invalid template id"));
