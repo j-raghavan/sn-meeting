@@ -27,6 +27,7 @@ import dev.jraghavan.snmeeting.model.HomeRows
 import dev.jraghavan.snmeeting.model.MeetingSummary
 import dev.jraghavan.snmeeting.model.TodoRef
 import dev.jraghavan.snmeeting.model.MicChoice
+import dev.jraghavan.snmeeting.model.Permissions
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
 import dev.jraghavan.snmeeting.record.BluetoothState
@@ -166,10 +167,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        ensurePermissions()
         render()
-        recover()
-        gate.request() // queued after recovery, so recovered meetings show their new status
+        if (access.onResume(Environment.isExternalStorageManager()) == Permissions.OnResume.STORAGE_CARD) {
+            gate.stop()
+            lists.showStorageNeeded(Permissions.STORAGE_TEXT) { grantStorage() }
+        } else {
+            recover()
+            gate.request() // queued after recovery, so recovered meetings show their new status
+        }
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
             CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; render() } }
         }
@@ -189,6 +194,7 @@ class MainActivity : Activity() {
 
     /** F6-FR1: the five newest meetings and every open to-do, from the core. */
     private fun refreshLists() {
+        if (!Environment.isExternalStorageManager()) return // the all-files card stays (S1)
         CoreJobs.run({ NativeBridge.nativeListRecent(RECENT) }) { json ->
             if (isDestroyed) return@run
             when (val r = CoreJson.list(json, MeetingSummary::from)) {
@@ -237,7 +243,13 @@ class MainActivity : Activity() {
             if (rec !is RecState.Stopping) RecordingService.stop(this)
             return
         }
-        if (!ensurePermissions()) return
+        val mic = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        when (access.onNew(mic, Environment.isExternalStorageManager())) {
+            Permissions.OnNew.GRANT_STORAGE -> return grantStorage()
+            Permissions.OnNew.ASK_MIC -> return requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), MIC_REQUEST)
+            Permissions.OnNew.MIC_BLOCKED -> return InkDialog.error(this, "The microphone isn't allowed", Permissions.MIC_BLOCKED_TEXT)
+            Permissions.OnNew.START -> Unit
+        }
         val p = pick()
         if (!p.canRecord) return render()
         RecordingService.start(this, micChoice)
@@ -272,22 +284,24 @@ class MainActivity : Activity() {
         return "%d:%02d:%02d".format(s / 3600, (s / 60) % 60, s % 60)
     }
 
-    /** Returns true when both mic and all-files access are granted; otherwise asks for them. */
-    private fun ensurePermissions(): Boolean {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
-            return false
-        }
-        if (!Environment.isExternalStorageManager()) {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName"))
-            )
-            return false
-        }
-        return true
+    /** S1: the system's all-files screen, only from a tap (the card's pill, or ＋ New). */
+    private fun grantStorage() {
+        startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+    }
+
+    /** The mic prompt came from ＋ New: granted, so carry on and start the meeting. */
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != MIC_REQUEST) return
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        access.micResult(granted)
+        if (granted) toggle() else render()
     }
 
     companion object {
         private const val RECENT = 5
+        private const val MIC_REQUEST = 1
+        /** Process-wide, so the denial count survives the activity being rebuilt. */
+        private val access = Permissions()
     }
 }

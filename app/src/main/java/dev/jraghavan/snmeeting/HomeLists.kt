@@ -68,6 +68,19 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val on
         }
     }
 
+    /**
+     * S1: no all-files access yet. In place of the meetings, why it is needed and a Grant access
+     * pill that opens the system screen (only when tapped).
+     */
+    fun showStorageNeeded(text: String, onGrant: () -> Unit) {
+        meetingRows.removeAllViews(); todoRows.removeAllViews()
+        meetingTitle.text = "Recent meetings"; todoTitle.text = "Open to-dos"
+        meetingRows.addView(ui.eyebrow("All-files access"), ui.wrap().apply { topMargin = ui.dim(14) })
+        meetingRows.addView(ui.body(text, 17f), ui.wrap().apply { topMargin = ui.dim(8) })
+        meetingRows.addView(ui.pill("Grant access", size = 16f, onClick = onGrant), ui.wrap().apply { topMargin = ui.dim(16); bottomMargin = ui.dim(14) })
+        empty(todoRows, "To-dos appear here once Meetings can read your recordings.")
+    }
+
     /** Open to-dos from every meeting, not just the five listed. [onTick] marks one done. */
     fun showTodos(todos: List<HomeRows.Todo>, error: String? = null, onTick: ((HomeRows.Todo) -> Unit)? = null) {
         todoRows.removeAllViews()
