@@ -5,6 +5,7 @@ use serde::Serialize;
 
 mod file;
 mod render;
+mod store;
 pub use file::{
     MAX_DESCRIPTION, MAX_FILE_BYTES, MAX_INSTRUCTIONS, MAX_LAYOUT, MAX_LIST_ITEM, MAX_LIST_ITEMS,
     MAX_NAME, TemplateError, parse, to_file, validate,
@@ -13,6 +14,7 @@ pub use render::{
     Context, CtxPara, CtxProviders, CtxSection, CtxTodo, FUEL, MAX_OUTPUT, RenderError,
     duration_label, render, sample_context,
 };
+pub use store::{Entry, Origin, Store, USER_DIR};
 
 pub const DEFAULT_ID: &str = "general";
 

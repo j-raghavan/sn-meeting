@@ -27,6 +27,8 @@ pub struct App {
     pub jobs: crate::jobs::Registry,
     /// Whole-call budgets for jobs (F5-FR7); only tests change them.
     pub budgets: crate::jobs::Budgets,
+    /// The user's templates folder under the storage root, and the parsed set (F11-FR3).
+    pub templates: crate::templates::Store,
 }
 
 #[derive(Debug)]
@@ -45,6 +47,7 @@ impl App {
     /// `new` with an explicit time zone (tests use a fixed offset).
     pub fn with_tz(core: Core, storage_root: PathBuf, tz: Arc<dyn LocalTz>) -> App {
         let (settings, origin) = settings::load(&settings::path_in(&core.app_data_dir));
+        let templates = crate::templates::Store::under(&storage_root);
         App {
             core,
             storage_root,
@@ -57,6 +60,7 @@ impl App {
             write: Mutex::new(()),
             jobs: Default::default(),
             budgets: Default::default(),
+            templates,
         }
     }
 

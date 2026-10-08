@@ -95,7 +95,7 @@ impl App {
             summarise_problem,
             summarise_fallback,
             default_template: s.default_template.clone(),
-            templates: crate::templates::builtins(),
+            templates: self.templates.effective(),
             budgets: self.budgets,
         })
     }
