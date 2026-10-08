@@ -56,6 +56,8 @@ object HomeRows {
 
     fun meeting(m: MeetingSummary): Meeting {
         val todos = when {
+            // N12: no summary yet, so "no open to-dos" would say more than is known.
+            m.status == Status.TRANSCRIBED && m.openTodoCount == 0 -> "  ·  not summarised"
             m.status != Status.DONE && m.status != Status.TRANSCRIBED -> ""
             m.openTodoCount == 0 -> "  ·  no open to-dos"
             else -> "  ·  " + Format.plural(m.openTodoCount, "open to-do")

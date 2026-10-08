@@ -34,6 +34,8 @@ class PresentersTest {
         assertEquals("—", u.detail)
         assertEquals("1 open to-do", HomeRows.meeting(row(Status.TRANSCRIBED, todos = 1)).detail.substringAfter("·  "))
         assertEquals("no open to-dos", HomeRows.meeting(row(Status.DONE)).detail.substringAfter("·  "))
+        // N12: transcribed but not summarised has no to-dos to speak of yet.
+        assertEquals("0:42:10  ·  not summarised", HomeRows.meeting(row(Status.TRANSCRIBED)).detail)
     }
 
     @Test fun failedAndUnreadableAreInverted() {
