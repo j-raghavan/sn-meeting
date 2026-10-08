@@ -239,3 +239,17 @@ async fn a_redirect_is_not_followed() {
     }
     assert!(elsewhere.received_requests().await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn oversized_bodies_are_capped() {
+    // An error body is read to 64 KiB: the key past that point is never even read.
+    let body = format!("first line\n{}{OA}", "x".repeat(200 * 1024));
+    let (s, d) = replying(ResponseTemplate::new(500).set_body_string(body)).await;
+    let r = call(&core_for(&s.uri(), d.path(), 5000), "summarise", "openai").await;
+    assert_eq!(detail(&r), "HTTP 500: first line");
+    // A model listing over 8 MiB is not a model listing.
+    let huge = format!(r#"{{"data":[{{"id":"{}"}}]}}"#, "m".repeat(9 * 1024 * 1024));
+    let (s, d) = replying(ResponseTemplate::new(200).set_body_string(huge)).await;
+    let r = call(&core_for(&s.uri(), d.path(), 5000), "summarise", "openai").await;
+    assert_eq!(detail(&r), "HTTP 200: unexpected response");
+}

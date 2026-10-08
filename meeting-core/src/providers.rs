@@ -11,6 +11,9 @@ pub const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// A model listing never needs more pages than this; stop rather than loop on a bad cursor.
 const MAX_PAGES: usize = 10;
 const ANTHROPIC_VERSION: &str = "2023-06-01";
+/// An error body is only mined for one message line; a model page is a few hundred KB at most.
+const MAX_ERROR_BYTES: usize = 64 * 1024;
+const MAX_LIST_BYTES: usize = 8 * 1024 * 1024;
 
 /// API roots. `Default` is the real hosts; tests point every field at a wiremock server.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,12 +142,17 @@ async fn list_ids(
             .await
             .map_err(transport)?;
         let code = resp.status().as_u16();
-        let body = resp.text().await.map_err(transport)?;
-        if !(200..300).contains(&code) {
-            return Err(Fail::Http(code, body));
+        let ok = (200..300).contains(&code);
+        let (body, cut) =
+            read_body(resp, if ok { MAX_LIST_BYTES } else { MAX_ERROR_BYTES }).await?;
+        if !ok {
+            return Err(Fail::Http(code, body)); // only its first line or JSON message is shown
         }
-        let (page, next) = parse_page(key.provider, &body)
-            .ok_or_else(|| Fail::Http(code, "unexpected response".into()))?;
+        let unexpected = || Fail::Http(code, "unexpected response".into());
+        if cut {
+            return Err(unexpected());
+        }
+        let (page, next) = parse_page(key.provider, &body).ok_or_else(unexpected)?;
         ids.extend(page);
         match next {
             Some(n) => cursor = Some(n),
@@ -152,6 +160,22 @@ async fn list_ids(
         }
     }
     Ok(ids)
+}
+
+/// Read at most `cap` bytes of the body, decoding lossily; `true` when the body was longer.
+async fn read_body(mut resp: reqwest::Response, cap: usize) -> Result<(String, bool), Fail> {
+    let mut buf: Vec<u8> = Vec::new();
+    let mut cut = false;
+    while let Some(chunk) = resp.chunk().await.map_err(transport)? {
+        let room = cap - buf.len();
+        if chunk.len() > room {
+            buf.extend_from_slice(&chunk[..room]);
+            cut = true;
+            break;
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok((String::from_utf8_lossy(&buf).into_owned(), cut))
 }
 
 /// One listing request. Keys go in headers only: never in the URL (rig's Gemini wire puts
