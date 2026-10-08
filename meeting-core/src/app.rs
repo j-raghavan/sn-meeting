@@ -325,6 +325,10 @@ impl App {
         }
         {
             let mut st = self.state();
+            if st.origin == Origin::Newer {
+                let e = "settings.json is from a newer version of Meetings, so it can't be changed here";
+                return json!({"error": e, "field": null}).to_string();
+            }
             let ks = |p| settings::key_status(&self.core.key_dir, p);
             let ctx = Ctx {
                 storage_root: &self.storage_root,

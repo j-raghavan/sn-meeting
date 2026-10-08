@@ -179,6 +179,9 @@ pub enum Origin {
     Defaults,
     /// The file was corrupt or unreadable: kept as `settings.json.bad`, defaults in use.
     Recovered,
+    /// Written by a newer app (a higher `schema`): kept untouched, defaults in use, and not
+    /// saved over until that app's version is back (as a newer sidecar is refused).
+    Newer,
 }
 
 pub fn path_in(app_data_dir: &Path) -> PathBuf {
@@ -191,12 +194,21 @@ pub fn load(path: &Path) -> (Settings, Origin) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             (Settings::default(), Origin::Defaults)
         }
+        Ok(bytes) if newer(&bytes) => (Settings::default(), Origin::Newer),
         Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
             Ok(s) => (sanitised(s), Origin::File),
             Err(_) => (Settings::default(), keep_bad(path)),
         },
         Err(_) => (Settings::default(), keep_bad(path)),
     }
+}
+
+/// Whether the file declares a schema newer than this app's.
+fn newer(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(bytes)
+        .ok()
+        .and_then(|v| v["schema"].as_u64())
+        .is_some_and(|n| n > u64::from(SCHEMA))
 }
 
 /// A hand-edited file may hold values a patch could never set: each such field reads as its

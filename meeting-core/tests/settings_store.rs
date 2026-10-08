@@ -216,3 +216,31 @@ fn bad_role_provider_in_file_does_not_block_other_patches() {
     );
     assert_eq!(e.unwrap_err().field, Some("transcribe.model"));
 }
+
+#[test]
+fn newer_schema_is_not_silently_rewritten() {
+    let d = tempfile::tempdir().unwrap();
+    let p = settings::path_in(d.path());
+    let newer = r#"{"schema": 2, "saveFolder": "Document/Meetings", "brandNew": {"x": 1}}"#;
+    fs::write(&p, newer).unwrap();
+    assert_eq!(load(&p), (Settings::default(), Origin::Newer));
+    let mut core = Core::device(d.path().to_str().unwrap());
+    core.key_dir = d.path().join("no-keys");
+    let app = App::new(core, d.path().into());
+    let v: Value = serde_json::from_str(&app.get_settings_json()).unwrap();
+    assert_eq!(v["origin"], "newer");
+    let r: Value = serde_json::from_str(&app.set_settings_json(r#"{"mic": "auto"}"#)).unwrap();
+    assert!(
+        r["error"].as_str().unwrap().contains("newer version"),
+        "{r}"
+    );
+    assert_eq!(
+        fs::read_to_string(&p).unwrap(),
+        newer,
+        "the file is untouched"
+    );
+    assert!(!d.path().join("settings.json.bad").exists());
+    // schema 1 and a missing schema still load.
+    fs::write(&p, r#"{"saveFolder": "Notes"}"#).unwrap();
+    assert_eq!(load(&p).1, Origin::File);
+}
