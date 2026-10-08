@@ -16,6 +16,8 @@ import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.TemplateChoice
+import dev.jraghavan.snmeeting.model.TemplateRow
 import dev.jraghavan.snmeeting.model.TestResult
 import dev.jraghavan.snmeeting.record.BluetoothState
 import dev.jraghavan.snmeeting.record.BtSnapshot
@@ -27,7 +29,7 @@ import dev.jraghavan.snmeeting.record.usbInputs
  * Settings (spec F10) in the Inkwell style (F9): microphone, save folder, the transcribe and
  * summarise providers with Test connection, and templates. The core owns settings.json: each
  * choice is a merge patch through nativeSetSettings, saved at once (no Save button), and the
- * page shows the core's reply. Sections not yet read from the core still use [MockSettings].
+ * page shows the core's reply.
  */
 class SettingsActivity : Activity() {
 
@@ -43,6 +45,7 @@ class SettingsActivity : Activity() {
     private var bt: BluetoothState? = null
     /** The Custom… folder field is open. */
     private var editingFolder = false
+    private var templates: List<TemplateRow> = emptyList()
 
     /**
      * The last Test connection result per "role/provider" (F10-FR5: shown until the next test),
@@ -77,7 +80,11 @@ class SettingsActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // Key files may have been added and the default template changed in Templates.
+        // Key files may have been added and templates changed in Templates or on the desktop.
+        // CoreJobs answers in order: the templates are in hand when the settings arrive.
+        scope.core({ NativeBridge.nativeListTemplates() }) { json ->
+            CoreJson.list(json, TemplateRow::from).getOrNull()?.let { templates = it }
+        }
         scope.core({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
     }
 
@@ -164,6 +171,23 @@ class SettingsActivity : Activity() {
         }
     }
 
+    /** F10-FR6: the default template for new transcriptions, and the way to manage them (F11). */
+    private fun templateSection(column: LinearLayout) {
+        val s = settings ?: return
+        ui.section(column, "Templates").apply {
+            addView(ui.note("Default for new transcriptions", 13f).apply { setPadding(0, ui.dim(10), 0, 0) })
+            TemplateChoice.of(null, s.effectiveDefaultTemplate, templates).options.forEachIndexed { i, t ->
+                if (i > 0) addView(ui.hairline())
+                choice(t.name, t.description, t.id == s.effectiveDefaultTemplate) { patch(SettingsPatch.defaultTemplate(t.id)) }
+            }
+            errors["defaultTemplate"]?.let { addView(error(it)) }
+            addView(ui.hairline())
+            addView(ui.pill("Manage templates  →", size = 16f) {
+                startActivity(Intent(this@SettingsActivity, TemplatesActivity::class.java)); overridePendingTransition(0, 0)
+            }, ui.wrap().apply { topMargin = ui.dim(12); bottomMargin = ui.dim(12) })
+        }
+    }
+
     /** The core's reason a change was refused, under the field it concerns. */
     private fun error(message: String): TextView = ui.note(message, 13f, ui.ink).apply { setPadding(0, ui.dim(4), 0, ui.dim(10)) }
 
@@ -199,19 +223,7 @@ class SettingsActivity : Activity() {
             "Anthropic can't transcribe audio, so it is offered for summaries only.")
         providerSection(column, "Summary & to-dos", SettingsView.SUMMARISE, null)
 
-        ui.section(column, "Templates").apply {
-            val def = MockTemplates.byId(MockSettings.defaultTemplate)
-            addView(LinearLayout(this@SettingsActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(0, ui.dim(10), 0, ui.dim(10))
-                addView(ui.note("Default for new transcriptions", 13f))
-                addView(ui.body(def?.name ?: "General meeting", 18f, bold = true), ui.wrap().apply { topMargin = ui.dim(2) })
-                addView(ui.note(def?.description ?: "", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
-            })
-            addView(ui.pill("Manage templates  →", size = 16f) {
-                startActivity(Intent(this@SettingsActivity, TemplatesActivity::class.java)); overridePendingTransition(0, 0)
-            }, ui.wrap().apply { bottomMargin = ui.dim(12) })
-        }
+        templateSection(column)
 
         ui.section(column, "About").apply {
             addView(LinearLayout(this@SettingsActivity).apply {
