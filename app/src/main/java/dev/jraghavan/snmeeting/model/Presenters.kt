@@ -100,6 +100,19 @@ data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: St
     }
 }
 
+/** F7-FR3: what the meeting screen's Summary card shows; null when there is no summary yet. */
+data class SummaryCard(val summary: String?, val decisions: List<String>, val sections: List<Section>) {
+    companion object {
+        fun of(m: Sidecar): SummaryCard? {
+            val summary = m.summary?.trim()?.ifEmpty { null }
+            val decisions = m.decisions.map { it.trim() }.filter { it.isNotEmpty() }
+            val sections = m.sections.filter { it.heading.isNotBlank() || it.body.isNotBlank() }
+            if (summary == null && decisions.isEmpty() && sections.isEmpty()) return null
+            return SummaryCard(summary, decisions, sections)
+        }
+    }
+}
+
 /**
  * F7-FR2: the meeting's action row, from its status, whether its job is running here, and the
  * key status of each role's provider. Every status has an enabled action or shows progress (INV8).

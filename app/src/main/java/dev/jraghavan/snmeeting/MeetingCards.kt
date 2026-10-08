@@ -6,10 +6,11 @@ import android.view.Gravity
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.SummaryCard
 import dev.jraghavan.snmeeting.model.Todo
 import dev.jraghavan.snmeeting.model.TranscriptPages
 
-/** The meeting screen's to-do and transcript cards (F7-FR3), in the Inkwell style. */
+/** The meeting screen's summary, to-do and transcript cards (F7-FR3), in the Inkwell style. */
 class MeetingCards(private val a: Activity, private val ui: Inkwell) {
 
     /** This meeting's to-dos, open and done; [onTick] stores the new state. */
@@ -44,6 +45,29 @@ class MeetingCards(private val a: Activity, private val ui: Inkwell) {
                     TranscriptPages.todoMeta(t)?.let { addView(ui.note(it, 13f), ui.wrap().apply { topMargin = ui.dim(3) }) }
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             })
+        }
+    }
+
+    /**
+     * S5: the summary, then Decisions as bullets, then each section under its mono eyebrow
+     * heading. Static text in one card: the page scrolls, the card never does (e-ink).
+     */
+    fun summary(c: SummaryCard): View = ui.card(padV = ui.dim(22)).apply {
+        var first = true
+        /** The space above a block: none for the first. */
+        fun top(): Int = if (first) { first = false; 0 } else ui.dim(22)
+        c.summary?.let { addView(ui.body(it, 17f).apply { setLineSpacing(0f, 1.35f) }, ui.fullWidth().apply { topMargin = top() }) }
+        if (c.decisions.isNotEmpty()) {
+            addView(ui.eyebrow("Decisions"), ui.wrap().apply { topMargin = top() })
+            c.decisions.forEach { d ->
+                addView(ui.body("•  $d", 17f).apply { setLineSpacing(0f, 1.3f) }, ui.fullWidth().apply { topMargin = ui.dim(8) })
+            }
+        }
+        c.sections.forEach { sec ->
+            addView(ui.eyebrow(sec.heading), ui.wrap().apply { topMargin = top() })
+            if (sec.body.isNotBlank()) {
+                addView(ui.body(sec.body.trim(), 17f).apply { setLineSpacing(0f, 1.35f) }, ui.fullWidth().apply { topMargin = ui.dim(8) })
+            }
         }
     }
 

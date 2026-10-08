@@ -54,6 +54,18 @@ class PresentersTest {
         "m", at, 2_530_000, status, failedAt, title, null, null, null, null, null, emptyList(), emptyList(), mic,
         texts.mapIndexed { i, t -> Segment("m-0${i + 1}.m4a", i * 900_000L, 900_000, t, null) }, null, note, emptyList())
 
+    @Test fun summaryCard() { // F7-FR3, S5
+        assertEquals(null, SummaryCard.of(sc(Status.TRANSCRIBED)))
+        val done = sc(Status.DONE).copy(summary = "  We agreed the scope.  ", decisions = listOf("Ship it", " "),
+            sections = listOf(Section("Blockers", "- None"), Section(" ", " ")))
+        val c = SummaryCard.of(done)!!
+        assertEquals("We agreed the scope.", c.summary)
+        assertEquals(listOf("Ship it"), c.decisions)
+        assertEquals(listOf(Section("Blockers", "- None")), c.sections)
+        // Decisions or sections alone still make a card.
+        assertEquals(listOf("Ship it"), SummaryCard.of(sc(Status.DONE).copy(decisions = listOf("Ship it")))!!.decisions)
+    }
+
     @Test fun meetingHeader() {
         val h = MeetingHeader.of(sc(texts = listOf(null, null, null), note = "mic disconnected"))
         assertEquals(Format.UNTITLED, h.title)

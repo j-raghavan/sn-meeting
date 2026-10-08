@@ -20,6 +20,7 @@ import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
 import dev.jraghavan.snmeeting.model.Sidecar
 import dev.jraghavan.snmeeting.model.Status
+import dev.jraghavan.snmeeting.model.SummaryCard
 import dev.jraghavan.snmeeting.model.TemplateChoice
 import dev.jraghavan.snmeeting.model.TemplateRow
 import dev.jraghavan.snmeeting.model.Todo
@@ -321,6 +322,12 @@ class MeetingActivity : Activity() {
             addView(actionsRow(actions!!))
 
             val m = v.meeting
+            SummaryCard.of(m)?.let { c ->
+                addView(ui.spacer(ui.dim(36)))
+                addView(ui.eyebrowItalic("Summary"))
+                addView(ui.spacer(ui.dim(14)))
+                addView(cards.summary(c))
+            }
             if (m.todos.isNotEmpty() || m.status == Status.DONE) {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("To-dos from this meeting"))
