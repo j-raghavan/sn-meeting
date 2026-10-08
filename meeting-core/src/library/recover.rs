@@ -58,6 +58,13 @@ impl Library<'_> {
                 Status::Transcribing if !live.jobs.contains(&id) => Some(Event::RecoverNoJob),
                 _ => None,
             };
+            // A hand-edited pair (failed without failedAt, failedAt on another status) is
+            // rewritten as the status machine reads it (INV8).
+            let canonical = phase(&sc).parts() != (sc.status, sc.failed_at);
+            if canonical {
+                let p = phase(&sc);
+                set_phase(&mut sc, p);
+            }
             let mut moved = false;
             if let Some(ev) = event
                 && let Ok(p) = status::next(phase(&sc), ev)
@@ -73,7 +80,7 @@ impl Library<'_> {
             } else {
                 (Vec::new(), Vec::new())
             };
-            if (moved || !flagged.is_empty()) && sidecar::write(&f.dir, &sc).is_err() {
+            if (moved || canonical || !flagged.is_empty()) && sidecar::write(&f.dir, &sc).is_err() {
                 continue; // not recovered after all; the next launch tries again
             }
             if moved {

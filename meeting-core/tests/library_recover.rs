@@ -202,3 +202,46 @@ fn a_meeting_that_cannot_be_written_is_retried_next_time() {
     assert_eq!(r["recovered"], json!([]));
     assert_eq!(recover(&e.app(), false)["recovered"], json!([ID0]));
 }
+
+#[test]
+fn failed_without_failed_at_is_normalised() {
+    // INV8: a hand-edited sidecar still offers an action.
+    let e = Env::new();
+    let app = e.app();
+    let a = begin(&app, T0)["id"].as_str().unwrap().to_owned();
+    app.finish_json(&a, 1000, "");
+    let b = begin(&app, T0 + 60_000)["id"].as_str().unwrap().to_owned();
+    app.finish_json(&b, 1000, "");
+    let dir = e.export();
+    let mut sc = read_sidecar(&dir, &a);
+    sc.status = meeting::status::Status::Failed;
+    sc.failed_at = None;
+    meeting::sidecar::write(&dir, &sc).unwrap();
+    let mut sc = read_sidecar(&dir, &b);
+    sc.failed_at = Some(meeting::status::FailedAt::Summarising); // stray on `recorded`
+    meeting::sidecar::write(&dir, &sc).unwrap();
+    let rows = parse(&app.list_recent_json(5));
+    let row = |id: &str| {
+        rows.as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        (row(&a)["status"].clone(), row(&a)["failedAt"].clone()),
+        (json!("failed"), json!("transcribing"))
+    );
+    assert_eq!(
+        (row(&b)["status"].clone(), row(&b)["failedAt"].clone()),
+        (json!("recorded"), json!(null))
+    );
+    let v = parse(&app.get_meeting_json(&a));
+    assert_eq!(v["meeting"]["failedAt"], "transcribing");
+    // Recovery rewrites the files themselves, without reporting them as recovered.
+    assert_eq!(recover(&app, true)["recovered"], json!([]));
+    let sa = read_sidecar(&dir, &a);
+    assert_eq!(sa.failed_at, Some(meeting::status::FailedAt::Transcribing));
+    assert_eq!(read_sidecar(&dir, &b).failed_at, None);
+}

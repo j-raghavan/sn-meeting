@@ -106,8 +106,10 @@ impl Library<'_> {
             started_at: sc.started_at.clone(),
             started_at_ms: ms,
             duration_ms: (source == Source::Sidecar).then_some(sc.duration_ms),
-            status: sc.status,
-            failed_at: sc.failed_at,
+            // The status machine's reading: `failed` without `failedAt` is failed(transcribing),
+            // a stray `failedAt` is dropped (INV8), so the shell always has an action to offer.
+            status: super::phase(sc).parts().0,
+            failed_at: super::phase(sc).parts().1,
             title: sc.title.clone(),
             segment_count: sc.segments.len(),
             open_todo_count: sc.todos.iter().filter(|t| !t.done).count(),
@@ -124,11 +126,13 @@ impl Library<'_> {
     /// `nativeGetMeeting`. A sidecar that can't be read is an error here, with its reason.
     pub fn get(&self, id: &str) -> Result<MeetingView, LibError> {
         let f = self.find(id)?;
-        let (sc, source) = if f.has_sidecar {
+        let (mut sc, source) = if f.has_sidecar {
             (sidecar::read(&f.dir, id)?, Source::Sidecar)
         } else {
             (self.infer(id, &f.audio), Source::Legacy)
         };
+        let p = super::phase(&sc);
+        super::set_phase(&mut sc, p);
         let path = |n: &str| f.dir.join(n).to_string_lossy().into_owned();
         Ok(MeetingView {
             segment_paths: sc.segments.iter().map(|s| path(&s.file)).collect(),
