@@ -67,6 +67,8 @@ class MainActivity : Activity() {
     private var bt: BluetoothState? = null
     /** settings.mic, read on resume (F2-FR8); Automatic until the core answers. */
     private var micChoice: MicChoice = MicChoice.Auto
+    /** settings.saveFolder, for the line under ＋ New (F10-FR3). */
+    private var saveFolder = "EXPORT/sn-meeting"
 
     // Ticks once a second while recording — e-ink friendly (no faster redraws).
     private val tick = object : Runnable {
@@ -169,7 +171,7 @@ class MainActivity : Activity() {
         recover()
         gate.request() // queued after recovery, so recovered meetings show their new status
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
-            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; render() } }
         }
     }
 
@@ -219,7 +221,7 @@ class MainActivity : Activity() {
         val next = pick().toggled() ?: return
         micChoice = next; render()
         CoreJobs.run({ NativeBridge.nativeSetSettings(SettingsPatch.mic(next)) }) { json ->
-            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; render() } }
         }
     }
 
@@ -261,7 +263,7 @@ class MainActivity : Activity() {
             is RecState.Starting -> "Connecting the microphone…"
             is RecState.Recording -> "Recording. The screen can sleep; it carries on."
             RecState.Stopping -> "Saving…"
-            is RecState.Idle -> r.message ?: "Recordings are saved to EXPORT/sn-meeting"
+            is RecState.Idle -> r.message ?: "Recordings are saved to $saveFolder"
         }
     }
 
