@@ -157,6 +157,32 @@ fn a_late_finish_after_recovery_still_records_the_length_and_note() {
 }
 
 #[test]
+fn a_recovered_meeting_lasts_to_the_end_of_its_last_segment() {
+    // S13: a crash leaves durationMs 0; recovery and the shell's measurement set it.
+    let e = Env::new();
+    {
+        let app = e.app();
+        begin(&app, T0);
+        let dir = e.export();
+        app.close_segment_json(ID0, 0, 900_000);
+        app.add_segment_json(
+            ID0,
+            dir.join(format!("{ID0}-02.m4a")).to_str().unwrap(),
+            900_100,
+        );
+        fs::write(dir.join(format!("{ID0}-01.m4a")), b"aac").unwrap();
+        fs::write(dir.join(format!("{ID0}-02.m4a")), b"aac").unwrap();
+    }
+    let app = e.app();
+    let r = recover(&app, false);
+    assert_eq!(r["measure"][0]["index"], 1, "{r}");
+    let len = |app: &meeting::app::App| parse(&app.list_recent_json(1))[0]["durationMs"].clone();
+    assert_eq!(len(&app), 900_000, "the closed first segment, at least");
+    app.close_segment_json(ID0, 1, 400_000);
+    assert_eq!(len(&app), 1_300_100);
+}
+
+#[test]
 fn transcribing_without_a_job_fails_and_keeps_its_text() {
     // F3-AC4.
     let e = Env::new();

@@ -93,7 +93,13 @@ impl Library<'_> {
             } else {
                 (Vec::new(), Vec::new())
             };
-            let changed = moved || canonical || empty || !flagged.is_empty();
+            // S13: a crash leaves durationMs 0; it lasts at least to its last closed segment.
+            let before = sc.duration_ms;
+            if sc.status == Status::Recorded {
+                super::extend_duration(&mut sc);
+            }
+            let longer = sc.duration_ms != before;
+            let changed = moved || canonical || empty || longer || !flagged.is_empty();
             if changed && sidecar::write(&f.dir, &sc).is_err() {
                 continue; // not recovered after all; the next launch tries again
             }
