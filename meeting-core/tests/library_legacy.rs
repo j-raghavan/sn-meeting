@@ -119,3 +119,33 @@ fn the_first_write_creates_a_recorded_sidecar() {
     let a = list.iter().find(|m| m.id == SPIKE_A).unwrap();
     assert_eq!((a.source, a.started_at_ms), (Source::Sidecar, T0 - 187_000));
 }
+
+#[test]
+fn duplicate_numbers_list_once() {
+    // "-001" and "-1" are not segment names (only the canonical "-01"), so one number can't
+    // list twice.
+    let e = Env::new();
+    let dir = e.folder("EXPORT/sn-meeting");
+    for name in ["-01", "-001", "-1", "-0001", "-100"] {
+        fs::write(dir.join(format!("{SPIKE_B}{name}.m4a")), b"aac").unwrap();
+    }
+    let v = parse(&e.app().get_meeting_json(SPIKE_B));
+    let files: Vec<&str> = v["meeting"]["segments"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["file"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        files,
+        [format!("{SPIKE_B}-01.m4a"), format!("{SPIKE_B}-100.m4a")]
+    );
+    assert_eq!(
+        meeting::sidecar::segment_number(SPIKE_B, &format!("{SPIKE_B}-001.m4a")),
+        None
+    );
+    assert_eq!(
+        meeting::sidecar::segment_number(SPIKE_B, &format!("{SPIKE_B}-100.m4a")),
+        Some(Some(100))
+    );
+}

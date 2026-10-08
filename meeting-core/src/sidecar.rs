@@ -193,8 +193,8 @@ pub fn is_valid_id(id: &str) -> bool {
     stamp_ok && matches!(&b[15..], [] | [b'b'..=b'z'])
 }
 
-/// `<id>.m4a` (legacy) or `<id>-NN.m4a`, NN two or more digits from 01. Nothing else: no
-/// separators, no `..`, so `dir.join(name)` stays in `dir` (Security, path traversal).
+/// `<id>.m4a` (legacy) or `<id>-NN.m4a`, NN from 01 as `segment_file_name` writes it. Nothing
+/// else: no separators, no `..`, so `dir.join(name)` stays in `dir` (Security, path traversal).
 pub fn segment_number(id: &str, name: &str) -> Option<Option<u32>> {
     let stem = name.strip_suffix(".m4a")?.strip_prefix(id)?;
     if stem.is_empty() {
@@ -204,7 +204,11 @@ pub fn segment_number(id: &str, name: &str) -> Option<Option<u32>> {
     if nn.len() < 2 || !nn.bytes().all(|c| c.is_ascii_digit()) {
         return None;
     }
-    nn.parse().ok().filter(|n| *n >= 1).map(Some)
+    // Canonical only ("-01", "-100"; not "-001"), so one number has one name.
+    nn.parse()
+        .ok()
+        .filter(|n| *n >= 1 && segment_file_name(id, *n) == name)
+        .map(Some)
 }
 
 pub fn segment_file_name(id: &str, number: u32) -> String {
