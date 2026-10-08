@@ -30,7 +30,9 @@ import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicPick
 import dev.jraghavan.snmeeting.record.MicSelector
 import dev.jraghavan.snmeeting.record.RecState
+import dev.jraghavan.snmeeting.record.Recoverer
 import dev.jraghavan.snmeeting.record.RecordingService
+import dev.jraghavan.snmeeting.record.RetrieverDuration
 import dev.jraghavan.snmeeting.record.usbInputs
 
 /**
@@ -232,8 +234,21 @@ class MainActivity : Activity() {
         ensurePermissions()
         render()
         fillTodos() // a to-do may have been ticked on the meeting screen
+        recover()
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
             CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
+        }
+    }
+
+    /**
+     * F3-FR5 on launch and resume: meetings a crash left recording or transcribing are moved on,
+     * and segments that were never closed are measured and closed. A live service is left alone.
+     */
+    private fun recover() {
+        val alive = RecordingService.running
+        CoreJobs.exec {
+            Recoverer(NativeBridge::nativeRecover, RetrieverDuration) { id, i, ms -> NativeBridge.nativeCloseSegment(id, i, ms) }
+                .run(alive)
         }
     }
 
