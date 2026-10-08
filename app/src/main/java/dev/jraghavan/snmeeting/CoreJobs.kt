@@ -63,3 +63,41 @@ object CoreJobs {
         }
     }
 }
+
+/**
+ * Long jobs (transcribe, summarise, Test connection; M2/M3 ruling) on their own single thread,
+ * so a minutes-long job never delays a tick or a rename on [CoreJobs]. It knows which keys are
+ * running, so a screen rebuilt mid-job still shows its progress, and tells listeners when a job
+ * ends (Home refreshes, F6-FR4).
+ */
+class JobLane(private val jobs: Jobs) {
+    private val running = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    private val listeners = LinkedHashSet<(String) -> Unit>()
+
+    fun isRunning(key: String) = key in running
+
+    /** Refuses a second job for the same key (one job per meeting): false then. Main thread. */
+    fun run(key: String, work: () -> String, done: (String) -> Unit): Boolean {
+        if (!running.add(key)) return false
+        jobs.run(work) { r ->
+            running.remove(key)
+            done(r)
+            listeners.toList().forEach { it(key) }
+        }
+        return true
+    }
+
+    /** Main thread; the returned function unsubscribes. */
+    fun onFinished(l: (String) -> Unit): () -> Unit {
+        listeners += l
+        return { listeners -= l }
+    }
+}
+
+object LongJobs {
+    val lane by lazy {
+        val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-jobs").apply { isDaemon = true } }
+        val main = Handler(Looper.getMainLooper())
+        JobLane(Jobs(worker) { main.post(it) })
+    }
+}
