@@ -24,6 +24,7 @@ const MAX_SETTINGS_BYTES: u64 = 256 * 1024;
 const MAX_MODEL_LEN: usize = 128;
 
 /// Fields this version doesn't know, kept on rewrite at every level (F10-FR7, as F3-FR6).
+/// Their values are kept; how a number is written may change (`1e2` becomes `100.0`).
 pub type Extra = Map<String, Value>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

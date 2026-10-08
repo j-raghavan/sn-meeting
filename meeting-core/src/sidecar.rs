@@ -9,6 +9,8 @@ pub const SCHEMA: u32 = 1;
 /// A sidecar is a few KB; a transcript of a long meeting a few hundred. Bigger is not ours.
 pub const MAX_SIDECAR_BYTES: u64 = 8 * 1024 * 1024;
 
+/// Unknown fields, kept on rewrite. Their values are kept; how a number is written may change
+/// (`1e2` is written back as `100.0`), since serde_json reads it as a float.
 type Extra = Map<String, Value>;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
