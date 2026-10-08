@@ -7,10 +7,14 @@
          /storage/emulated/0/EXPORT/sn-meeting folder (same approach as inkread's PDF export). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- The Rust core calls the provider APIs over HTTPS (Test connection, transcription). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:allowBackup="false"
         android:label="Meetings"
-        android:theme="@style/Meetings">
+        android:theme="@style/Meetings"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"

@@ -14,7 +14,14 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
+        ndk {
+            // The Supernote is arm64; the core is built for nothing else (F1-FR4).
+            abiFilters += "arm64-v8a"
+        }
     }
+
+    // libmeeting.so is staged into src/main/jniLibs/ by buildApk.sh (cargo-ndk) before this runs.
+    sourceSets["main"].jniLibs.srcDirs("src/main/jniLibs")
 
     buildTypes {
         release {
@@ -29,6 +36,17 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    // Don't let Gradle recompress the prebuilt .so (it is already stripped).
+    packaging {
+        jniLibs.useLegacyPackaging = false
+    }
+
+    // F8-FR4: the spike shipped an API-31 call to the API-30 device; make that a build failure.
+    lint {
+        error += "NewApi"
+        abortOnError = true
     }
 }
 
