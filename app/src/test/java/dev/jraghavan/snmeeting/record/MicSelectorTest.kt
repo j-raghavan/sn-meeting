@@ -1,5 +1,6 @@
 package dev.jraghavan.snmeeting.record
 
+import dev.jraghavan.snmeeting.model.MicChoice
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -41,5 +42,34 @@ class MicSelectorTest {
 
     @Test fun bluetoothNeedsTheAdapterOn() {
         assertNull(MicSelector.pick(emptyList(), jabra.copy(adapterOn = false)).chosen)
+    }
+
+    @Test fun rememberedChoiceWinsWhenPresent() { // F2-FR8
+        val p = MicSelector.pick(usb, jabra, MicChoice.Bluetooth("Jabra"))
+        assertEquals("Bluetooth — Jabra", p.chosen!!.label)
+        assertEquals(MicChoice.Usb("USB-Audio - USB Audio"), p.toggled())
+    }
+
+    @Test fun toggleSwitchesBetweenTheTwo() {
+        val p = MicSelector.pick(usb, jabra, MicChoice.Auto)
+        assertEquals(MicChoice.Bluetooth("Jabra"), p.toggled())
+        assertNull(MicSelector.pick(usb, BtSnapshot.NONE).toggled()) // one mic: nothing to switch to
+        assertNull(MicSelector.pick(emptyList(), BtSnapshot.NONE).toggled())
+    }
+
+    @Test fun rememberedMicAbsentFallsBackToUsbFirst() {
+        assertEquals(MicKind.USB, MicSelector.pick(usb, BtSnapshot.NONE, MicChoice.Bluetooth("Jabra")).chosen!!.kind)
+        val two = jabra.copy(hfpConnected = listOf("Jabra", "Bose"))
+        assertEquals("Bluetooth — Jabra", MicSelector.pick(emptyList(), two, MicChoice.Usb("Gone")).chosen!!.label)
+    }
+
+    @Test fun nameMatchIsExact() {
+        assertEquals("USB — USB-Audio - USB Audio", MicSelector.pick(usb, jabra, MicChoice.Bluetooth("jabra")).chosen!!.label)
+        assertEquals("Bluetooth — Bose", MicSelector.pick(emptyList(), jabra.copy(hfpConnected = listOf("Jabra", "Bose")), MicChoice.Bluetooth("Bose")).chosen!!.label)
+    }
+
+    @Test fun bluetoothOffNamesTheRememberedHeadset() { // EC11: bonded list is empty while off
+        assertEquals("Turn on Bluetooth to use Jabra", MicSelector.pick(emptyList(), BtSnapshot.NONE, MicChoice.Bluetooth("Jabra")).reason)
+        assertEquals(MicSelector.NONE, MicSelector.pick(emptyList(), BtSnapshot.NONE, MicChoice.Usb("x")).reason)
     }
 }
