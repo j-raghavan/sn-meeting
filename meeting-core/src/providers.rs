@@ -42,6 +42,9 @@ pub fn http_client(connect_timeout: Duration, https_only: bool) -> Result<reqwes
     reqwest::Client::builder()
         .tls_certs_only(roots)
         .https_only(https_only)
+        // Never follow a redirect: reqwest strips Authorization across origins, but not our
+        // x-api-key / x-goog-api-key headers. A 3xx is reported as an HTTP error instead.
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(connect_timeout)
         .build()
         .map_err(|e| e.without_url().to_string())

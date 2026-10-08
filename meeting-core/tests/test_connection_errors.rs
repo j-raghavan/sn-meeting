@@ -217,3 +217,25 @@ async fn a_one_line_key_file_does_not_leak() {
         assert_eq!(r["status"], "key_file_error", "{body:?}");
     }
 }
+
+#[tokio::test]
+async fn a_redirect_is_not_followed() {
+    let elsewhere = MockServer::start().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": []})))
+        .expect(0)
+        .mount(&elsewhere)
+        .await;
+    for provider in ["openai", "anthropic", "gemini"] {
+        let to = format!("{}/v1/models", elsewhere.uri());
+        let (s, d) =
+            replying(ResponseTemplate::new(302).insert_header("location", to.as_str())).await;
+        let r = call(&core_for(&s.uri(), d.path(), 5000), "summarise", provider).await;
+        assert_eq!(
+            (r["status"].clone(), detail(&r)),
+            (json!("http_error"), "HTTP 302"),
+            "{provider}"
+        );
+    }
+    assert!(elsewhere.received_requests().await.unwrap().is_empty());
+}
