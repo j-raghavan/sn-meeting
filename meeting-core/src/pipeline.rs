@@ -11,7 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 mod summary;
+mod transcript;
 pub use summary::{context, summarise};
+pub use transcript::rewrite as rewrite_transcript;
 
 /// A meeting with no segment at all (a recording that never produced a file).
 pub const NO_AUDIO: &str = "No audio was recorded";
@@ -163,6 +165,9 @@ pub async fn transcribe(
         store(lib, lock, id, &seg, text, None)?;
     }
     let p = finish(lib, lock, id, Event::AllSegmentsText, None)?;
+    // S4: the transcript file exists as soon as there is a transcript (summary empty); a
+    // summary re-renders it. A failure here is reported by the summary's own write.
+    let _ = transcript::rewrite(lib, lock, id, &plan.templates, true);
     if plan.summarise.is_none() {
         // Transcribed; Summarise again is offered once the key is there (F7-FR2).
         let problem = plan.summarise_problem.clone();

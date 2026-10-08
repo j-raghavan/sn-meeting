@@ -1,7 +1,9 @@
 //! F5-FR4 / FR5 / FR8: the summarise job, run after transcription or as "Summarise again" on the
 //! stored transcript. The merge is made on a fresh read of the sidecar, the transcript file is
-//! written before the sidecar, and a render error writes neither (the old file stays).
-use super::{JobError, JobPlan, apply, finish, joined, locked, paragraphs};
+//! written before the sidecar, and a render error writes neither (the old file stays). The
+//! layout renders outside the write lock (S16, `transcript.rs`).
+use super::transcript::{self, template_of};
+use super::{JobError, JobPlan, finish, joined, locked, paragraphs};
 use crate::jobs::{self, Cancel};
 use crate::library::{self, LibError, Library};
 use crate::providers::{self, CallFail, JsonAsk};
@@ -12,20 +14,6 @@ use crate::templates::{self, Context, CtxPara, CtxProviders, CtxSection, CtxTodo
 use crate::tz;
 use chrono::{DateTime, FixedOffset};
 use std::sync::Mutex;
-
-/// The meeting's template from the plan, or General with a note when it no longer exists
-/// (F11-FR6).
-fn template_for<'a>(plan: &'a JobPlan, id: &str) -> Option<(&'a Template, Option<String>)> {
-    if let Some(t) = plan.templates.iter().find(|t| t.id == id) {
-        return Some((t, None));
-    }
-    let general = plan
-        .templates
-        .iter()
-        .find(|t| t.id == templates::DEFAULT_ID)?;
-    let note = format!("Template {id} was not found; used {}", general.name);
-    Some((general, Some(note)))
-}
 
 /// `nativeSummarise` and the tail of `transcribe`. Returns `done` or failed(summarising).
 pub async fn summarise(
@@ -52,7 +40,7 @@ pub async fn summarise(
     .map_err(JobError::NotStarted)?;
     let fail = |msg: String| finish(lib, lock, id, Event::SummariseFailed, Some(msg));
     let tid = sc.template_id.clone().unwrap_or_default();
-    let Some((tpl, note)) = template_for(plan, &tid) else {
+    let Some((tpl, note)) = template_of(&plan.templates, &tid) else {
         return fail("No template is available".into());
     };
     let Ok(started) = DateTime::parse_from_rfc3339(&sc.started_at) else {
@@ -102,48 +90,72 @@ pub async fn summarise(
         model: ran,
         extra: Default::default(),
     };
-    locked(lock, || {
-        let mut render_error = None;
-        let done = lib.update(id, |cur, dir| {
-            let mut next = cur.clone(); // a fresh read: a to-do ticked meanwhile survives
-            summarise::merge(&mut next, x, &first_seen, summarise::new_todo_id);
-            // Record the fallback only if the meeting still names the template the job began
-            // with: a template chosen meanwhile is the one the next run uses (F11-FR6).
-            if note.is_some() && next.template_id.as_deref() == Some(tid.as_str()) {
-                next.template_id = Some(tpl.id.clone());
-            }
-            next.providers.summarise = Some(run);
-            if let Some(n) = note {
-                next.note = Some(match next.note.take() {
-                    Some(old) if !old.contains(&n) => format!("{old}; {n}"),
-                    _ => n,
-                });
-            }
-            let md = match templates::render(&tpl.layout, &context(&next, tpl, &started)) {
-                Ok(md) => md,
-                Err(e) => {
-                    render_error = Some(e.message);
-                    return Err(LibError::Invalid("render".into()));
-                }
+    // The merged sidecar `cur` becomes: a fresh read, so a to-do ticked meanwhile survives.
+    let merged = |cur: &Sidecar| {
+        let mut next = cur.clone();
+        summarise::merge(&mut next, x.clone(), &first_seen, summarise::new_todo_id);
+        // Record the fallback only if the meeting still names the template the job began
+        // with: a template chosen meanwhile is the one the next run uses (F11-FR6).
+        if note.is_some() && next.template_id.as_deref() == Some(tid.as_str()) {
+            next.template_id = Some(tpl.id.clone());
+        }
+        next.providers.summarise = Some(run.clone());
+        if let Some(n) = &note {
+            next.note = Some(match next.note.take() {
+                Some(old) if !old.contains(n.as_str()) => format!("{old}; {n}"),
+                _ => n.clone(),
+            });
+        }
+        next
+    };
+    // S16: render outside the write lock; under it, re-read and re-merge, and write the file
+    // only if what the layout sees is unchanged (else render again; the last try is locked).
+    let name = sidecar::transcript_file_name(id);
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let snap = match locked(lock, || lib.load_for_write(id)) {
+            Ok((_, sc)) => merged(&sc),
+            Err(e) => return Err(JobError::Storage(e)),
+        };
+        // A render error writes neither the file nor the merge.
+        let ctx = match transcript::context_of(&snap, tpl) {
+            Ok(c) => c,
+            Err(e) => return fail(e),
+        };
+        let md = match transcript::render(tpl, &ctx) {
+            Ok(md) => md,
+            Err(e) => return fail(e),
+        };
+        let last = attempt == transcript::ATTEMPTS;
+        let r = locked(lock, || -> Result<Option<Phase>, LibError> {
+            let (dir, cur) = lib.load_for_write(id)?;
+            let mut next = merged(&cur);
+            let now = transcript::context_of(&next, tpl).map_err(LibError::Invalid)?;
+            let md = if now == ctx {
+                md
+            } else if last {
+                transcript::render(tpl, &now).map_err(LibError::Invalid)?
+            } else {
+                return Ok(None);
             };
-            let name = sidecar::transcript_file_name(id);
             crate::atomic::write_atomic(&dir.join(&name), md.as_bytes())?;
-            next.transcript_file = Some(name);
+            next.transcript_file = Some(name.clone());
             let p = status::next(library::phase(&next), Event::SummariseOk)?;
             library::set_phase(&mut next, p);
-            *cur = next;
-            Ok(p)
+            sidecar::write(&dir, &next)?;
+            Ok(Some(p))
         });
-        match (render_error, done) {
-            (Some(msg), _) => apply(lib, id, Event::SummariseFailed, Some(msg)),
-            (None, Err(LibError::Io(kind))) => {
-                let msg = format!("The transcript can't be saved ({kind:?})");
-                apply(lib, id, Event::SummariseFailed, Some(msg))
+        match r {
+            Ok(Some(p)) => return Ok(p),
+            Ok(None) => continue,
+            Err(LibError::Io(kind)) => {
+                return fail(format!("The transcript can't be saved ({kind:?})"));
             }
-            (None, done) => done,
+            Err(LibError::Invalid(msg)) => return fail(msg),
+            Err(e) => return Err(JobError::Storage(e)),
         }
-    })
-    .map_err(JobError::Storage)
+    }
 }
 
 /// The layout variables for `sc` (F11-FR4). Read-only data: a template can't reach the sidecar.

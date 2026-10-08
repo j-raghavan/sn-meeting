@@ -236,20 +236,38 @@ impl App {
         json!(self.library().open_todos()).to_string()
     }
 
+    /// S4: after an edit the transcript file shows, render it again (outside the write lock).
+    /// Best effort: the edit itself is already saved.
+    fn edited(&self, id: &str, r: Result<(), crate::library::LibError>) -> String {
+        if r.is_ok() {
+            let templates = self.templates.effective();
+            let _ = crate::pipeline::rewrite_transcript(
+                &self.library(),
+                &self.write,
+                id,
+                &templates,
+                false,
+            );
+        }
+        reply(r.map(|()| ok()))
+    }
+
     /// `nativeSetTodoDone` (F6-FR2).
     pub fn set_todo_done_json(&self, id: &str, todo_id: &str, done: bool) -> String {
-        let _w = self.write_lock();
-        reply(
-            self.library()
-                .set_todo_done(id, todo_id, done)
-                .map(|()| ok()),
-        )
+        let r = {
+            let _w = self.write_lock();
+            self.library().set_todo_done(id, todo_id, done)
+        };
+        self.edited(id, r)
     }
 
     /// `nativeRenameMeeting` (F7-FR5); an empty title clears it.
     pub fn rename_json(&self, id: &str, title: &str) -> String {
-        let _w = self.write_lock();
-        reply(self.library().rename(id, title).map(|()| ok()))
+        let r = {
+            let _w = self.write_lock();
+            self.library().rename(id, title)
+        };
+        self.edited(id, r)
     }
 
     /// `nativeSetMeetingTemplate` (F7-FR2).
@@ -258,8 +276,11 @@ impl App {
         if settings::is_template_id(template_id) && !self.template_usable(template_id) {
             return error_json("template not found");
         }
-        let _w = self.write_lock();
-        reply(self.library().set_template(id, template_id).map(|()| ok()))
+        let r = {
+            let _w = self.write_lock();
+            self.library().set_template(id, template_id)
+        };
+        self.edited(id, r)
     }
 
     /// `nativeDeleteMeeting` (F7-FR4): `{ok, removed: [file names]}`.

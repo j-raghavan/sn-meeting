@@ -489,3 +489,119 @@ fn a_bluetooth_mic_is_named_in_the_layout() {
     sc.mic = None; // legacy audio
     assert_eq!(meeting::pipeline::context(&sc, tpl, &started).mic, "");
 }
+
+#[test]
+fn the_transcript_file_is_written_once_transcription_ends() {
+    // S4 / F5-FR11: with no summary, the file has the transcript and an empty summary.
+    let fx = fixture(&["openai", "anthropic"]);
+    std::fs::remove_file(fx.e.data.path().join("keys/copilot-key-anthropic.txt")).unwrap();
+    let m = fx.run(Job::Transcribe)["meeting"].clone();
+    assert_eq!(m["status"], "transcribed");
+    assert_eq!(m["transcriptFile"], format!("{}.transcript.md", fx.id));
+    let md = fx.transcript();
+    assert!(md.starts_with("# Untitled meeting\n"), "{md}");
+    assert!(
+        md.contains("## Transcript\n[0:00:00] text 1\n[0:15:00] text 2\n"),
+        "{md}"
+    );
+    // A summary that fails afterwards keeps it.
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(ResponseTemplate::new(400).set_body_string("bad"));
+    let m = fx.run(Job::Transcribe)["meeting"].clone();
+    assert_eq!(m["failedAt"], "summarising");
+    assert!(fx.transcript().contains("[0:15:00] text 2"));
+}
+
+#[test]
+fn the_transcript_file_follows_ticks_renames_and_the_template() {
+    // S4: the file is re-rendered after every edit that it shows.
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    fx.run(Job::Transcribe);
+    let todo = fx.meeting()["todos"][0]["id"].as_str().unwrap().to_owned();
+    assert!(fx.transcript().contains("- [ ] Send the deck to Priya"));
+    assert_eq!(
+        parse(&fx.app.set_todo_done_json(&fx.id, &todo, true)),
+        json!({"ok": true})
+    );
+    assert!(
+        fx.transcript().contains("- [x] Send the deck to Priya"),
+        "{}",
+        fx.transcript()
+    );
+    fx.app.rename_json(&fx.id, "Renamed");
+    assert!(
+        fx.transcript().starts_with("# Renamed\n"),
+        "{}",
+        fx.transcript()
+    );
+    assert_eq!(
+        parse(&fx.app.set_template_json(&fx.id, "standup")),
+        json!({"ok": true})
+    );
+    let first = fx.transcript().lines().nth(1).unwrap().to_owned();
+    assert!(first.ends_with(" · Stand-up"), "{first}");
+    // No stray temporary files are left beside it.
+    let tmps = std::fs::read_dir(&fx.dir)
+        .unwrap()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+        .count();
+    assert_eq!(tmps, 0);
+}
+
+#[test]
+fn edits_before_transcription_write_no_transcript_file() {
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.app.rename_json(&fx.id, "Early");
+    assert_eq!(fx.transcript(), "");
+    assert!(fx.meeting()["transcriptFile"].is_null());
+}
+
+#[test]
+fn rewriting_the_transcript_reports_what_stops_it() {
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    fx.run(Job::Transcribe);
+    let lib = fx.app.library();
+    let lock = std::sync::Mutex::new(());
+    let rw = |t: &[meeting::templates::Template]| {
+        meeting::pipeline::rewrite_transcript(&lib, &lock, &fx.id, t, false)
+    };
+    let builtins = meeting::templates::builtins();
+    assert_eq!(rw(&[]), Err("No template is available".into()));
+    let mut bad = builtins.clone();
+    bad[0].layout = "{{ 1 // 0 }}".into();
+    assert!(
+        rw(&bad)
+            .unwrap_err()
+            .starts_with("Template error on line 1")
+    );
+    let good = read_sidecar(&fx.dir, &fx.id);
+    let mut sc = good.clone();
+    sc.started_at = "not a time".into();
+    meeting::sidecar::write(&fx.dir, &sc).unwrap();
+    assert_eq!(
+        rw(&builtins),
+        Err("The meeting's start time can't be read".into())
+    );
+    meeting::sidecar::write(&fx.dir, &good).unwrap();
+    let file = fx.dir.join(format!("{}.transcript.md", fx.id));
+    std::fs::remove_file(&file).unwrap();
+    std::fs::create_dir_all(file.join("x")).unwrap();
+    assert!(
+        rw(&builtins)
+            .unwrap_err()
+            .starts_with("The transcript can't be saved (")
+    );
+    assert_eq!(
+        meeting::pipeline::rewrite_transcript(
+            &lib,
+            &lock,
+            "meeting-20200101-000000",
+            &builtins,
+            true
+        ),
+        Err("meeting not found".into())
+    );
+}

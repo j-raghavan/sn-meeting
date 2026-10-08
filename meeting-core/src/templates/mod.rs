@@ -12,8 +12,8 @@ pub use file::{
     MAX_NAME, TemplateError, parse, to_file, validate,
 };
 pub use render::{
-    Context, CtxPara, CtxProviders, CtxSection, CtxTodo, FUEL, MAX_OUTPUT, RenderError,
-    duration_label, render, sample_context,
+    Context, CtxPara, CtxProviders, CtxSection, CtxTodo, FUEL, MAX_OUTPUT, RENDER_HOOK,
+    RenderError, duration_label, render, sample_context,
 };
 pub use store::{Entry, Origin, Store, USER_DIR};
 

@@ -235,8 +235,19 @@ fn env() -> Environment<'static> {
     e
 }
 
+/// Tests only (S16): when set, called at the start of every render, so a test can hold a
+/// render open and check that nothing else waits for it.
+#[doc(hidden)]
+pub static RENDER_HOOK: std::sync::RwLock<Option<fn()>> = std::sync::RwLock::new(None);
+
 /// Render `layout` with `ctx`. An error reads "Template error on line N: …".
 pub fn render(layout: &str, ctx: &Context) -> Result<String, RenderError> {
+    if let Some(hook) = *RENDER_HOOK
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    {
+        hook();
+    }
     let e = env();
     let to_err = |x: minijinja::Error| {
         let line = x.line();
