@@ -36,3 +36,6 @@ dependencies are permissively licensed (MIT / Apache-2.0 / ISC / BSD style).
 | serde, serde_json | 1 | MIT OR Apache-2.0 |
 | thiserror | 2 | MIT OR Apache-2.0 |
 | jni | 0.22.4 | MIT OR Apache-2.0 |
+| chrono | 0.4.45 | MIT OR Apache-2.0 |
+| iana-time-zone, android_system_properties | 0.1 | MIT OR Apache-2.0 |
+| num-traits | 0.2 | MIT OR Apache-2.0 |
