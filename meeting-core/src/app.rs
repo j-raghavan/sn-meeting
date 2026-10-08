@@ -106,6 +106,38 @@ impl App {
         }
     }
 
+    /// `nativeAddSegment`.
+    pub fn add_segment_json(&self, id: &str, seg_path: &str, start_offset_ms: i64) -> String {
+        let lib = self.library();
+        reply(
+            lib.add_segment(id, seg_path, start_offset_ms)
+                .map(|a| json!(a)),
+        )
+    }
+
+    /// `nativeCloseSegment`; `index` is 0-based.
+    pub fn close_segment_json(&self, id: &str, index: i32, duration_ms: i64) -> String {
+        let Ok(index) = usize::try_from(index) else {
+            return error_json("segIndex must be >= 0");
+        };
+        reply(
+            self.library()
+                .close_segment(id, index, duration_ms)
+                .map(|()| ok()),
+        )
+    }
+
+    /// `nativeFinishMeeting`; an empty `note` means none. The recording is over either way,
+    /// so the meeting stops being live even if the sidecar can't be updated.
+    pub fn finish_json(&self, id: &str, duration_ms: i64, note: &str) -> String {
+        let mut st = self.state();
+        if st.live.recording.as_deref() == Some(id) {
+            st.live.recording = None;
+        }
+        let lib = self.library_of(&st.settings);
+        reply(lib.finish(id, duration_ms, Some(note)).map(|()| ok()))
+    }
+
     /// Every provider's key status, read fresh (the user may add a file at any time).
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL
@@ -190,5 +222,17 @@ impl App {
             _ => None,
         };
         api::test_connection_model(&self.core, role, provider, model.as_deref())
+    }
+}
+
+fn ok() -> Value {
+    json!({"ok": true})
+}
+
+/// A library result as JSON: the value, or `{"error": ...}`.
+fn reply(r: Result<Value, crate::library::LibError>) -> String {
+    match r {
+        Ok(v) => v.to_string(),
+        Err(e) => error_json(&e.to_string()),
     }
 }

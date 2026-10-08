@@ -150,6 +150,21 @@ pub fn begin_meeting(started_at_ms: i64, mic_json: &str, audio_json: &str) -> St
     with_app(|app| app.begin_json(started_at_ms, mic_json, audio_json))
 }
 
+/// `nativeAddSegment(id, segPath, startOffsetMs)` (F3-FR2).
+pub fn add_segment(id: &str, seg_path: &str, start_offset_ms: i64) -> String {
+    with_app(|app| app.add_segment_json(id, seg_path, start_offset_ms))
+}
+
+/// `nativeCloseSegment(id, segIndex, durationMs)` (F3-FR2); `segIndex` is 0-based.
+pub fn close_segment(id: &str, seg_index: i32, duration_ms: i64) -> String {
+    with_app(|app| app.close_segment_json(id, seg_index, duration_ms))
+}
+
+/// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
+pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
+    with_app(|app| app.finish_json(id, duration_ms, note))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

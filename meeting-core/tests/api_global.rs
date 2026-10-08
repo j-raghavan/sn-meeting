@@ -17,6 +17,9 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("getSettings", api::get_settings()),
         ("setSettings", api::set_settings("{}")),
         ("beginMeeting", api::begin_meeting(0, "{}", "{}")),
+        ("addSegment", api::add_segment("x", "y", 0)),
+        ("closeSegment", api::close_segment("x", 0, 0)),
+        ("finishMeeting", api::finish_meeting("x", 0, "")),
     ]
 }
 

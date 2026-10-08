@@ -1,8 +1,8 @@
 //! F3: the meeting library. Folders are scanned on every call; there is no index (ADR D5). Every
 //! call runs on the shell's single CoreJobs thread, which serialises writes.
 use crate::segment::{self, SegmentPlan};
-use crate::sidecar::{self, Audio, Mic, Segment, Sidecar, SidecarError};
-use crate::status::Status;
+use crate::sidecar::{self, Audio, Mic, Segment, SegmentFlag, Sidecar, SidecarError};
+use crate::status::{self, Event, Illegal, Phase, Status};
 use crate::tz::{self, LocalTz};
 use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 const MAX_MIC_NAME: usize = 200;
 const MAX_CODEC: usize = 32;
+const MAX_NOTE: usize = 200;
 
 /// The library's view of the world: its folders (current first) and the device time zone.
 pub struct Library<'a> {
@@ -34,6 +35,8 @@ pub enum LibError {
     NotFound,
     #[error(transparent)]
     Sidecar(#[from] SidecarError),
+    #[error(transparent)]
+    Illegal(#[from] Illegal),
     #[error("{0}")]
     Invalid(String),
     #[error("storage: {0}")]
@@ -59,8 +62,15 @@ pub struct Begun {
     pub plan: SegmentPlan,
 }
 
+/// `nativeAddSegment`'s reply: the new segment's 0-based index and path.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SegmentAdded {
+    pub index: usize,
+    pub path: String,
+}
+
 /// One meeting's files in one folder.
-#[allow(dead_code)] // read once segments and listings arrive (F3-FR2, F3-FR3)
 pub(crate) struct Found {
     pub(crate) dir: PathBuf,
     pub(crate) has_sidecar: bool,
@@ -123,6 +133,25 @@ impl Library<'_> {
         out
     }
 
+    /// The folder and files of `id`, in whichever library folder holds it.
+    pub(crate) fn find(&self, id: &str) -> Result<Found, LibError> {
+        if !sidecar::is_valid_id(id) {
+            return Err(LibError::BadId);
+        }
+        self.scan().remove(id).ok_or(LibError::NotFound)
+    }
+
+    /// A meeting's folder and sidecar, to change and write back. A sidecar that can't be read
+    /// is never overwritten.
+    pub(crate) fn load_for_write(&self, id: &str) -> Result<(PathBuf, Sidecar), LibError> {
+        let f = self.find(id)?;
+        if !f.has_sidecar {
+            return Err(LibError::NotFound);
+        }
+        let sc = sidecar::read(&f.dir, id)?;
+        Ok((f.dir, sc))
+    }
+
     /// F3-FR1: create the sidecar (`recording`) in the current folder and return the id, the
     /// first segment's path and the recorder's plan. `started_at_ms` is the shell's wall clock
     /// at Record. A second meeting in the same second gets a `b`..`z` suffix; ids already used
@@ -170,6 +199,106 @@ impl Library<'_> {
             plan,
         })
     }
+}
+
+impl Library<'_> {
+    /// F3-FR2 / F2-FR5: the recorder rolled over to a new file. `seg_path` must be the next
+    /// `<id>-NN.m4a` in the meeting's own folder (even if the save folder changed since it
+    /// began), and `start_offset_ms` must be later than the previous segment's.
+    pub fn add_segment(
+        &self,
+        id: &str,
+        seg_path: &str,
+        start_offset_ms: i64,
+    ) -> Result<SegmentAdded, LibError> {
+        let (dir, mut sc) = self.load_for_write(id)?;
+        if sc.status != Status::Recording {
+            return Err(invalid("meeting is not recording"));
+        }
+        let index = sc.segments.len();
+        let number = u32::try_from(index + 1).map_err(|_| invalid("too many segments"))?;
+        let name = sidecar::segment_file_name(id, number);
+        let expected = dir.join(&name);
+        if Path::new(seg_path) != expected {
+            return Err(invalid(format!(
+                "next segment must be {}",
+                expected.display()
+            )));
+        }
+        let start =
+            u64::try_from(start_offset_ms).map_err(|_| invalid("startOffsetMs must be >= 0"))?;
+        if sc
+            .segments
+            .last()
+            .is_some_and(|s| start <= s.start_offset_ms)
+        {
+            return Err(invalid(
+                "startOffsetMs must be after the previous segment's",
+            ));
+        }
+        sc.segments.push(open_segment(name, start));
+        sidecar::write(&dir, &sc)?;
+        Ok(SegmentAdded {
+            index,
+            path: expected.to_string_lossy().into_owned(),
+        })
+    }
+
+    /// F3-FR2 / F3-FR5: store a finalised segment's measured duration. `index` is 0-based and
+    /// must be open. Allowed while recording and, for recovery's measurements, once recorded.
+    /// 0 ms flags the segment `empty`.
+    pub fn close_segment(&self, id: &str, index: usize, duration_ms: i64) -> Result<(), LibError> {
+        let (dir, mut sc) = self.load_for_write(id)?;
+        if !matches!(sc.status, Status::Recording | Status::Recorded) {
+            return Err(invalid("meeting is past recording"));
+        }
+        let d = u64::try_from(duration_ms).map_err(|_| invalid("durationMs must be >= 0"))?;
+        let Some(seg) = sc
+            .segments
+            .get_mut(index)
+            .filter(|s| s.duration_ms.is_none())
+        else {
+            return Err(invalid(format!("segment {index} is not open")));
+        };
+        seg.duration_ms = Some(d);
+        if d == 0 && seg.flag.is_none() {
+            seg.flag = Some(SegmentFlag::Empty);
+        }
+        sidecar::write(&dir, &sc)?;
+        Ok(())
+    }
+
+    /// F3-FR2 / workflow step 4: recording stopped. `note` records why, e.g. "mic
+    /// disconnected" (F2-FR3); blank means none.
+    pub fn finish(&self, id: &str, duration_ms: i64, note: Option<&str>) -> Result<(), LibError> {
+        let (dir, mut sc) = self.load_for_write(id)?;
+        let d = u64::try_from(duration_ms).map_err(|_| invalid("durationMs must be >= 0"))?;
+        let next = status::next(phase(&sc), Event::Stop)?;
+        set_phase(&mut sc, next);
+        sc.duration_ms = d;
+        if let Some(n) = note.map(clean_note).filter(|n| !n.is_empty()) {
+            sc.note = Some(n);
+        }
+        sidecar::write(&dir, &sc)?;
+        Ok(())
+    }
+}
+
+pub(crate) fn phase(sc: &Sidecar) -> Phase {
+    Phase::from_parts(sc.status, sc.failed_at)
+}
+
+pub(crate) fn set_phase(sc: &mut Sidecar, p: Phase) {
+    (sc.status, sc.failed_at) = p.parts();
+}
+
+/// One line, at most `MAX_NOTE` characters.
+fn clean_note(n: &str) -> String {
+    let one_line: String = n
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect();
+    one_line.trim().chars().take(MAX_NOTE).collect()
 }
 
 pub(crate) fn open_segment(file: String, start_offset_ms: u64) -> Segment {

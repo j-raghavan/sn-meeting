@@ -3,7 +3,7 @@
 //! `api::guarded` already turns core panics into `{"error":…}`, so this is the second net.
 use jni::EnvUnowned;
 use jni::objects::{JClass, JString};
-use jni::sys::jlong;
+use jni::sys::{jint, jlong};
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeVersion<'local>(
@@ -81,6 +81,53 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeBeginMeet
         let mic: String = mic_json.try_to_string(env)?;
         let audio: String = audio_json.try_to_string(env)?;
         env.new_string(crate::api::begin_meeting(started_at_ms, &mic, &audio))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeAddSegment<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    seg_path: JString<'local>,
+    start_offset_ms: jlong,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let seg_path: String = seg_path.try_to_string(env)?;
+        env.new_string(crate::api::add_segment(&id, &seg_path, start_offset_ms))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCloseSegment<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    seg_index: jint,
+    duration_ms: jlong,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::close_segment(&id, seg_index, duration_ms))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeFinishMeeting<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    duration_ms: jlong,
+    note: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let note: String = note.try_to_string(env)?;
+        env.new_string(crate::api::finish_meeting(&id, duration_ms, &note))
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }

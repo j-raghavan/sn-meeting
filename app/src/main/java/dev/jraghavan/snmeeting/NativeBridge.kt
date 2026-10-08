@@ -35,4 +35,13 @@ object NativeBridge {
 
     /** Starts a meeting: `{id, firstSegmentPath, plan: {maxDurationMs, maxFileBytes}}`. */
     external fun nativeBeginMeeting(startedAtMs: Long, micJson: String, audioJson: String): String
+
+    /** The recorder rolled over: `segPath` must be the next `<id>-NN.m4a`. `{index, path}`. */
+    external fun nativeAddSegment(id: String, segPath: String, startOffsetMs: Long): String
+
+    /** A finalised segment's measured duration; `segIndex` is 0-based. `{ok: true}`. */
+    external fun nativeCloseSegment(id: String, segIndex: Int, durationMs: Long): String
+
+    /** Recording stopped; `note` is why ("mic disconnected"), "" for none. `{ok: true}`. */
+    external fun nativeFinishMeeting(id: String, durationMs: Long, note: String): String
 }
