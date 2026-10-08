@@ -67,6 +67,17 @@ impl App {
         self.state().live.clone()
     }
 
+    /// Mark a transcribe/summarise job as running (`true`) or finished. M4's jobs call this;
+    /// recovery and delete leave a running job's meeting alone.
+    pub fn set_job(&self, id: &str, running: bool) {
+        let mut st = self.state();
+        if running {
+            st.live.jobs.insert(id.to_owned());
+        } else {
+            st.live.jobs.remove(id);
+        }
+    }
+
     /// The library over the current settings' folders, current first.
     pub fn library(&self) -> Library<'_> {
         self.library_of(&self.state().settings)
@@ -173,6 +184,16 @@ impl App {
     /// `nativeSetMeetingTemplate` (F7-FR2).
     pub fn set_template_json(&self, id: &str, template_id: &str) -> String {
         reply(self.library().set_template(id, template_id).map(|()| ok()))
+    }
+
+    /// `nativeDeleteMeeting` (F7-FR4): `{ok, removed: [file names]}`.
+    pub fn delete_json(&self, id: &str) -> String {
+        let st = self.state();
+        let lib = self.library_of(&st.settings);
+        reply(
+            lib.delete(id, &st.live)
+                .map(|removed| json!({"ok": true, "removed": removed})),
+        )
     }
 
     /// Every provider's key status, read fresh (the user may add a file at any time).

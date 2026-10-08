@@ -29,6 +29,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
             "setMeetingTemplate",
             api::set_meeting_template("x", "general"),
         ),
+        ("deleteMeeting", api::delete_meeting("x")),
     ]
 }
 
@@ -89,4 +90,34 @@ fn init_then_the_app_exports() {
         parse(&api::set_settings("[]"))["error"],
         "settings must be a JSON object"
     );
+}
+
+/// Every Kotlin external but nativeVersion and nativeInit needs the app, so each must be in
+/// `app_exports` (checked before and after init above).
+#[test]
+fn app_exports_cover_the_bridge() {
+    let kt = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../app/src/main/java/dev/jraghavan/snmeeting/NativeBridge.kt"),
+    )
+    .unwrap();
+    let mut bridge: Vec<String> = kt
+        .lines()
+        .filter_map(|l| l.trim().strip_prefix("external fun native"))
+        .map(|rest| {
+            let name = rest.split('(').next().unwrap();
+            let mut c = name.chars();
+            let first = c.next().unwrap().to_ascii_lowercase();
+            std::iter::once(first).chain(c).collect()
+        })
+        .filter(|n: &String| n != "version" && n != "init")
+        .collect();
+    bridge.sort();
+    // Names only: calling app_exports here before init is harmless (they all refuse).
+    let mut covered: Vec<String> = app_exports()
+        .into_iter()
+        .map(|(n, _)| n.to_owned())
+        .collect();
+    covered.sort();
+    assert_eq!(bridge, covered);
 }

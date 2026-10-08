@@ -190,6 +190,11 @@ pub fn set_meeting_template(id: &str, template_id: &str) -> String {
     with_app(|app| app.set_template_json(id, template_id))
 }
 
+/// `nativeDeleteMeeting(id)` (F7-FR4).
+pub fn delete_meeting(id: &str) -> String {
+    with_app(|app| app.delete_json(id))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

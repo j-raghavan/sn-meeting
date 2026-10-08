@@ -1,7 +1,7 @@
-//! The meeting edits the UI makes: to-dos (F6-FR2), the title (F7-FR5) and the template
-//! (F7-FR2).
+//! The meeting edits the UI makes: to-dos (F6-FR2), the title (F7-FR5), the template
+//! (F7-FR2) and deleting a meeting (F7-FR4).
 use super::list::Source;
-use super::{LibError, Library, invalid};
+use super::{LibError, Library, Liveness, invalid};
 use crate::sidecar::{self, TitleSource};
 use serde::Serialize;
 
@@ -91,5 +91,40 @@ impl Library<'_> {
         sc.template_id = Some(template_id.to_owned());
         sidecar::write(&dir, &sc)?;
         Ok(())
+    }
+
+    /// F7-FR4: remove the meeting's audio, transcript and sidecar (and a stray `.tmp`). Only
+    /// names that belong to this exact id are touched, so `…211706b` survives deleting
+    /// `…211706`. Refused while it is recording or a job is running on it. Audio goes first and
+    /// the sidecar last, so a failure part-way leaves a listed meeting, not hidden audio.
+    pub fn delete(&self, id: &str, live: &Liveness) -> Result<Vec<String>, LibError> {
+        if live.recording.as_deref() == Some(id) {
+            return Err(invalid("meeting is recording"));
+        }
+        if live.jobs.contains(id) {
+            return Err(invalid("meeting is being transcribed"));
+        }
+        let f = self.find(id)?;
+        let mut names: Vec<String> = f.audio.iter().map(|(_, n)| n.clone()).collect();
+        if f.has_sidecar
+            && let Ok(sc) = sidecar::read(&f.dir, id)
+        {
+            names.extend(sc.segments.iter().map(|s| s.file.clone()));
+        }
+        names.sort();
+        names.dedup();
+        let side = sidecar::sidecar_file_name(id);
+        names.push(sidecar::transcript_file_name(id));
+        names.push(format!("{side}.tmp"));
+        names.push(side);
+        let mut removed = Vec::new();
+        for n in names {
+            match std::fs::remove_file(f.dir.join(&n)) {
+                Ok(()) => removed.push(n),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Ok(removed)
     }
 }

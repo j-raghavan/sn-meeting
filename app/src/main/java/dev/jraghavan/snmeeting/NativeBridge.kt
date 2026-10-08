@@ -62,4 +62,8 @@ object NativeBridge {
 
     /** The template the next Transcribe or Summarise again uses. `{ok: true}`. */
     external fun nativeSetMeetingTemplate(id: String, templateId: String): String
+
+    /** Removes the meeting's audio, sidecar and transcript; refused while recording or a job
+     *  runs. `{ok: true, removed: [file names]}`. */
+    external fun nativeDeleteMeeting(id: String): String
 }
