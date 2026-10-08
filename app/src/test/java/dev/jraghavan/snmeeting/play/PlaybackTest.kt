@@ -37,6 +37,14 @@ class PlaybackTest {
         assertEquals(0, p.positionMs()) // rewound, paused
     }
 
+    @Test fun aSegmentWithoutAFileKeepsTheOthersOnTheirOwnPaths() { // N8
+        val v = """{"meeting":{"id":"m","status":"recorded","segments":[{"startOffsetMs":0,"durationMs":1000},{"file":"m-02.m4a","startOffsetMs":1000,"durationMs":5000}]},
+            "dir":"/d","segmentPaths":["/d/m-01.m4a","/d/m-02.m4a"]}"""
+        val mv = CoreJson.obj(v, MeetingView::from).getOrNull()!!
+        assertEquals(2, mv.meeting.segments.size)
+        assertEquals(listOf(SegmentPlaylist.Item("/d/m-02.m4a", 5000)), SegmentPlaylist.of(mv).items)
+    }
+
     @Test fun pauseAndResumeKeepThePlace() {
         p.play(); p.toggle(); pos = 5_000
         assertEquals(5_000, p.positionMs())

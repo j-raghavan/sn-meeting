@@ -54,6 +54,8 @@ class SegmentedRecorder(
     private var index = 0
     private var lastOffset = 0L
     private var armed: String? = null
+    /** The file being written now: closed by this path, never a re-formatted one (N8). */
+    private var currentPath = ""
 
     /** Segment `number` (1-based) beside the first: the core insists on exactly this path. */
     private fun pathFor(number: Int): String = segmentPath(begun.firstSegmentPath, begun.id, number)
@@ -85,7 +87,7 @@ class SegmentedRecorder(
         } catch (e: Exception) {
             return discard(CANT_START)
         }
-        t0 = clock.elapsedMs(); index = 0; lastOffset = 0; armed = null
+        t0 = clock.elapsedMs(); index = 0; lastOffset = 0; armed = null; currentPath = b.firstSegmentPath
         phase = Phase.RECORDING
         listener.onRecording(b.id, t0)
         listener.onSegmentStarted(0)
@@ -139,10 +141,12 @@ class SegmentedRecorder(
 
     private fun beginNext(next: String, closePrevious: Boolean) {
         val offset = maxOf(clock.elapsedMs() - t0, lastOffset + 1) // the core needs strictly later
-        if (closePrevious) core.closeSegment(begun.id, index, pathFor(index + 1), measure = true, fallbackMs = offset - lastOffset)
-        index += 1; lastOffset = offset
+        if (closePrevious) core.closeSegment(begun.id, index, currentPath, measure = true, fallbackMs = offset - lastOffset)
+        index += 1; lastOffset = offset; currentPath = next
         core.addSegment(begun.id, next, offset) { r ->
-            if (r is CoreResult.Err) end(EndReason.RECORDER_ERROR) // the library would not know this file
+            // The library would not know this file, or knows it by another path (N8).
+            val agreed = r is CoreResult.Ok && r.value.path == next
+            if (!agreed) end(EndReason.RECORDER_ERROR)
         }
         listener.onSegmentStarted(index)
     }
@@ -162,7 +166,7 @@ class SegmentedRecorder(
 
     /** F2-FR7: a stop with no audio deletes that file; the core then reads the segment as empty. */
     private fun closeCurrent(finalised: Boolean) {
-        val path = pathFor(index + 1)
+        val path = currentPath
         if (!finalised) storage.delete(path)
         val estimate = if (finalised) clock.elapsedMs() - t0 - lastOffset else 0
         core.closeSegment(begun.id, index, path, measure = finalised, fallbackMs = estimate)

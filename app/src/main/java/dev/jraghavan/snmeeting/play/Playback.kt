@@ -12,10 +12,13 @@ class SegmentPlaylist(val items: List<Item>) {
     fun offsetOf(index: Int): Long = items.take(index).sumOf { it.durationMs }
 
     companion object {
-        /** The segments that have audio: a missing or empty one (flagged by the core) is skipped. */
+        /**
+         * The segments that have audio: a missing or empty one (flagged by the core), or one with
+         * no file, is skipped. Paths are the core's, one per segment, so they line up (N8).
+         */
         fun of(v: MeetingView): SegmentPlaylist = SegmentPlaylist(
             v.meeting.segments.zip(v.segmentPaths)
-                .filter { (s, _) -> s.flag == null }
+                .filter { (s, _) -> s.flag == null && s.file != null }
                 .map { (s, path) -> Item(path, s.durationMs ?: 0) },
         )
     }

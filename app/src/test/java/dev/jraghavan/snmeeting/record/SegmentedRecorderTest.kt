@@ -4,6 +4,7 @@ import dev.jraghavan.snmeeting.model.Begun
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.SegmentAdded
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SegmentedRecorderTest {
@@ -189,6 +190,24 @@ class SegmentedRecorderTest {
         r.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
         now += 5_000; events.onApproachingLimit(); events.onNextFileStarted()
         assertEquals("finish 5000 'recorder error' discard=false", log.last())
+    }
+
+    @Test fun aSegmentPathTheCoreDisagreesWithEndsTheMeeting() { // N8: the core names the files
+        val other = object : RecorderCore by core {
+            override fun addSegment(id: String, path: String, startOffsetMs: Long, done: (CoreResult<SegmentAdded>) -> Unit) {
+                log += "add ${path.substringAfterLast('-')}"; done(CoreResult.Ok(SegmentAdded(1, "/elsewhere/x-02.m4a")))
+            }
+        }
+        val r = SegmentedRecorder(other, rec, storage, clock, object : SegmentedRecorder.Listener {
+            override fun onRecording(id: String, startElapsedMs: Long) {}
+            override fun onSegmentStarted(index: Int) {}
+            override fun onEnded(id: String?, message: String) { ended = id to message }
+        })
+        r.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        now += 5_000; events.onApproachingLimit(); events.onNextFileStarted()
+        assertEquals(id to EndReason.RECORDER_ERROR.message, ended)
+        // The segment being written was closed by the path it was written to.
+        assertTrue(log.any { it.startsWith("close 1 02.m4a") })
     }
 
     @Test fun eventsAfterTheEndAreIgnored() {

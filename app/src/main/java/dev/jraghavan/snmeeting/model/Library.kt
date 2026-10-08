@@ -65,7 +65,8 @@ data class TodoRef(
     }
 }
 
-data class Segment(val file: String, val startOffsetMs: Long, val durationMs: Long?, val text: String?, val flag: String?)
+/** [file] is null only in a hand-edited sidecar; the segment is kept so indexes still line up (N8). */
+data class Segment(val file: String?, val startOffsetMs: Long, val durationMs: Long?, val text: String?, val flag: String?)
 data class Todo(val id: String, val text: String, val owner: String?, val due: String?, val done: Boolean)
 data class Section(val heading: String, val body: String)
 data class MicRef(val kind: String, val name: String)
@@ -97,7 +98,7 @@ data class Sidecar(
             sections = o.arr("sections").mapObj { Section(it.strOr("heading", ""), it.strOr("body", "")) },
             mic = o.obj("mic")?.let { m -> MicRef(m.strOr("kind", ""), m.strOr("name", "")) },
             segments = o.arr("segments").mapObj {
-                Segment(it.str("file") ?: return@mapObj null, it.long("startOffsetMs") ?: 0, it.long("durationMs"), it.str("text"), it.str("flag"))
+                Segment(it.str("file"), it.long("startOffsetMs") ?: 0, it.long("durationMs"), it.str("text"), it.str("flag"))
             },
             error = o.str("error"), note = o.str("note"),
             todos = o.arr("todos").mapObj {
