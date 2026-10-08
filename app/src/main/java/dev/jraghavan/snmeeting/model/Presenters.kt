@@ -99,3 +99,46 @@ data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: St
         }
     }
 }
+
+/**
+ * F7-FR2: the meeting's action row, from its status, whether its job is running here, and the
+ * key status of each role's provider. Every status has an enabled action or shows progress (INV8).
+ */
+data class Actions(
+    val primary: Job?, val primaryEnabled: Boolean, val progress: String?, val canCancel: Boolean,
+    val note: String?, val canDelete: Boolean,
+) {
+    enum class Job(val label: String) { TRANSCRIBE("Transcribe"), SUMMARISE("Summarise again") }
+
+    companion object {
+        /** "Transcribing 2/3": the segment in flight (1-based) over the total. */
+        fun transcribing(m: Sidecar): String {
+            val total = m.segments.size
+            val n = minOf(m.segments.count { it.text != null } + 1, total)
+            return "Transcribing $n/$total"
+        }
+
+        fun of(m: Sidecar, jobRunning: Boolean, transcribeKey: KeyStatus?, summariseKey: KeyStatus?): Actions {
+            fun problem(k: KeyStatus?) = when (k) {
+                null -> "Checking the key…"
+                is KeyStatus.Problem -> k.detail
+                is KeyStatus.Found -> null
+            }
+            fun offer(job: Job, key: KeyStatus?, idle: String): Actions {
+                val p = problem(key)
+                return Actions(job, p == null, null, false, p ?: m.error ?: idle, true)
+            }
+            return when {
+                m.status == Status.RECORDING -> Actions(null, false, "Recording…", false, null, false)
+                m.status == Status.TRANSCRIBING ->
+                    Actions(null, false, transcribing(m), jobRunning, "You can leave this screen; it carries on.", false)
+                jobRunning -> Actions(null, false, "Summarising…", true, "You can leave this screen; it carries on.", false)
+                m.status == Status.RECORDED || (m.status == Status.FAILED && m.failedAt != FailedAt.SUMMARISING) ->
+                    offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.")
+                m.status == Status.TRANSCRIBED || m.status == Status.DONE || m.status == Status.FAILED ->
+                    offer(Job.SUMMARISE, summariseKey, "Ticked to-dos stay ticked.")
+                else -> offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.") // an unknown status: start over
+            }
+        }
+    }
+}

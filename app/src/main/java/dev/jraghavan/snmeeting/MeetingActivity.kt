@@ -9,12 +9,14 @@ import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.Actions
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.MeetingHeader
 import dev.jraghavan.snmeeting.model.MeetingView
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.Sidecar
 import dev.jraghavan.snmeeting.model.Status
 import dev.jraghavan.snmeeting.model.TemplateChoice
 import dev.jraghavan.snmeeting.model.TemplateRow
@@ -37,6 +39,26 @@ class MeetingActivity : Activity() {
     private var settings: SettingsView? = null
     private var templates: List<TemplateRow> = emptyList()
     private var pickingTemplate = false
+    private var actions: Actions? = null
+    private var progress: TextView? = null
+
+    /** F7-FR2: while this meeting's job runs, the sidecar is re-read once a second for progress. */
+    private val poll = object : Runnable {
+        override fun run() {
+            if (!LongJobs.lane.isRunning(id)) return
+            scope.core({ NativeBridge.nativeGetMeeting(id) }) { json ->
+                val v = CoreJson.obj(json, MeetingView::from).getOrNull() ?: return@core
+                val next = actionsFor(v.meeting)
+                // Only the label moves: change it in place (no page redraw). Anything else: rebuild.
+                if (next.copy(progress = null) == actions?.copy(progress = null)) {
+                    view = v; actions = next; progress?.text = next.progress
+                } else {
+                    view = v; render()
+                }
+            }
+            handler.postDelayed(this, 1000)
+        }
+    }
     private val handler = Handler(Looper.getMainLooper())
 
     // F7-FR1: playback outlives re-renders; the card shows its state.
@@ -78,6 +100,7 @@ class MeetingActivity : Activity() {
     override fun onStop() {
         playback?.release() // leaving the screen stops the audio
         handler.removeCallbacks(tick)
+        handler.removeCallbacks(poll) // the job carries on; onResume picks its progress up again
         showPlayer()
         super.onStop()
     }
@@ -91,7 +114,11 @@ class MeetingActivity : Activity() {
     private fun load() {
         scope.core({ NativeBridge.nativeGetMeeting(id) }) { json ->
             when (val r = CoreJson.obj(json, MeetingView::from)) {
-                is CoreResult.Ok -> { view = r.value; preparePlayback(r.value); render() }
+                is CoreResult.Ok -> {
+                    view = r.value; preparePlayback(r.value); render()
+                    handler.removeCallbacks(poll)
+                    if (LongJobs.lane.isRunning(id)) handler.postDelayed(poll, 1000)
+                }
                 is CoreResult.Err -> showGone(r.message)
             }
         }
@@ -197,8 +224,53 @@ class MeetingActivity : Activity() {
         }
     }
 
+    private fun actionsFor(m: Sidecar): Actions {
+        val s = settings
+        return Actions.of(m, LongJobs.lane.isRunning(id),
+            s?.keys?.get(s.effectiveTranscribe.provider), s?.keys?.get(s.effectiveSummarise.provider))
+    }
+
+    /** F7-FR2: the one action the status allows, or progress with Cancel while a job runs. */
+    private fun actionsRow(a: Actions): View = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        progress = null
+        a.primary?.let { job ->
+            val pill = ui.pill(job.label, filled = a.primaryEnabled) { if (a.primaryEnabled) start(job) }
+            if (!a.primaryEnabled) { pill.setTextColor(ui.textMuted); pill.isClickable = false }
+            addView(pill, ui.wrap())
+        }
+        a.progress?.let { label ->
+            val chip = ui.chip(label)
+            progress = chip
+            addView(chip, ui.wrap())
+            if (a.canCancel) addView(ui.pill("Cancel", size = 15f) { cancel() }, ui.wrap().apply { topMargin = ui.dim(12) })
+        }
+        a.note?.let { addView(ui.note(it, 15f).apply { gravity = Gravity.CENTER }, ui.wrap().apply { topMargin = ui.dim(12) }) }
+    }
+
+    /** Runs on the job lane; the result is already in the sidecar, so the screen just re-reads it. */
+    private fun start(job: Actions.Job) {
+        val started = LongJobs.lane.run(id, {
+            if (job == Actions.Job.TRANSCRIBE) NativeBridge.nativeTranscribe(id) else NativeBridge.nativeSummarise(id)
+        }) { json ->
+            if (isDestroyed) return@run
+            // Not started at all (busy, no key, not offered now): say why. A job that ran and
+            // failed shows its error under the action instead.
+            val r = CoreJson.obj(json, Sidecar::ofJob)
+            if (r is CoreResult.Err) InkDialog.error(this, "${job.label} didn't start", r.message)
+            load()
+        }
+        if (started) load()
+    }
+
+    private fun cancel() {
+        scope.core({ NativeBridge.nativeCancel(id) }) { load() }
+    }
+
     private fun render() {
         val v = view ?: return
+        actions = actionsFor(v.meeting)
         val h = MeetingHeader.of(v.meeting)
         val column = ui.column().apply {
             addView(ui.header("All meetings"))
@@ -218,6 +290,8 @@ class MeetingActivity : Activity() {
             addView(ui.spacer(ui.dim(32)))
             addView(playerCard())
             templateCard(v)?.let { addView(ui.spacer(ui.dim(20))); addView(it) }
+            addView(ui.spacer(ui.dim(24)))
+            addView(actionsRow(actions!!))
 
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(32)))
