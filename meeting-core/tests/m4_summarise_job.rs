@@ -645,3 +645,36 @@ fn transcribe_again_is_only_offered_once_transcribed() {
         json!({"error": "Transcribe again isn't available while recorded"})
     );
 }
+
+#[test]
+fn a_whole_job_leaves_the_key_files_untouched() {
+    // INV4: keys are read, never written: bytes, modification times and the folder's
+    // listing are the same after a job, a Test connection and a settings change.
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY));
+    let keys = fx.e.data.path().join("keys");
+    let snapshot = || {
+        let mut v: Vec<(String, Vec<u8>, std::time::SystemTime)> = std::fs::read_dir(&keys)
+            .unwrap()
+            .map(|e| {
+                let p = e.unwrap().path();
+                let m = std::fs::metadata(&p).unwrap().modified().unwrap();
+                (
+                    p.file_name().unwrap().to_string_lossy().into_owned(),
+                    std::fs::read(&p).unwrap(),
+                    m,
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let before = snapshot();
+    std::thread::sleep(Duration::from_millis(20)); // a rewrite would show a later time
+    assert_eq!(fx.run(Job::Transcribe)["meeting"]["status"], "done");
+    fx.app.test_connection("summarise", "anthropic");
+    fx.app
+        .set_settings_json(r#"{"summarise":{"model":"claude-y"}}"#);
+    fx.app.get_settings_json();
+    assert_eq!(snapshot(), before);
+}
