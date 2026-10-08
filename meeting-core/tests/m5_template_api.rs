@@ -222,3 +222,29 @@ fn a_save_that_cannot_be_written_is_an_error() {
         "{r}"
     );
 }
+
+#[test]
+fn a_differently_cased_file_is_not_saved_over() {
+    // N4: on a case-insensitive folder (the device's shared storage, the Mac's temp dir)
+    // standup.md and Standup.md are one file; a save would land in Standup.md, which the
+    // scan doesn't read as a template.
+    let e = Env::new();
+    let app = e.app();
+    let dir = e.root.path().join(USER_DIR);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("Standup.md"), "the desktop's own notes").unwrap();
+    let r = parse(&app.save_template_json(&standup_json(&app).to_string()));
+    assert_eq!(
+        r,
+        json!({"error": "A file named Standup.md already exists", "line": null, "field": "id"})
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("Standup.md")).unwrap(),
+        "the desktop's own notes"
+    );
+    // The same name in the same case is the user's copy, saved over as usual.
+    std::fs::remove_file(dir.join("Standup.md")).unwrap();
+    std::fs::write(dir.join("standup.md"), "old").unwrap();
+    let r = parse(&app.save_template_json(&standup_json(&app).to_string()));
+    assert_eq!(r["origin"], "customised", "{r}");
+}

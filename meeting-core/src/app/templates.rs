@@ -88,6 +88,13 @@ impl App {
         if let Err(e) = templates::validate(&t) {
             return template_error(&e);
         }
+        if let Some(other) = self.cased_twin(&t.id) {
+            return template_error(&TemplateError {
+                error: format!("A file named {other} already exists"),
+                line: None,
+                field: Some("id"),
+            });
+        }
         let write = std::fs::create_dir_all(self.templates.dir()).and_then(|()| {
             let path = self.templates.path_of(&t.id);
             crate::atomic::write_atomic(&path, templates::to_file(&t).as_bytes())
@@ -96,6 +103,18 @@ impl App {
             return error_json(&format!("can't save the template: {:?}", e.kind()));
         }
         self.get_template_json(&t.id)
+    }
+
+    /// N4: a file in the templates folder whose name is `<id>.md` in another case. On a
+    /// case-insensitive folder (shared storage) saving would write into it, and the scan never
+    /// reads it as a template.
+    fn cased_twin(&self, id: &str) -> Option<String> {
+        let want = format!("{id}.md");
+        std::fs::read_dir(self.templates.dir())
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .find(|n| *n != want && n.eq_ignore_ascii_case(&want))
     }
 
     /// `nativeResetTemplate`: delete the user's file for `id` (a customised built-in goes back
