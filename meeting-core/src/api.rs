@@ -122,6 +122,29 @@ pub fn test_connection_model(
     }
 }
 
+/// D2: Test connection for a transcription with no model chosen: the listing names the model
+/// a job would pick; `keep` receives the listing.
+pub(crate) fn test_connection_auto(
+    core: &Core,
+    key: &crate::keyfile::ProviderKey,
+    keep: impl FnOnce(Vec<String>),
+) -> String {
+    let http = match providers::http_client(core.timeout, core.https_only) {
+        Ok(c) => c,
+        Err(e) => return error_json(&crate::scrub::scrub(&e, &[key.expose()])),
+    };
+    let fut = providers::test_connection_listing(&http, &core.endpoints, key, None, core.timeout);
+    match crate::runtime::block_on(fut) {
+        Ok((r, ids)) => {
+            if let Some(ids) = ids {
+                keep(ids);
+            }
+            json!(r).to_string()
+        }
+        Err(e) => error_json(&format!("runtime: {e}")),
+    }
+}
+
 /// No usable key: the F4-FR5 message, in the same shape as a connection result.
 fn key_error_json(p: Provider, ks: &KeyStatus) -> String {
     let status = match ks {

@@ -58,40 +58,57 @@ fn phase_word(p: Phase) -> &'static str {
 
 impl App {
     /// The role's provider, key and model, read now (F4-FR3, F10-FR4).
-    fn pick(&self, s: &Settings, role: Role) -> Result<(ProviderKey, String), String> {
+    fn pick(
+        &self,
+        s: &Settings,
+        role: Role,
+    ) -> Result<(ProviderKey, String, settings::ModelSource), String> {
         let usable = |p| settings::key_status(&self.core.key_dir, p).usable();
         let p = settings::effective_provider(s, role, usable);
         let key = keyfile::load(&self.core.key_dir, p).map_err(|e| key_problem(p, e))?;
         let from_key = Some((key.model.as_str(), key.transcribe_model.as_deref()));
         // Always Some with a key: summarise has the file's model, transcribe a default.
-        let model = settings::effective_model(role, p, s.role(role).model.as_deref(), from_key)
-            .map_or_else(String::new, |(m, _)| m);
-        Ok((key, model))
+        let (model, source) =
+            settings::effective_model(role, p, s.role(role).model.as_deref(), from_key)
+                .unwrap_or((String::new(), settings::ModelSource::Default));
+        Ok((key, model, source))
     }
 
     /// F5-FR10: snapshot what `job` needs. A later Settings change or key-file edit does not
     /// reach the running job.
     pub fn plan(&self, job: Job) -> Result<JobPlan, String> {
         let (s, _) = self.settings();
-        let transcribe = match job {
-            Job::Transcribe => Some(self.pick(&s, Role::Transcribe)?),
-            Job::Summarise => None,
+        let http = providers::http_client(jobs::CONNECT_TIMEOUT, self.core.https_only)?;
+        let (transcribe, transcribe_fallback) = match job {
+            Job::Transcribe => {
+                let (key, mut model, source) = self.pick(&s, Role::Transcribe)?;
+                // D2: the account's listing picks the model when none is chosen, and the
+                // fallback when the chosen one is refused (D1).
+                let ids = self.listed_models(&key, &http);
+                if source == settings::ModelSource::Default
+                    && let Some(m) = ids
+                        .as_deref()
+                        .and_then(|ids| settings::pick_transcribe(key.provider, ids))
+                {
+                    model = m;
+                }
+                let fb = settings::transcribe_fallback(key.provider, &model, ids.as_deref());
+                (Some((key, model)), fb)
+            }
+            Job::Summarise => (None, None),
         };
         // Transcribe runs without a summarise key and stops at `transcribed`; Summarise
         // again needs one (F7-FR2).
         let (summarise, summarise_problem) = match self.pick(&s, Role::Summarise) {
-            Ok(k) => (Some(k), None),
+            Ok((k, m, _)) => (Some((k, m)), None),
             Err(e) if job == Job::Transcribe => (None, Some(e)),
             Err(e) => return Err(e),
         };
-        let transcribe_fallback = transcribe
-            .as_ref()
-            .and_then(|(k, m)| settings::transcribe_fallback(k.provider, m));
         let summarise_fallback = summarise
             .as_ref()
             .map(|(k, _)| fallback_model(k.provider).to_owned());
         Ok(JobPlan {
-            http: providers::http_client(jobs::CONNECT_TIMEOUT, self.core.https_only)?,
+            http,
             endpoints: self.core.endpoints.clone(),
             transcribe,
             summarise,

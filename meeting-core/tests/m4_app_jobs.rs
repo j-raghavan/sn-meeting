@@ -138,7 +138,8 @@ async fn settings_changed_mid_job_do_not_reach_it() {
         .map(|r| r.url.path().to_owned())
         .collect();
     let t = "/v1/audio/transcriptions";
-    assert_eq!(paths, [t, t, "/v1/responses"]);
+    // The job lists the account's models first (D2: unmocked here, so the default runs).
+    assert_eq!(paths, ["/v1/models", t, t, "/v1/responses"]);
 }
 
 const SUMMARY: &str =

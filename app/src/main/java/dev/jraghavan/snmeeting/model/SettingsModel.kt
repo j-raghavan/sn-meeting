@@ -145,13 +145,14 @@ object ProviderRows {
         Row(p, Format.providerName(p), hint, selected, key?.usable == true && !selected)
     }
 
-    /** "gpt-4o-mini · from the key file"; null when no model can run (summarise without a key). */
+    /** "gpt-4o-mini · from the key file", "gpt-4o-transcribe · auto"; null when no model can run (summarise without a key). */
     fun model(role: String, s: SettingsView): String? {
         val e = s.effective(role)
         val m = e.model ?: return null
         val from = when (e.modelSource) {
             "override" -> "your choice"
             "keyFile" -> "from the key file"
+            "auto" -> "auto" // the first transcription model the account lists (D2)
             else -> "the default"
         }
         return "$m  ·  $from"

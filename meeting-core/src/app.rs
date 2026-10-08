@@ -7,6 +7,7 @@ use crate::settings::{self, Ctx, KeyStatus, Origin, Role, Settings};
 use crate::sidecar::{Audio, Mic};
 use crate::tz::{DeviceTz, LocalTz};
 use serde_json::{Map, Value, json};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -30,6 +31,8 @@ pub struct App {
     pub budgets: crate::jobs::Budgets,
     /// The user's templates folder under the storage root, and the parsed set (F11-FR3).
     pub templates: crate::templates::Store,
+    /// D2: each provider's model listing, once read, for the life of the process.
+    models: Mutex<HashMap<Provider, Vec<String>>>,
 }
 
 #[derive(Debug)]
@@ -62,6 +65,7 @@ impl App {
             jobs: Default::default(),
             budgets: Default::default(),
             templates,
+            models: Mutex::default(),
         }
     }
 
@@ -83,6 +87,34 @@ impl App {
     pub fn settings(&self) -> (Settings, Origin) {
         let st = self.state();
         (st.settings.clone(), st.origin)
+    }
+
+    /// D2: `p`'s model listing, if it has been read in this process.
+    pub fn cached_models(&self, p: Provider) -> Option<Vec<String>> {
+        let m = self.models.lock().unwrap_or_else(PoisonError::into_inner);
+        m.get(&p).cloned()
+    }
+
+    fn store_models(&self, p: Provider, ids: Vec<String>) {
+        let mut m = self.models.lock().unwrap_or_else(PoisonError::into_inner);
+        m.insert(p, ids);
+    }
+
+    /// D2: the key's provider's model listing, read once per process (the call Test connection
+    /// makes). `None` when it can't be read; it is tried again next time. Blocking.
+    pub(crate) fn listed_models(
+        &self,
+        key: &crate::keyfile::ProviderKey,
+        http: &crate::providers::Http,
+    ) -> Option<Vec<String>> {
+        if let Some(ids) = self.cached_models(key.provider) {
+            return Some(ids);
+        }
+        let ep = &self.core.endpoints;
+        let fut = crate::providers::list_models(http, ep, key, self.core.timeout);
+        let ids = crate::runtime::block_on(fut).ok().flatten()?;
+        self.store_models(key.provider, ids.clone());
+        Some(ids)
     }
 
     /// What is live right now: the recording, and every meeting with a job in flight.
@@ -291,7 +323,16 @@ impl App {
                 } => Some((model.as_str(), transcribe_model.as_deref())),
                 _ => None,
             };
-            let m = settings::effective_model(role, p, s.role(role).model.as_deref(), from_key);
+            let mut m = settings::effective_model(role, p, s.role(role).model.as_deref(), from_key);
+            // D2: once the account's models are known, the one a job would pick.
+            if let Some((_, settings::ModelSource::Default)) = m
+                && role == Role::Transcribe
+                && let Some(auto) = self
+                    .cached_models(p)
+                    .and_then(|ids| settings::pick_transcribe(p, &ids))
+            {
+                m = Some((auto, settings::ModelSource::Auto));
+            }
             let (model, source) = m.map_or((None, None), |(m, src)| (Some(m), Some(src)));
             json!({"provider": p, "model": model, "modelSource": source})
         };
@@ -358,17 +399,26 @@ impl App {
 
     /// `nativeTestConnection`. Settings' model override applies only when `provider` is the
     /// role's effective provider: testing another provider checks its own key file's model.
+    /// With no transcription model chosen (no override, no `transcribe_model`), it names the
+    /// one a job would pick from the listing (D2), and keeps the listing.
     pub fn test_connection(&self, role: &str, provider: &str) -> String {
-        let model = match (Role::from_id(role), Provider::from_id(provider)) {
-            (Some(r), Some(p)) => {
-                let (s, _) = self.settings();
-                let usable = |q| settings::key_status(&self.core.key_dir, q).usable();
-                (settings::effective_provider(&s, r, usable) == p)
-                    .then(|| s.role(r).model.clone())
-                    .flatten()
-            }
-            _ => None,
+        let (r, p) = match (Role::from_id(role), Provider::from_id(provider)) {
+            (Some(r), Some(p)) => (r, p),
+            _ => return api::test_connection_model(&self.core, role, provider, None),
         };
+        let (s, _) = self.settings();
+        let usable = |q| settings::key_status(&self.core.key_dir, q).usable();
+        let model = (settings::effective_provider(&s, r, usable) == p)
+            .then(|| s.role(r).model.clone())
+            .flatten();
+        if r == Role::Transcribe
+            && r.providers().contains(&p)
+            && model.is_none()
+            && let Ok(key) = crate::keyfile::load(&self.core.key_dir, p)
+            && key.transcribe_model.is_none()
+        {
+            return api::test_connection_auto(&self.core, &key, |ids| self.store_models(p, ids));
+        }
         api::test_connection_model(&self.core, role, provider, model.as_deref())
     }
 }

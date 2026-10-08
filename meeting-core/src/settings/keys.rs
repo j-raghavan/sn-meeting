@@ -62,9 +62,32 @@ pub fn transcribe_candidates(p: Provider) -> &'static [&'static str] {
     }
 }
 
-/// D1: the one model a transcription retries with when `model` is refused: the next known
-/// transcription model after it (the first other one when `model` isn't a known one).
-pub fn transcribe_fallback(p: Provider, model: &str) -> Option<String> {
+/// The transcription models in `ids` (a provider's listing) in the order they are tried.
+fn listed_candidates(p: Provider, ids: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = transcribe_candidates(p)
+        .iter()
+        .filter(|c| ids.iter().any(|id| id == *c))
+        .map(|c| (*c).to_owned())
+        .collect();
+    if p == Provider::Gemini {
+        out.extend(ids.iter().filter(|id| id.contains("flash")).cloned());
+    }
+    out.dedup();
+    out
+}
+
+/// D2: the first transcription model the account lists, when none is chosen.
+pub fn pick_transcribe(p: Provider, ids: &[String]) -> Option<String> {
+    listed_candidates(p, ids).into_iter().next()
+}
+
+/// D1: the one model a transcription retries with when `model` is refused. With the account's
+/// listing (`ids`), the first listed transcription model other than `model`; without one, the
+/// next known model after it (the first other one when `model` isn't a known one).
+pub fn transcribe_fallback(p: Provider, model: &str, ids: Option<&[String]>) -> Option<String> {
+    if let Some(ids) = ids {
+        return listed_candidates(p, ids).into_iter().find(|m| m != model);
+    }
     let c = transcribe_candidates(p);
     let after = c.iter().position(|m| *m == model).map_or(0, |i| i + 1);
     c[after.min(c.len())..]
@@ -191,6 +214,8 @@ pub enum ModelSource {
     Override,
     KeyFile,
     Default,
+    /// D2: the first transcription model the account lists.
+    Auto,
 }
 
 /// F4-FR3: override > key file (`transcribe_model` for transcribe, `model` for summarise) >

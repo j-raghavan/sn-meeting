@@ -100,18 +100,56 @@ pub async fn test_connection(
     model: &str,
     timeout: Duration,
 ) -> ConnectionResult {
+    test_connection_listing(http, ep, key, Some(model), timeout)
+        .await
+        .0
+}
+
+/// `test_connection`, and the listing when there was one. With no `model` (D2: no
+/// transcription model chosen), the result names the first transcription model listed,
+/// "… · gpt-4o-transcribe · auto".
+pub async fn test_connection_listing(
+    http: &reqwest::Client,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: Option<&str>,
+    timeout: Duration,
+) -> (ConnectionResult, Option<Vec<String>>) {
     let started = Instant::now();
     let outcome = tokio::time::timeout(timeout, list_ids(http, ep, key))
         .await
         .unwrap_or_else(|_| Err(Fail::Transport(ConnStatus::TimedOut, "Timed out".into())));
     let ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let default = crate::settings::transcribe_candidates(key.provider)
+        .first()
+        .copied()
+        .unwrap_or_default();
+    let mut shown = model.unwrap_or(default).to_owned();
+    let mut listing = None;
     let (status, model_found, detail) = match outcome {
         Ok(ids) => {
-            let found = ids.iter().any(|id| id == model);
             let mut d = format!("Connected · {ms} ms");
-            if !found {
-                d.push_str(&format!(" · model {model} not found"));
-            }
+            let found = match model {
+                Some(m) => {
+                    let found = ids.iter().any(|id| id == m);
+                    if !found {
+                        d.push_str(&format!(" · model {m} not found"));
+                    }
+                    found
+                }
+                None => match crate::settings::pick_transcribe(key.provider, &ids) {
+                    Some(m) => {
+                        d.push_str(&format!(" · {m} · auto"));
+                        shown = m;
+                        true
+                    }
+                    None => {
+                        d.push_str(" · no transcription model found");
+                        false
+                    }
+                },
+            };
+            listing = Some(ids);
             (ConnStatus::Connected, Some(found), d)
         }
         Err(Fail::Transport(s, d)) => (s, None, d),
@@ -121,15 +159,30 @@ pub async fn test_connection(
         }
     };
     let secret = [key.expose()];
-    ConnectionResult {
+    let result = ConnectionResult {
         ok: status == ConnStatus::Connected,
         status,
         ms,
         provider: key.provider.id(),
-        model: scrub(model, &secret),
+        model: scrub(&shown, &secret),
         model_found,
         detail: scrub(&detail, &secret),
-    }
+    };
+    (result, listing)
+}
+
+/// Every model id the key can see (the listing Test connection uses), or `None` when the
+/// listing fails or takes longer than `timeout`.
+pub async fn list_models(
+    http: &reqwest::Client,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    timeout: Duration,
+) -> Option<Vec<String>> {
+    tokio::time::timeout(timeout, list_ids(http, ep, key))
+        .await
+        .ok()?
+        .ok()
 }
 
 enum Fail {

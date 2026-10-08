@@ -17,7 +17,7 @@ mod keys;
 pub use folder::{OUTSIDE, validate_save_folder};
 pub use keys::{
     KeyStatus, ModelSource, Role, effective_model, effective_provider, key_status, key_status_of,
-    transcribe_candidates, transcribe_fallback,
+    pick_transcribe, transcribe_candidates, transcribe_fallback,
 };
 
 /// A settings file is a few hundred bytes; anything this big is not one.

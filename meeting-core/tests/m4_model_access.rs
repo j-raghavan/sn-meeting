@@ -199,3 +199,130 @@ fn gemini_falls_back_too() {
     transcribed(&m);
     assert_eq!(m["providers"]["transcribe"]["model"], "gemini-3.8-flash");
 }
+
+#[test]
+fn with_no_model_chosen_the_first_listed_transcription_model_runs() {
+    let fx = fixture("openai", None);
+    fx.openai_lists(&[
+        "whisper-1",
+        "gpt-4o-mini-transcribe",
+        "gpt-4o-transcribe",
+        "gpt-4o-mini",
+    ]);
+    fx.openai_answers("gpt-4o-transcribe", 200, OK);
+    // Before anything has listed the models, Settings shows the code default.
+    let eff = |fx: &Fx| parse(&fx.app.get_settings_json())["effective"]["transcribe"].clone();
+    assert_eq!(
+        eff(&fx),
+        json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "default"})
+    );
+    let m = fx.transcribe();
+    transcribed(&m);
+    assert_eq!(m["providers"]["transcribe"]["model"], "gpt-4o-transcribe");
+    assert_eq!(
+        eff(&fx),
+        json!({"provider": "openai", "model": "gpt-4o-transcribe", "modelSource": "auto"})
+    );
+    // The listing is kept for the process: a second job doesn't list again.
+    let id2 = {
+        let b = begin(&fx.app, T0 + 3_600_000);
+        let first = PathBuf::from(b["firstSegmentPath"].as_str().unwrap());
+        std::fs::write(&first, b"seg").unwrap();
+        let id = b["id"].as_str().unwrap().to_owned();
+        fx.app.finish_json(&id, 1_000, "");
+        id
+    };
+    parse(&fx.app.run_job_json(&id2, Job::Transcribe));
+    assert_eq!(fx.requests("/v1/models").len(), 1);
+    assert_eq!(fx.requests("/v1/audio/transcriptions").len(), 2);
+}
+
+#[test]
+fn the_fallback_is_a_model_the_account_lists() {
+    let fx = fixture("openai", Some("gpt-transcribe"));
+    fx.openai_lists(&["whisper-1", "gpt-4o-mini"]);
+    fx.openai_answers("gpt-transcribe", 403, NO_ACCESS);
+    fx.openai_answers("whisper-1", 200, OK);
+    let m = fx.transcribe();
+    transcribed(&m);
+    assert_eq!(m["providers"]["transcribe"]["model"], "whisper-1");
+}
+
+#[test]
+fn test_connection_names_the_model_it_chose() {
+    let fx = fixture("openai", None);
+    fx.openai_lists(&["gpt-4o-mini-transcribe", "whisper-1"]);
+    let r = parse(&fx.app.test_connection("transcribe", "openai"));
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["model"], "gpt-4o-mini-transcribe");
+    assert_eq!(r["model_found"], true);
+    let d = r["detail"].as_str().unwrap();
+    assert!(
+        d.starts_with("Connected · ") && d.ends_with(" · gpt-4o-mini-transcribe · auto"),
+        "{d}"
+    );
+    let eff = &parse(&fx.app.get_settings_json())["effective"]["transcribe"];
+    assert_eq!(eff["model"], "gpt-4o-mini-transcribe");
+    assert_eq!(eff["modelSource"], "auto");
+    // A key file's transcribe_model is checked as it is.
+    let fx = fixture("openai", Some("whisper-1"));
+    fx.openai_lists(&["gpt-4o-mini-transcribe"]);
+    let r = parse(&fx.app.test_connection("transcribe", "openai"));
+    assert_eq!(
+        (r["model"].clone(), r["model_found"].clone()),
+        (json!("whisper-1"), json!(false))
+    );
+}
+
+#[test]
+fn an_account_listing_no_transcription_model_says_so() {
+    let fx = fixture("openai", None);
+    fx.openai_lists(&["gpt-4o-mini"]);
+    let r = parse(&fx.app.test_connection("transcribe", "openai"));
+    assert_eq!(r["model_found"], false, "{r}");
+    assert!(
+        r["detail"]
+            .as_str()
+            .unwrap()
+            .ends_with(" · no transcription model found"),
+        "{r}"
+    );
+}
+
+#[test]
+fn gemini_picks_its_flash_model() {
+    let list = |ids: &[&str]| {
+        let models: Vec<Value> = ids
+            .iter()
+            .map(|i| json!({"name": format!("models/{i}")}))
+            .collect();
+        Mock::given(method("GET"))
+            .and(path("/v1beta/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models": models})))
+    };
+    let fx = fixture("gemini", None);
+    fx.mount(list(&[
+        "gemini-2.5-pro",
+        "gemini-9-flash-lite",
+        "gemini-9-flash",
+    ]));
+    let r = parse(&fx.app.test_connection("transcribe", "gemini"));
+    assert_eq!(r["model"], "gemini-9-flash-lite", "{r}");
+    let fx = fixture("gemini", None);
+    fx.mount(list(&["gemini-9-flash", "gemini-3.8-flash"]));
+    assert_eq!(
+        parse(&fx.app.test_connection("transcribe", "gemini"))["model"],
+        "gemini-3.8-flash"
+    );
+}
+
+#[test]
+fn an_unlistable_account_uses_the_code_default() {
+    let fx = fixture("openai", None);
+    fx.openai_answers("gpt-transcribe", 200, OK);
+    let m = fx.transcribe();
+    transcribed(&m);
+    assert_eq!(m["providers"]["transcribe"]["model"], "gpt-transcribe");
+    let eff = &parse(&fx.app.get_settings_json())["effective"]["transcribe"];
+    assert_eq!(eff["modelSource"], "default");
+}

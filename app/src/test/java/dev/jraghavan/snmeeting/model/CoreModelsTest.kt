@@ -147,6 +147,8 @@ class CoreModelsTest {
         assertEquals(3, ProviderRows.of("summarise", s).size)
         assertEquals("gpt-transcribe  ·  the default", ProviderRows.model("transcribe", s))
         assertEquals("gpt-4o-mini  ·  from the key file", ProviderRows.model("summarise", s))
+        val auto = CoreJson.obj(j.replace(""""gpt-transcribe","modelSource":"default"""", """"gpt-4o-transcribe","modelSource":"auto""""), SettingsView::from).getOrNull()!!
+        assertEquals("gpt-4o-transcribe  ·  auto", ProviderRows.model("transcribe", auto)) // D2
         assertEquals("""{"transcribe":{"provider":"gemini"}}""", SettingsPatch.provider("transcribe", "gemini"))
         assertEquals("""{"transcribe":{"model":"whisper-1"}}""", SettingsPatch.model("transcribe", " whisper-1 "))
     }
