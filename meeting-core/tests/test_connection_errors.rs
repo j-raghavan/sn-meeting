@@ -69,6 +69,40 @@ async fn a_server_error_echoing_the_key_is_scrubbed() {
 }
 
 #[tokio::test]
+async fn a_cut_or_percent_encoded_key_is_scrubbed() {
+    // A provider echoing the first 12 characters of the key, or the key URL-encoded.
+    let body =
+        json!({"error":{"message":format!("bad {} and {}", &AN[..12], &AN[AN.len() - 13..])}});
+    let (s, d) = replying(ResponseTemplate::new(500).set_body_json(body)).await;
+    let r = call(
+        &core_for(&s.uri(), d.path(), 5000),
+        "summarise",
+        "anthropic",
+    )
+    .await;
+    assert_eq!(detail(&r), "HTTP 500: bad [redacted] and [redacted]");
+    let key = "sk-ant+SECRET/x=0002abcdef";
+    let encoded = "sk-ant%2BSECRET%2Fx%3D0002abcdef";
+    let lower_hex = "sk-ant%2bSECRET%2fx%3d0002abcdef";
+    let body = json!({"error":{"message":format!("bad {encoded} {lower_hex}")}});
+    let (s, d) = replying(ResponseTemplate::new(500).set_body_json(body)).await;
+    std::fs::write(
+        d.path().join("copilot-key-claude.txt"),
+        format!("provider=anthropic\nkey={key}\nmodel=m\n"),
+    )
+    .unwrap();
+    let r = call(
+        &core_for(&s.uri(), d.path(), 5000),
+        "summarise",
+        "anthropic",
+    )
+    .await;
+    let text = r.to_string();
+    assert!(!text.contains("SECRET"), "{r}");
+    assert!(detail(&r).starts_with("HTTP 500: bad [redacted]"), "{r}");
+}
+
+#[tokio::test]
 async fn plain_text_and_html_error_bodies() {
     let text = format!("upstream failed\nAuthorization: Bearer {OA}");
     let (s, d) = replying(ResponseTemplate::new(503).set_body_string(text)).await;

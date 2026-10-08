@@ -29,6 +29,17 @@ const CASES: &[(&str, &str)] = &[
     ("the bearerless path; authorization required", "the bearerless path; authorization required"),
     ("Authorization: ", "Authorization: "),
     ("", ""),
+    // ordinary key=value pairs and prose that merely names a scheme or header
+    ("monkey=banana", "monkey=banana"),
+    ("hotkey=F1, turnkey = yes", "hotkey=F1, turnkey = yes"),
+    ("api_key=sk-1&x=2", "api_key=[redacted]&x=2"),
+    ("Bearer of bad news", "Bearer of bad news"),
+    ("Authorization: failed for project", "Authorization: failed for project"),
+    ("authorization: Required", "authorization: Required"),
+    ("bearer dXNlcjpwYXNz rest", "bearer [redacted] rest"),
+    // the known secret cut short, or URL-encoded
+    ("echo sk-proj-SECR!", "echo [redacted]!"),
+    ("tail ...ECRET-0123456789", "tail ...[redacted]"),
     // non-ASCII text survives
     ("Fehler – schlüssel: x-api-key: ä-ß", "Fehler – schlüssel: x-api-key: [redacted]"),
 ];
@@ -104,4 +115,25 @@ fn truncates_after_redacting() {
     // With no delimiter in reach, the cut is hard.
     let blob = "x".repeat(MAX_LEN * 2);
     assert_eq!(scrub(&blob, &[]), format!("{}…", "x".repeat(MAX_LEN - 1)));
+}
+
+#[test]
+fn encoded_and_partial_keys() {
+    let key = "sk-ant+SECRET/x=0002abcdef";
+    assert_eq!(
+        scrub("v=sk-ant%2BSECRET%2Fx%3D0002abcdef;", &[key]),
+        "v=[redacted];"
+    );
+    assert_eq!(
+        scrub("v=sk-ant%2bSECRET%2fx%3d0002abcdef;", &[key]),
+        "v=[redacted];"
+    );
+    // Runs shorter than 12 characters are left: they are not the key.
+    assert_eq!(scrub("sk-ant+SECR", &[key]), "sk-ant+SECR");
+    assert_eq!(scrub("sk-ant+SECRE", &[key]), "[redacted]");
+    // A key of 12 characters or fewer is only replaced whole.
+    assert_eq!(
+        scrub("abcdefghijkl abcdefghijk", &["abcdefghijkl"]),
+        "[redacted] abcdefghijk"
+    );
 }
