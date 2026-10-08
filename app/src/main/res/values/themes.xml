@@ -7,4 +7,28 @@
         <item name="android:textColor">@android:color/black</item>
         <item name="android:windowAnimationStyle">@null</item>
     </style>
+
+    <!-- inkread's InkDialog (styles.xml): black accents, serif title, mono bold letter-spaced
+         buttons, a rounded keyline card. Rename, delete, notice and error dialogs (F9-FR4). -->
+    <style name="InkDialog" parent="@android:style/Theme.Material.Light.Dialog.Alert">
+        <item name="android:colorAccent">@android:color/black</item>
+        <item name="android:textColorPrimary">@android:color/black</item>
+        <item name="android:windowBackground">@drawable/ink_dialog_bg</item>
+        <item name="android:windowTitleStyle">@style/InkDialog.Title</item>
+        <item name="android:buttonBarButtonStyle">@style/InkDialog.Button</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+    <style name="InkDialog.Title" parent="@android:style/TextAppearance.Material.DialogWindowTitle">
+        <item name="android:fontFamily">serif</item>
+        <item name="android:textColor">@android:color/black</item>
+        <item name="android:textSize">21sp</item>
+    </style>
+    <style name="InkDialog.Button" parent="@android:style/Widget.Material.Button.Borderless">
+        <item name="android:fontFamily">monospace</item>
+        <item name="android:textColor">@android:color/black</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.06</item>
+        <item name="android:stateListAnimator">@null</item>
+        <item name="android:background">@null</item>
+    </style>
 </resources>
