@@ -14,6 +14,10 @@ import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.MeetingHeader
 import dev.jraghavan.snmeeting.model.MeetingView
+import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.Status
+import dev.jraghavan.snmeeting.model.TemplateChoice
+import dev.jraghavan.snmeeting.model.TemplateRow
 import dev.jraghavan.snmeeting.play.MediaPlayerPort
 import dev.jraghavan.snmeeting.play.Playback
 import dev.jraghavan.snmeeting.play.SegmentPlaylist
@@ -30,6 +34,9 @@ class MeetingActivity : Activity() {
     private lateinit var id: String
     private var view: MeetingView? = null
     private var page: ScrollView? = null
+    private var settings: SettingsView? = null
+    private var templates: List<TemplateRow> = emptyList()
+    private var pickingTemplate = false
     private val handler = Handler(Looper.getMainLooper())
 
     // F7-FR1: playback outlives re-renders; the card shows its state.
@@ -57,6 +64,14 @@ class MeetingActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Settings and templates may have changed in their screens or on the desktop. CoreJobs
+        // answers in order, so both are in hand when the meeting arrives: one redraw.
+        scope.core({ NativeBridge.nativeGetSettings() }) { json ->
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { settings = it }
+        }
+        scope.core({ NativeBridge.nativeListTemplates() }) { json ->
+            CoreJson.list(json, TemplateRow::from).getOrNull()?.let { templates = it }
+        }
         load()
     }
 
@@ -145,6 +160,43 @@ class MeetingActivity : Activity() {
         position?.text = "${Format.duration(pb.positionMs())}  /  ${Format.duration(playlist?.totalMs ?: 0)}"
     }
 
+    /** F11-FR6 / F7-FR2: the template the next Transcribe or Summarise again uses, with an inline picker. */
+    private fun templateCard(v: MeetingView): View? {
+        if (templates.isEmpty()) return null
+        val choice = TemplateChoice.of(v.meeting.templateId, settings?.effectiveDefaultTemplate ?: TemplateChoice.GENERAL, templates)
+        val current = choice.current ?: return null
+        val canChange = v.meeting.status != Status.RECORDING && v.meeting.status != Status.TRANSCRIBING &&
+            !LongJobs.lane.isRunning(id)
+        return ui.card(padV = ui.dim(12)).apply {
+            addView(LinearLayout(this@MeetingActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(LinearLayout(this@MeetingActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(ui.eyebrow("Template"))
+                    addView(ui.body(current.name, 18f, bold = true), ui.wrap().apply { topMargin = ui.dim(4) })
+                    addView(ui.note(choice.note ?: current.description, 13f), ui.wrap().apply { topMargin = ui.dim(2) })
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                if (canChange) addView(ui.pill(if (pickingTemplate) "Done" else "Change", size = 15f) { pickingTemplate = !pickingTemplate; render() })
+            })
+            if (pickingTemplate && canChange) {
+                addView(ui.spacer(ui.dim(8)))
+                choice.options.forEach { t ->
+                    addView(ui.hairline())
+                    addView(ui.choiceRow(t.name, t.description, t.id == current.id) { setTemplate(t.id) })
+                }
+            }
+        }
+    }
+
+    private fun setTemplate(templateId: String) {
+        pickingTemplate = false
+        scope.core({ NativeBridge.nativeSetMeetingTemplate(id, templateId) }) { json ->
+            (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't change the template", it.message) }
+            load()
+        }
+    }
+
     private fun render() {
         val v = view ?: return
         val h = MeetingHeader.of(v.meeting)
@@ -165,6 +217,7 @@ class MeetingActivity : Activity() {
 
             addView(ui.spacer(ui.dim(32)))
             addView(playerCard())
+            templateCard(v)?.let { addView(ui.spacer(ui.dim(20))); addView(it) }
 
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(32)))

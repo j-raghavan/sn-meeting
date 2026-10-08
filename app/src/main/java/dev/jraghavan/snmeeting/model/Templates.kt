@@ -36,3 +36,27 @@ data class TemplateRow(
         ) }
     }
 }
+
+/** F11-FR6: the meeting's template card and its picker. */
+data class TemplateChoice(val current: TemplateRow?, val note: String?, val options: List<TemplateRow>) {
+    companion object {
+        /** A YOURS template whose file has an error can't be used by a job, so it isn't offered. */
+        private fun usable(t: TemplateRow) = t.problem == null || t.origin != TemplateOrigin.YOURS
+
+        /**
+         * [templateId] is the meeting's (null until set or first transcribed: Settings'
+         * [default] applies). A template that has gone falls back to General, with a note.
+         */
+        fun of(templateId: String?, default: String, rows: List<TemplateRow>): TemplateChoice {
+            val options = rows.filter(::usable)
+            val wanted = templateId ?: default
+            val found = options.firstOrNull { it.id == wanted }
+            if (found != null) return TemplateChoice(found, null, options)
+            val general = options.firstOrNull { it.id == GENERAL }
+            val note = if (templateId != null) "Its template is gone, so ${general?.name ?: "General meeting"} is used" else null
+            return TemplateChoice(general, note, options)
+        }
+
+        const val GENERAL = "general"
+    }
+}
