@@ -80,3 +80,9 @@ interface RecorderCore {
 
 /** Measures a finalised file (MediaMetadataRetriever METADATA_KEY_DURATION); null if unreadable. */
 fun interface DurationPort { fun durationMs(path: String): Long? }
+
+/** The partial wakelock, not reference-counted: acquire() again only extends the timeout. */
+interface WakePort {
+    fun acquire(timeoutMs: Long)
+    fun release()
+}

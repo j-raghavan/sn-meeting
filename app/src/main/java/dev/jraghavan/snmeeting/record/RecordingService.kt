@@ -66,13 +66,14 @@ class RecordingService : Service() {
         val pick = MicSelector.pick(usbInputs(am), BtSnapshot.NONE, choice)
         val mic = pick.chosen ?: return shutdown(RecState.Idle(pick.reason, null))
         hub.publish(RecState.Starting(mic.label))
+        val wake = WakeLease(AndroidWake(this)).also { it.begin(guard) } // F2-FR6: the screen may sleep
         val rec = SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration), MediaRecorderAdapter(this), FileStorage, AndroidClock,
             object : SegmentedRecorder.Listener {
                 override fun onRecording(id: String, startElapsedMs: Long) {
                     hub.publish(RecState.Recording(id, mic.label, startElapsedMs))
                     notify(notification(mic.label, startElapsedMs))
                 }
-                override fun onSegmentStarted(index: Int) = Unit
+                override fun onSegmentStarted(index: Int) = wake.renew()
                 override fun onEnded(id: String?, message: String) = shutdown(RecState.Idle(message, id))
             })
         recorder = rec

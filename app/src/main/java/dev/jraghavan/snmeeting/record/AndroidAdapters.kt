@@ -6,6 +6,7 @@ import android.media.AudioManager
 import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
 import android.os.Handler
+import android.os.PowerManager
 import android.os.SystemClock
 import dev.jraghavan.snmeeting.CoreJobs
 import dev.jraghavan.snmeeting.NativeBridge
@@ -156,4 +157,12 @@ class CoreRecorderBridge(private val h: Handler, private val duration: DurationP
             return null
         }
     }
+}
+
+class AndroidWake(ctx: Context) : WakePort {
+    private val lock = ctx.getSystemService(PowerManager::class.java)
+        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Meetings:recording").apply { setReferenceCounted(false) }
+
+    override fun acquire(timeoutMs: Long) = lock.acquire(timeoutMs)
+    override fun release() { if (lock.isHeld) lock.release() }
 }
