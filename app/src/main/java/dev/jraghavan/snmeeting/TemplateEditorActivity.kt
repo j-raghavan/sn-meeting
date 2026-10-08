@@ -170,7 +170,7 @@ class TemplateEditorActivity : Activity() {
     /** F11-AC6: the layout against the sample meeting. Nothing is saved. */
     private fun preview() {
         val json = current().json()
-        scope.core({ NativeBridge.nativePreviewTemplate(json) }) { reply ->
+        scope.preview({ NativeBridge.nativePreviewTemplate(json) }) { reply ->
             when (val r = CoreJson.obj(reply) { it.str("markdown") }) {
                 is CoreResult.Ok -> {
                     showError(null); status.text = ""

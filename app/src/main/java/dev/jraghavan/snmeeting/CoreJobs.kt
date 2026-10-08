@@ -101,3 +101,18 @@ object LongJobs {
         JobLane(Jobs(worker) { main.post(it) })
     }
 }
+
+/**
+ * S16: the template editor's Preview on its own thread. A preview renders a layout the user is
+ * still writing, which can take a while; on [CoreJobs] it would delay a tick or the recorder's
+ * next segment.
+ */
+object PreviewJobs {
+    private val jobs by lazy {
+        val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-preview").apply { isDaemon = true } }
+        val main = Handler(Looper.getMainLooper())
+        Jobs(worker) { main.post(it) }
+    }
+
+    fun run(work: () -> String, done: (String) -> Unit) = jobs.run(work, done)
+}

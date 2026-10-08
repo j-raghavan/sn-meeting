@@ -22,6 +22,9 @@ class ScreenScope(private val alive: () -> Boolean) {
 
     /** A short core call on [CoreJobs]; [done] only while this screen still wants it. */
     fun core(work: () -> String, done: (String) -> Unit) = CoreJobs.run(work, deliver(done))
+
+    /** A template preview on [PreviewJobs], off the core queue (S16). */
+    fun preview(work: () -> String, done: (String) -> Unit) = PreviewJobs.run(work, deliver(done))
 }
 
 /**
