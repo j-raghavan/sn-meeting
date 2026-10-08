@@ -151,6 +151,20 @@ impl App {
         reply(self.library().get(id).map(|v| json!(v)))
     }
 
+    /// `nativeOpenTodos`: open to-dos from every meeting (F6-FR1).
+    pub fn open_todos_json(&self) -> String {
+        json!(self.library().open_todos()).to_string()
+    }
+
+    /// `nativeSetTodoDone` (F6-FR2).
+    pub fn set_todo_done_json(&self, id: &str, todo_id: &str, done: bool) -> String {
+        reply(
+            self.library()
+                .set_todo_done(id, todo_id, done)
+                .map(|()| ok()),
+        )
+    }
+
     /// Every provider's key status, read fresh (the user may add a file at any time).
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL

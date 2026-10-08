@@ -50,4 +50,10 @@ object NativeBridge {
 
     /** `{meeting: <sidecar>, source, dir, segmentPaths, transcriptPath}`. */
     external fun nativeGetMeeting(id: String): String
+
+    /** Open to-dos from every meeting, newest meeting first: `[TodoRef]`. */
+    external fun nativeOpenTodos(): String
+
+    /** Ticks or unticks one to-do. `{ok: true}`. */
+    external fun nativeSetTodoDone(id: String, todoId: String, done: Boolean): String
 }

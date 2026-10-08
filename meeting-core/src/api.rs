@@ -170,6 +170,16 @@ pub fn get_meeting(id: &str) -> String {
     with_app(|app| app.get_meeting_json(id))
 }
 
+/// `nativeOpenTodos()` (F6-FR1).
+pub fn open_todos() -> String {
+    with_app(App::open_todos_json)
+}
+
+/// `nativeSetTodoDone(id, todoId, done)` (F6-FR2).
+pub fn set_todo_done(id: &str, todo_id: &str, done: bool) -> String {
+    with_app(|app| app.set_todo_done_json(id, todo_id, done))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

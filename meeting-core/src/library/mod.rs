@@ -8,7 +8,9 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod edit;
 mod list;
+pub use edit::TodoRef;
 pub use list::{MeetingSummary, MeetingView, Source};
 
 const MAX_MIC_NAME: usize = 200;

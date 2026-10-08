@@ -3,7 +3,7 @@
 //! `api::guarded` already turns core panics into `{"error":…}`, so this is the second net.
 use jni::EnvUnowned;
 use jni::objects::{JClass, JString};
-use jni::sys::{jint, jlong};
+use jni::sys::{jboolean, jint, jlong};
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeVersion<'local>(
@@ -153,6 +153,33 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeGetMeetin
     env.with_env(|env| -> jni::errors::Result<JString<'local>> {
         let id: String = id.try_to_string(env)?;
         env.new_string(crate::api::get_meeting(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeOpenTodos<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::open_todos())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSetTodoDone<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    todo_id: JString<'local>,
+    done: jboolean,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let todo_id: String = todo_id.try_to_string(env)?;
+        env.new_string(crate::api::set_todo_done(&id, &todo_id, done))
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
