@@ -39,7 +39,9 @@ pub struct Settings {
     pub previous_folders: Vec<String>,
     pub transcribe: RoleSettings,
     pub summarise: RoleSettings,
-    /// F10-FR6.
+    /// F10-FR6: a template id ([`is_template_id`]). Whether that template exists is checked
+    /// against the effective templates in M5. A bad id in the file reads as the default.
+    #[serde(deserialize_with = "lenient_template")]
     pub default_template: String,
     /// Security: the one-time "audio is sent to <provider>" notice, per provider.
     pub notice_shown: NoticeShown,
@@ -114,6 +116,27 @@ fn lenient_mic<'de, D: serde::Deserializer<'de>>(d: D) -> Result<MicChoice, D::E
     Ok(v.as_str()
         .and_then(|s| MicChoice::try_from(s.to_owned()).ok())
         .unwrap_or_default())
+}
+
+/// A template id: kebab-case (F11-FR1), 1-64 characters of `a-z`, `0-9` and single inner
+/// hyphens. Also the user copy's file stem, so it can never name a path.
+pub fn is_template_id(id: &str) -> bool {
+    id.len() <= 64
+        && !id.is_empty()
+        && id.split('-').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+        })
+}
+
+fn lenient_template<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(v.as_str()
+        .filter(|s| is_template_id(s))
+        .unwrap_or(DEFAULT_TEMPLATE)
+        .to_owned())
 }
 
 /// One role's choice. `provider: null` = "first provider with a key", resolved on every read.
@@ -427,6 +450,11 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
     let mut patch = obj.clone();
     patch.remove("schema");
     patch.remove("previousFolders");
+    if let Some(t) = patch.get("defaultTemplate").filter(|t| !t.is_null())
+        && !t.as_str().is_some_and(is_template_id)
+    {
+        return Err(err("defaultTemplate", "invalid template id"));
+    }
     if let Some(m) = patch.get("mic").filter(|m| !m.is_null()) {
         let m = m
             .as_str()
