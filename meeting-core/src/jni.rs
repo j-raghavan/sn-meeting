@@ -183,3 +183,18 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSetTodoDo
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRenameMeeting<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    title: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let title: String = title.try_to_string(env)?;
+        env.new_string(crate::api::rename_meeting(&id, &title))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

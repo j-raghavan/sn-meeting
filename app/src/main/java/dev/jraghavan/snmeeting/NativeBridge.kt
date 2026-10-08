@@ -56,4 +56,7 @@ object NativeBridge {
 
     /** Ticks or unticks one to-do. `{ok: true}`. */
     external fun nativeSetTodoDone(id: String, todoId: String, done: Boolean): String
+
+    /** Names the meeting (`titleSource = user`); "" returns it to untitled. `{ok: true}`. */
+    external fun nativeRenameMeeting(id: String, title: String): String
 }

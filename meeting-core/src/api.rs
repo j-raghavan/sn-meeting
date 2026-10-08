@@ -180,6 +180,11 @@ pub fn set_todo_done(id: &str, todo_id: &str, done: bool) -> String {
     with_app(|app| app.set_todo_done_json(id, todo_id, done))
 }
 
+/// `nativeRenameMeeting(id, title)` (F7-FR5).
+pub fn rename_meeting(id: &str, title: &str) -> String {
+    with_app(|app| app.rename_json(id, title))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

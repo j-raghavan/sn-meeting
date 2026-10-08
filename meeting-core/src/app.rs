@@ -165,6 +165,11 @@ impl App {
         )
     }
 
+    /// `nativeRenameMeeting` (F7-FR5); an empty title clears it.
+    pub fn rename_json(&self, id: &str, title: &str) -> String {
+        reply(self.library().rename(id, title).map(|()| ok()))
+    }
+
     /// Every provider's key status, read fresh (the user may add a file at any time).
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL

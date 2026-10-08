@@ -1,8 +1,11 @@
-//! The meeting edits the UI makes: to-dos (F6-FR2).
+//! The meeting edits the UI makes: to-dos (F6-FR2) and the title (F7-FR5).
 use super::list::Source;
 use super::{LibError, Library, invalid};
-use crate::sidecar;
+use crate::sidecar::{self, TitleSource};
 use serde::Serialize;
+
+/// Longest title, in characters.
+const MAX_TITLE: usize = 200;
 
 /// One row of `nativeOpenTodos` (F6-FR1).
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -51,6 +54,27 @@ impl Library<'_> {
             .find(|t| t.id == todo_id)
             .ok_or_else(|| invalid("to-do not found"))?;
         todo.done = done;
+        sidecar::write(&dir, &sc)?;
+        Ok(())
+    }
+
+    /// F7-FR5: a user title (`titleSource = user`, which extraction never overwrites). An
+    /// empty or blank title returns the meeting to untitled, so the next extraction may name
+    /// it. Legacy audio gets its sidecar here.
+    pub fn rename(&self, id: &str, title: &str) -> Result<(), LibError> {
+        let t = title.trim();
+        if t.chars().any(char::is_control) {
+            return Err(invalid("title can't contain control characters"));
+        }
+        if t.chars().count() > MAX_TITLE {
+            return Err(invalid("title is too long"));
+        }
+        let (dir, mut sc) = self.load_for_write(id)?;
+        (sc.title, sc.title_source) = if t.is_empty() {
+            (None, None)
+        } else {
+            (Some(t.to_owned()), Some(TitleSource::User))
+        };
         sidecar::write(&dir, &sc)?;
         Ok(())
     }

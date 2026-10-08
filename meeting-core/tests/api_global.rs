@@ -24,6 +24,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("getMeeting", api::get_meeting("x")),
         ("openTodos", api::open_todos()),
         ("setTodoDone", api::set_todo_done("x", "y", true)),
+        ("renameMeeting", api::rename_meeting("x", "y")),
     ]
 }
 
