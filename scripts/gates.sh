@@ -15,6 +15,7 @@ step() { printf '\033[34m== %s\033[0m\n' "$*" >&2; }
 
 step "cargo fmt --check";            cargo fmt --check
 step "cargo clippy";                 cargo clippy --all-targets -- -D warnings
+step "cargo clippy (jni-bridge)";    cargo clippy --all-targets --features jni-bridge -- -D warnings
 step "cargo test";                   cargo test -p meeting-core
 step "cargo llvm-cov (>= 97% lines)"
 cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex 'meeting-core/src/jni\.rs$'

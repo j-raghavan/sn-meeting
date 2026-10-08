@@ -1,5 +1,6 @@
 # Meetings — Rust workspace (F1-FR1).
-#   meeting-core : the cdylib core (libmeeting.so).
+#   meeting-core : the cdylib core (libmeeting.so) + feature-gated JNI bridge.
+# INV5: a bare `cargo test -p meeting-core` builds with `jni` absent from the resolved graph.
 [workspace]
 resolver = "3"
 members = ["meeting-core"]
@@ -9,6 +10,10 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.95.0"
 authors = ["J-Raghavan"]
+
+[workspace.dependencies]
+serde_json = "1"
+jni = "0.22.4"
 
 [profile.release]
 # Keep panic = "unwind" (the default): the JNI edge catches panics (INV6/NFR4); "abort" would
