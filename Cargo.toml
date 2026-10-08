@@ -1,0 +1,20 @@
+# Meetings — Rust workspace (F1-FR1).
+#   meeting-core : the cdylib core (libmeeting.so).
+[workspace]
+resolver = "3"
+members = ["meeting-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95.0"
+authors = ["J-Raghavan"]
+
+[profile.release]
+# Keep panic = "unwind" (the default): the JNI edge catches panics (INV6/NFR4); "abort" would
+# make catch_unwind impossible.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"

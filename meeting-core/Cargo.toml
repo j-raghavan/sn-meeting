@@ -1,0 +1,7 @@
+[package]
+name = "meeting-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+description = "Meetings core (libmeeting.so): key files, provider calls via rig-core, and a feature-gated JNI bridge."
