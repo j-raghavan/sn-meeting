@@ -298,11 +298,15 @@ impl Library<'_> {
 
     /// F3-FR2 / workflow step 4: recording stopped. `note` records why, e.g. "mic
     /// disconnected" (F2-FR3); blank means none.
+    /// A meeting already `recorded` (recovery moved it on before the recorder's own finish
+    /// arrived, S12) takes only the length and the note.
     pub fn finish(&self, id: &str, duration_ms: i64, note: Option<&str>) -> Result<(), LibError> {
         let (dir, mut sc) = self.load_for_write(id)?;
         let d = u64::try_from(duration_ms).map_err(|_| invalid("durationMs must be >= 0"))?;
-        let next = status::next(phase(&sc), Event::Stop)?;
-        set_phase(&mut sc, next);
+        if sc.status != Status::Recorded {
+            let next = status::next(phase(&sc), Event::Stop)?;
+            set_phase(&mut sc, next);
+        }
         sc.duration_ms = d;
         if let Some(n) = note.map(clean_note).filter(|n| !n.is_empty()) {
             sc.note = Some(n);

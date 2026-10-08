@@ -115,6 +115,48 @@ fn a_segment_that_cant_be_checked_is_not_flagged_missing() {
 }
 
 #[test]
+fn a_late_finish_after_recovery_still_records_the_length_and_note() {
+    // S12: the service died, Home recovered the meeting, then the recorder's finish arrived.
+    let e = Env::new();
+    {
+        let app = e.app();
+        begin(&app, T0);
+        let dir = e.export();
+        app.close_segment_json(ID0, 0, 900_000);
+        app.add_segment_json(
+            ID0,
+            dir.join(format!("{ID0}-02.m4a")).to_str().unwrap(),
+            900_100,
+        );
+        fs::write(dir.join(format!("{ID0}-01.m4a")), b"aac").unwrap();
+        fs::write(dir.join(format!("{ID0}-02.m4a")), b"aac").unwrap();
+    }
+    let app = e.app();
+    assert_eq!(recover(&app, false)["recovered"], json!([ID0]));
+    assert_eq!(
+        parse(&app.finish_json(ID0, 1_300_100, "mic disconnected")),
+        json!({"ok": true})
+    );
+    let sc = read_sidecar(&e.export(), ID0);
+    assert_eq!(
+        (sc.status, sc.duration_ms, sc.note.as_deref()),
+        (
+            meeting::status::Status::Recorded,
+            1_300_100,
+            Some("mic disconnected")
+        )
+    );
+    // Once it has moved on, a finish is refused and changes nothing.
+    let mut sc = sc;
+    sc.status = meeting::status::Status::Transcribed;
+    meeting::sidecar::write(&e.export(), &sc).unwrap();
+    assert_eq!(
+        parse(&app.finish_json(ID0, 5, "")),
+        json!({"error": "Stop is not allowed while Transcribed"})
+    );
+}
+
+#[test]
 fn transcribing_without_a_job_fails_and_keeps_its_text() {
     // F3-AC4.
     let e = Env::new();

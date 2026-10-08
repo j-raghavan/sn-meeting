@@ -40,9 +40,12 @@ class RecordingService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    /** Set in onDestroy: a late shutdown then only publishes (S12). */
+    @Volatile private var destroyed = false
+
     override fun onCreate() {
         super.onCreate()
-        running = true
+        life.created()
         CoreJobs.init(filesDir.absolutePath)
         am = getSystemService(AudioManager::class.java)
         thread = HandlerThread("recorder").also { it.start() }
@@ -116,6 +119,7 @@ class RecordingService : Service() {
     /** The one exit, after the session released everything: leave the foreground, stop. */
     private fun shutdown(end: RecState.Idle) {
         session = null
+        if (destroyed) return // a late reply after onDestroy (S12): nothing left to stop
         stopForeground(STOP_FOREGROUND_REMOVE)
         // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).
         val reason = end.message?.let(EndReason::ofMessage)
@@ -126,12 +130,16 @@ class RecordingService : Service() {
     }
 
     override fun onDestroy() {
-        // Stopped by the system mid-recording: finalise what we can, then release (INV7).
+        // Stopped by the system mid-recording: finalise what we can, then release (INV7). The
+        // stop queues its close and finish on CoreJobs; "running" clears after them (S12).
+        destroyed = true
         val s = session
-        h.post { s?.destroy() }
+        h.post {
+            s?.destroy()
+            life.destroyed { CoreJobs.exec(it) }
+        }
         thread.quitSafely()
         if (s != null) hub.publish(RecState.Idle(null, null))
-        running = false
         super.onDestroy()
     }
 
@@ -176,9 +184,10 @@ class RecordingService : Service() {
         private const val NOTE_ID = 1
         private const val END_NOTE_ID = 2
 
+        private val life = RunningFlag()
+
         /** For nativeRecover(serviceAlive) and Home's ＋ New / ■ Stop. */
-        @Volatile var running = false
-            private set
+        val running get() = life.running
 
         val hub = RecordingHub { r -> Handler(Looper.getMainLooper()).post(r) }
 

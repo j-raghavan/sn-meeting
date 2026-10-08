@@ -152,9 +152,15 @@ object RetrieverDuration : DurationPort {
     }
 }
 
-/** RecorderCore over NativeBridge on CoreJobs' thread; results back on the recording handler. */
+/**
+ * RecorderCore over NativeBridge on CoreJobs' thread; results back on the recording handler, or
+ * on the worker itself once that handler's thread has quit (S12).
+ */
 class CoreRecorderBridge(private val h: Handler, private val duration: DurationPort) : RecorderCore {
-    private fun <T> call(work: () -> T, done: (T) -> Unit) = CoreJobs.exec { val v = work(); h.post { done(v) } }
+    private fun <T> call(work: () -> T, done: (T) -> Unit) = CoreJobs.exec {
+        val v = work()
+        postOrRun(h::post) { done(v) } // the recorder thread may have quit (S12)
+    }
 
     override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) =
         call({ CoreJson.obj(NativeBridge.nativeBeginMeeting(startedAtMs, micJson, audioJson), Begun::from) }, done)

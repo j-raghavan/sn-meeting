@@ -163,9 +163,16 @@ fn finish_notes_why_and_happens_once() {
         (sc.status, sc.note.as_deref()),
         (Status::Recorded, Some("mic disconnected"))
     );
+    // A second finish (the recorder's, after recovery got there first) only updates the
+    // length and the note; the status stays (S12).
     assert_eq!(
-        parse(&app.finish_json(ID0, 61_000, "")),
-        json!({"error": "Stop is not allowed while Recorded"})
+        parse(&app.finish_json(ID0, 62_000, "")),
+        json!({"ok": true})
+    );
+    let sc = read_sidecar(&e.export(), ID0);
+    assert_eq!(
+        (sc.status, sc.duration_ms, sc.note.as_deref()),
+        (Status::Recorded, 62_000, Some("mic disconnected"))
     );
     let e2 = Env::new();
     let app2 = e2.app();
