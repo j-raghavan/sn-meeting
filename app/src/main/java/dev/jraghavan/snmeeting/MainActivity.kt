@@ -182,9 +182,19 @@ class MainActivity : Activity() {
         CoreJobs.run({ NativeBridge.nativeOpenTodos() }) { json ->
             if (isDestroyed) return@run
             when (val r = CoreJson.list(json, TodoRef::from)) {
-                is CoreResult.Ok -> lists.showTodos(r.value.map(HomeRows::todo))
+                is CoreResult.Ok -> lists.showTodos(r.value.map(HomeRows::todo), onTick = ::tick)
                 is CoreResult.Err -> lists.showTodos(emptyList(), r.message)
             }
+        }
+    }
+
+    /** F6-FR2: ticking stores done in the meeting's sidecar; the row leaves on the redraw. */
+    private fun tick(t: HomeRows.Todo) {
+        CoreJobs.run({ NativeBridge.nativeSetTodoDone(t.meetingId, t.todoId, true) }) { json ->
+            if (isDestroyed) return@run
+            val r = CoreJson.ok(json)
+            if (r is CoreResult.Err) InkDialog.error(this, "Couldn't tick the to-do", r.message)
+            refreshLists()
         }
     }
 

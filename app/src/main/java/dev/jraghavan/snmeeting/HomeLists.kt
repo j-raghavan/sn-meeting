@@ -81,7 +81,15 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val on
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, ui.dim(14), 0, ui.dim(14))
                 addView(ui.checkbox(false).apply {
-                    if (onTick != null) { isClickable = true; setOnClickListener { onTick(t) } }
+                    if (onTick != null) {
+                        isClickable = true
+                        setOnClickListener {
+                            // Ticked at once (one redraw); the row leaves when the list is re-read.
+                            isClickable = false; text = "✓"; setTextColor(android.graphics.Color.WHITE)
+                            background = ui.outline(ui.dim(3), ui.ink)
+                            onTick(t)
+                        }
+                    }
                 })
                 addView(LinearLayout(a).apply {
                     orientation = LinearLayout.VERTICAL
