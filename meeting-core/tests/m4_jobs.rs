@@ -25,9 +25,12 @@ fn key(p: Provider) -> &'static str {
     }
 }
 
-/// One rig completion to `uri` as `p`, mapped through `classify_call`.
+/// One rig completion to `uri` as `p`, mapped through `classify_call`. The client is built on
+/// a blocking thread: loading the roots is CPU work that, polled inline, would hold the test's
+/// single runtime thread past the cancel and budget timers when tests run in parallel.
 async fn call(p: Provider, uri: &str) -> Result<String, CallError> {
-    let http = rig_http(http_client(Duration::from_secs(5), false).unwrap());
+    let build = || http_client(Duration::from_secs(5), false).unwrap();
+    let http = rig_http(tokio::task::spawn_blocking(build).await.unwrap());
     let req = CompletionRequest::new(Message::user("hello")).max_tokens(16);
     let r = match p {
         Provider::OpenAi => {
