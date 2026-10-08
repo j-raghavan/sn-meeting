@@ -1,7 +1,8 @@
 //! The JNI-shaped API: strings in, JSON out, never a panic, never a key. `jni.rs` only marshals.
 use crate::app::App;
-use crate::keyfile::{self, KeyError, Provider};
+use crate::keyfile::{self, Provider};
 use crate::providers::{self, Endpoints};
+use crate::settings::{self, KeyStatus, Role};
 use serde_json::json;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
@@ -33,10 +34,6 @@ impl Core {
 
 /// The process's app, created by `nativeInit`. Every other export needs it.
 static APP: OnceLock<App> = OnceLock::new();
-
-/// OpenAI and Gemini transcription defaults (F4-FR3).
-const OPENAI_TRANSCRIBE: &str = "gpt-transcribe";
-const GEMINI_TRANSCRIBE: &str = "gemini-3.8-flash";
 
 /// Run `f`, turning a panic into `{"error": "internal error"}` (INV6, NFR4).
 pub fn guarded(f: impl FnOnce() -> String) -> String {
@@ -82,25 +79,37 @@ pub fn test_connection(role: &str, provider: &str) -> String {
     with_app(|app| app.test_connection(role, provider))
 }
 
-/// `test_connection` against an explicit `Core`. Must not be called on a runtime thread.
+/// `test_connection` against an explicit `Core`, with the key file's (or default) model.
+/// Must not be called on a runtime thread.
 pub fn test_connection_with(core: &Core, role: &str, provider: &str) -> String {
+    test_connection_model(core, role, provider, None)
+}
+
+/// Test connection checking `model_override` instead of the key file's model when given
+/// (F10-FR4: Settings' override for this role and provider).
+pub fn test_connection_model(
+    core: &Core,
+    role: &str,
+    provider: &str,
+    model_override: Option<&str>,
+) -> String {
     let Some(p) = Provider::from_id(provider) else {
         return error_json("unknown provider");
     };
-    let transcribe_default = match (role, p) {
-        ("summarise", _) => None,
-        ("transcribe", Provider::Anthropic) => return error_json("anthropic cannot transcribe"),
-        ("transcribe", Provider::Gemini) => Some(GEMINI_TRANSCRIBE),
-        ("transcribe", Provider::OpenAi) => Some(OPENAI_TRANSCRIBE),
-        _ => return error_json("unknown role"),
+    let Some(r) = Role::from_id(role) else {
+        return error_json("unknown role");
     };
+    if !r.providers().contains(&p) {
+        return error_json(&format!("{} cannot {}", p.id(), r.id()));
+    }
     let key = match keyfile::load(&core.key_dir, p) {
         Ok(k) => k,
-        Err(e) => return key_error_json(p, &e),
+        Err(e) => return key_error_json(p, &settings::key_status_of(p, &Err(e))),
     };
-    let model = match transcribe_default {
-        None => key.model.clone(),
-        Some(default) => key.transcribe_model.clone().unwrap_or(default.to_owned()),
+    let from_key = Some((key.model.as_str(), key.transcribe_model.as_deref()));
+    // Some for every usable key: summarise has the key file's model, transcribe a default.
+    let Some((model, _)) = settings::effective_model(r, p, model_override, from_key) else {
+        return error_json("no model");
     };
     let http = match providers::http_client(core.timeout, core.https_only) {
         Ok(c) => c,
@@ -114,30 +123,26 @@ pub fn test_connection_with(core: &Core, role: &str, provider: &str) -> String {
 }
 
 /// No usable key: the F4-FR5 message, in the same shape as a connection result.
-fn key_error_json(p: Provider, e: &KeyError) -> String {
-    let file = p.canonical_file_name();
-    let (status, detail) = match e {
-        KeyError::NotFound {
-            vault_present: true,
-            ..
-        } => (
-            "no_key",
-            format!(
-                "Your keys are in SN-Copilot's encrypted vault; Meetings v1 needs the plaintext {file}"
-            ),
-        ),
-        KeyError::NotFound { .. } => ("no_key", format!("Add {file} to MyStyle/SnCopilot")),
-        // Scrubbed as well: KeyError text comes from the user's file (INV2, F4-FR6).
-        other => (
-            "key_file_error",
-            crate::scrub::scrub(&format!("{} key file: {other}", p.id()), &[]),
-        ),
+fn key_error_json(p: Provider, ks: &KeyStatus) -> String {
+    let status = match ks {
+        KeyStatus::Missing { .. } | KeyStatus::Vault { .. } => "no_key",
+        _ => "key_file_error",
     };
     json!({
         "ok": false, "status": status, "ms": 0, "provider": p.id(),
-        "model": null, "model_found": null, "detail": detail,
+        "model": null, "model_found": null, "detail": ks.detail(),
     })
     .to_string()
+}
+
+/// `nativeGetSettings`.
+pub fn get_settings() -> String {
+    with_app(App::get_settings_json)
+}
+
+/// `nativeSetSettings(json)`: an RFC 7396 merge patch.
+pub fn set_settings(patch: &str) -> String {
+    with_app(|app| app.set_settings_json(patch))
 }
 
 #[cfg(test)]

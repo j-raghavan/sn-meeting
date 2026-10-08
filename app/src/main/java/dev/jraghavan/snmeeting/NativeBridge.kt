@@ -21,4 +21,12 @@ object NativeBridge {
      * 15 s, so call it through [CoreJobs]. `role` is `transcribe` or `summarise`.
      */
     external fun nativeTestConnection(role: String, provider: String): String
+
+    // Settings (F10). The core owns settings.json; these are not wired into the UI until M7.
+
+    /** `{settings, origin, effective, keys}`: what is stored, what will run, each key's status. */
+    external fun nativeGetSettings(): String
+
+    /** An RFC 7396 merge patch; replies as [nativeGetSettings], or `{error, field}`. */
+    external fun nativeSetSettings(json: String): String
 }

@@ -193,3 +193,61 @@ async fn a_transcribe_model_line_overrides_the_default() {
         (json!("whisper-x"), json!(true))
     );
 }
+
+/// F10-FR4: Settings' model override is what Test connection checks, but only for the role's
+/// effective provider; testing another provider uses that provider's key file.
+#[tokio::test]
+async fn the_settings_override_is_checked_for_the_effective_provider_only() {
+    let s = MockServer::start().await;
+    let d = tempfile::tempdir().unwrap();
+    write_keys(d.path());
+    Mock::given(path("/v1/models"))
+        .and(header("authorization", format!("Bearer {OA}").as_str()))
+        .respond_with(ok(json!({"data":[{"id":"gpt-override"}]})))
+        .mount(&s)
+        .await;
+    Mock::given(path("/v1/models"))
+        .and(header("x-api-key", AN))
+        .respond_with(ok(json!({"data":[{"id":"claude-b"}],"has_more":false})))
+        .mount(&s)
+        .await;
+    let data = tempfile::tempdir().unwrap();
+    std::fs::write(
+        data.path().join("settings.json"),
+        r#"{"summarise": {"provider": "openai", "model": "gpt-override"}}"#,
+    )
+    .unwrap();
+    let mut core = core_for(&s.uri(), d.path(), 5000);
+    core.app_data_dir = data.path().into();
+    let app = std::sync::Arc::new(meeting::app::App::new(core, d.path().into()));
+    let run = |role: &'static str, provider: &'static str| {
+        let app = app.clone();
+        async move {
+            let out = tokio::task::spawn_blocking(move || app.test_connection(role, provider))
+                .await
+                .unwrap();
+            assert_no_key(&out);
+            serde_json::from_str::<serde_json::Value>(&out).unwrap()
+        }
+    };
+    let r = run("summarise", "openai").await;
+    assert_eq!(
+        (r["model"].clone(), r["model_found"].clone()),
+        (json!("gpt-override"), json!(true))
+    );
+    let r = run("summarise", "anthropic").await;
+    assert_eq!(
+        (r["model"].clone(), r["model_found"].clone()),
+        (json!("claude-b"), json!(true))
+    );
+    // Transcribe has no override: the OpenAI default, which this mock doesn't list.
+    let r = run("transcribe", "openai").await;
+    assert_eq!(
+        (r["model"].clone(), r["model_found"].clone()),
+        (json!("gpt-transcribe"), json!(false))
+    );
+    assert_eq!(
+        run("bogus", "openai").await,
+        json!({"error": "unknown role"})
+    );
+}
