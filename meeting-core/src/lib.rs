@@ -3,6 +3,7 @@ pub mod api;
 pub mod app;
 pub mod atomic;
 pub mod keyfile;
+pub mod library;
 pub mod providers;
 pub mod runtime;
 pub mod scrub;
@@ -10,6 +11,7 @@ pub mod segment;
 pub mod settings;
 pub mod sidecar;
 pub mod status;
+pub mod tz;
 
 #[cfg(feature = "jni-bridge")]
 mod jni;

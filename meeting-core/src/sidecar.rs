@@ -236,6 +236,33 @@ impl Sidecar {
     }
 }
 
+/// A sidecar for `id` with every field at its empty value; callers fill in the rest.
+pub fn blank(id: &str) -> Sidecar {
+    Sidecar {
+        schema: SCHEMA,
+        id: id.to_owned(),
+        started_at: String::new(),
+        duration_ms: 0,
+        status: Status::Recorded,
+        failed_at: None,
+        title: None,
+        title_source: None,
+        template_id: None,
+        providers: Providers::default(),
+        summary: None,
+        decisions: Vec::new(),
+        sections: Vec::new(),
+        mic: None,
+        audio: None,
+        segments: Vec::new(),
+        transcript_file: None,
+        error: None,
+        note: None,
+        todos: Vec::new(),
+        extra: Extra::new(),
+    }
+}
+
 /// Read and validate `dir/<id>.json`. A sidecar of a newer schema is refused rather than
 /// rewritten by an app that doesn't know its meaning.
 pub fn read(dir: &Path, id: &str) -> Result<Sidecar, SidecarError> {

@@ -16,6 +16,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ),
         ("getSettings", api::get_settings()),
         ("setSettings", api::set_settings("{}")),
+        ("beginMeeting", api::begin_meeting(0, "{}", "{}")),
     ]
 }
 

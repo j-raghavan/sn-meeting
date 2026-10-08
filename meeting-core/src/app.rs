@@ -1,16 +1,21 @@
-//! Process state behind the JNI API: `Core` (M1, immutable) plus the settings in use.
+//! Process state behind the JNI API: `Core` (M1, immutable), the settings in use, the device
+//! time zone and what is live (recording, jobs).
 use crate::api::{self, Core, error_json};
 use crate::keyfile::Provider;
+use crate::library::{Library, Liveness};
 use crate::settings::{self, Ctx, KeyStatus, Origin, Role, Settings};
+use crate::sidecar::{Audio, Mic};
+use crate::tz::{DeviceTz, LocalTz};
 use serde_json::{Map, Value, json};
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 #[derive(Debug)]
 pub struct App {
     pub core: Core,
     /// `/storage/emulated/0` on the device; a tempdir in tests.
     pub storage_root: PathBuf,
+    pub tz: Arc<dyn LocalTz>,
     state: Mutex<State>,
 }
 
@@ -18,16 +23,27 @@ pub struct App {
 struct State {
     settings: Settings,
     origin: Origin,
+    live: Liveness,
 }
 
 impl App {
     /// Load `settings.json` from `core.app_data_dir`. Never fails (ADR D10).
     pub fn new(core: Core, storage_root: PathBuf) -> App {
+        App::with_tz(core, storage_root, Arc::new(DeviceTz))
+    }
+
+    /// `new` with an explicit time zone (tests use a fixed offset).
+    pub fn with_tz(core: Core, storage_root: PathBuf, tz: Arc<dyn LocalTz>) -> App {
         let (settings, origin) = settings::load(&settings::path_in(&core.app_data_dir));
         App {
             core,
             storage_root,
-            state: Mutex::new(State { settings, origin }),
+            tz,
+            state: Mutex::new(State {
+                settings,
+                origin,
+                live: Liveness::default(),
+            }),
         }
     }
 
@@ -44,6 +60,50 @@ impl App {
     pub fn settings(&self) -> (Settings, Origin) {
         let st = self.state();
         (st.settings.clone(), st.origin)
+    }
+
+    /// What is live right now.
+    pub fn liveness(&self) -> Liveness {
+        self.state().live.clone()
+    }
+
+    /// The library over the current settings' folders, current first.
+    pub fn library(&self) -> Library<'_> {
+        self.library_of(&self.state().settings)
+    }
+
+    fn library_of(&self, s: &Settings) -> Library<'_> {
+        Library {
+            folders: s.folders(&self.storage_root),
+            tz: self.tz.as_ref(),
+        }
+    }
+
+    /// `nativeBeginMeeting`. One recording at a time: the meeting stays live until finished.
+    pub fn begin_json(&self, started_at_ms: i64, mic_json: &str, audio_json: &str) -> String {
+        let mic: Mic = match serde_json::from_str(mic_json) {
+            Ok(m) => m,
+            Err(e) => return error_json(&format!("micJson: {e}")),
+        };
+        let audio: Audio = match serde_json::from_str(audio_json) {
+            Ok(a) => a,
+            Err(e) => return error_json(&format!("audioJson: {e}")),
+        };
+        let mut st = self.state();
+        if let Some(active) = &st.live.recording {
+            return error_json(&format!("already recording {active}"));
+        }
+        let debug_ms = st.settings.debug.segment_ms;
+        match self
+            .library_of(&st.settings)
+            .begin(started_at_ms, mic, audio, debug_ms)
+        {
+            Ok(b) => {
+                st.live.recording = Some(b.id.clone());
+                json!(b).to_string()
+            }
+            Err(e) => error_json(&e.to_string()),
+        }
     }
 
     /// Every provider's key status, read fresh (the user may add a file at any time).

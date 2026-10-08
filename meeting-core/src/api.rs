@@ -145,6 +145,11 @@ pub fn set_settings(patch: &str) -> String {
     with_app(|app| app.set_settings_json(patch))
 }
 
+/// `nativeBeginMeeting(startedAtMs, micJson, audioJson)` (F3-FR1).
+pub fn begin_meeting(started_at_ms: i64, mic_json: &str, audio_json: &str) -> String {
+    with_app(|app| app.begin_json(started_at_ms, mic_json, audio_json))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
