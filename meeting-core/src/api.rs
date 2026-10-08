@@ -157,7 +157,11 @@ mod tests {
     #[test]
     fn the_device_core_uses_the_real_hosts_over_https() {
         let c = Core::device("/data/x");
-        assert_eq!(c.key_dir, PathBuf::from(keyfile::DEFAULT_KEY_DIR));
+        // The literal, not the constant: a typo in DEFAULT_KEY_DIR must fail here.
+        assert_eq!(
+            c.key_dir,
+            PathBuf::from("/storage/emulated/0/MyStyle/SnCopilot")
+        );
         assert_eq!(c.endpoints, Endpoints::default());
         assert_eq!(c.timeout, providers::TEST_TIMEOUT);
         assert!(c.https_only);
