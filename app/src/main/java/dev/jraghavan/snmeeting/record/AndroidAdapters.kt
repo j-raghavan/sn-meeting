@@ -3,6 +3,7 @@ package dev.jraghavan.snmeeting.record
 import android.content.Context
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
+import android.media.AudioRouting
 import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
 import android.os.Handler
@@ -40,10 +41,11 @@ fun usbInputs(am: AudioManager): List<UsbInput> = am.getDevices(AudioManager.GET
 fun inputById(am: AudioManager, id: Int): AudioDeviceInfo? =
     am.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.id == id }
 
-class MediaRecorderAdapter(private val ctx: Context) : RecorderPort {
+class MediaRecorderAdapter(private val ctx: Context, private val handler: Handler) : RecorderPort {
     private val am = ctx.getSystemService(AudioManager::class.java)
     private var r: MediaRecorder? = null
     private var path: String? = null
+    private var routing: AudioRouting.OnRoutingChangedListener? = null
 
     @Suppress("DEPRECATION") // MediaRecorder(Context) is API 31+ and crashed on this device (F2 Facts)
     private fun configured(spec: AudioSpec, source: InputSource, deviceId: Int, out: String): MediaRecorder =
@@ -84,7 +86,10 @@ class MediaRecorderAdapter(private val ctx: Context) : RecorderPort {
         } catch (e: Exception) {
             m.release(); File(path).delete(); throw e
         }
-        r = m; this.path = path
+        // F2-FR3: the input actually in use; any other than the pinned one is mic loss.
+        val l = AudioRouting.OnRoutingChangedListener { ar -> events.onRoutedTo(ar.routedDevice?.id) }
+        m.addOnRoutingChangedListener(l, handler)
+        r = m; this.path = path; routing = l
     }
 
     override fun setNext(path: String): Boolean = try {
@@ -96,6 +101,8 @@ class MediaRecorderAdapter(private val ctx: Context) : RecorderPort {
     override fun stop(): Boolean {
         val m = r ?: return false
         r = null
+        routing?.let { m.removeOnRoutingChangedListener(it) }
+        routing = null
         val ok = try {
             m.stop(); true
         } catch (e: RuntimeException) {

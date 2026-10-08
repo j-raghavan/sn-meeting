@@ -11,6 +11,14 @@ enum class EndReason(val note: String, val message: String) {
     MIC_LOST("mic disconnected", "Microphone disconnected — recording saved"),
     STORAGE_FULL("storage full", "Storage full — recording saved"),
     RECORDER_ERROR("recorder error", "The recorder stopped — recording saved"),
+    ;
+
+    /** An ending the user didn't ask for stays in the notification shade once the service stops. */
+    val leavesNotice get() = this != USER
+
+    companion object {
+        fun ofMessage(message: String): EndReason? = entries.firstOrNull { it.message == message }
+    }
 }
 
 /**

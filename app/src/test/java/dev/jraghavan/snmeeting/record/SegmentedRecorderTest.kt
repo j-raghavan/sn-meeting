@@ -224,4 +224,10 @@ class SegmentedRecorderTest {
         assertEquals(listOf("close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log.drop(1))
         assertEquals(null to "Storage full", ended)
     }
+
+    @Test fun onlyEndingsNobodyAskedForLeaveANotice() {
+        assertEquals(listOf(EndReason.MIC_LOST, EndReason.STORAGE_FULL, EndReason.RECORDER_ERROR), EndReason.entries.filter { it.leavesNotice })
+        assertEquals(EndReason.MIC_LOST, EndReason.ofMessage("Microphone disconnected — recording saved"))
+        assertEquals(null, EndReason.ofMessage(SegmentedRecorder.TOO_SHORT))
+    }
 }

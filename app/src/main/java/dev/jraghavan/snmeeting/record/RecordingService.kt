@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Handler
 import android.os.HandlerThread
@@ -31,6 +33,8 @@ class RecordingService : Service() {
     private lateinit var am: AudioManager
     private val guard = ExitGuard()
     private var recorder: SegmentedRecorder? = null
+    /** The input the recording is pinned to (F2-FR3). */
+    private var pinnedId: Int? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -63,11 +67,12 @@ class RecordingService : Service() {
 
     private fun begin(choice: MicChoice) {
         if (recorder != null) return
+        getSystemService(NotificationManager::class.java).cancel(END_NOTE_ID)
         val pick = MicSelector.pick(usbInputs(am), BtSnapshot.NONE, choice)
         val mic = pick.chosen ?: return shutdown(RecState.Idle(pick.reason, null))
         hub.publish(RecState.Starting(mic.label))
         val wake = WakeLease(AndroidWake(this)).also { it.begin(guard) } // F2-FR6: the screen may sleep
-        val rec = SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration), MediaRecorderAdapter(this), FileStorage, AndroidClock,
+        val rec = SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration), MediaRecorderAdapter(this, h), FileStorage, AndroidClock,
             object : SegmentedRecorder.Listener {
                 override fun onRecording(id: String, startElapsedMs: Long) {
                     hub.publish(RecState.Recording(id, mic.label, startElapsedMs))
@@ -77,15 +82,30 @@ class RecordingService : Service() {
                 override fun onEnded(id: String?, message: String) = shutdown(RecState.Idle(message, id))
             })
         recorder = rec
-        rec.start(mic, mic.deviceId ?: return shutdown(RecState.Idle(MicSelector.NONE, null)), InputSource.MIC, listOf(AudioSpec.USB))
+        am.registerAudioDeviceCallback(devices, h); guard.hold("deviceCallback") { am.unregisterAudioDeviceCallback(devices) }
+        val id = mic.deviceId ?: return shutdown(RecState.Idle(MicSelector.NONE, null))
+        pinnedId = id
+        rec.start(mic, id, InputSource.MIC, listOf(AudioSpec.USB))
+    }
+
+    /** F2-FR3, EC1, EC2: the pinned input going away ends the recording; nothing else is used. */
+    private val devices = object : AudioDeviceCallback() {
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
+            if (removed.any { it.id == pinnedId }) recorder?.onMicLost()
+        }
     }
 
     /** The one exit: release everything, publish, leave the foreground, stop. */
     private fun shutdown(end: RecState.Idle) {
         guard.releaseAll()
-        recorder = null
+        recorder = null; pinnedId = null
         hub.publish(end)
         stopForeground(STOP_FOREGROUND_REMOVE)
+        // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).
+        val reason = end.message?.let(EndReason::ofMessage)
+        if (reason != null && reason.leavesNotice) {
+            getSystemService(NotificationManager::class.java).notify(END_NOTE_ID, ended(reason.message))
+        }
         stopSelf()
     }
 
@@ -121,6 +141,15 @@ class RecordingService : Service() {
             .build()
     }
 
+    private fun ended(text: String): Notification =
+        Notification.Builder(this, CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_meetings)
+            .setContentTitle("Meetings")
+            .setContentText(text)
+            .setAutoCancel(true)
+            .setContentIntent(PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE))
+            .build()
+
     private fun notify(n: Notification) = getSystemService(NotificationManager::class.java).notify(NOTE_ID, n)
 
     companion object {
@@ -129,6 +158,7 @@ class RecordingService : Service() {
         const val EXTRA_MIC = "mic"
         private const val CHANNEL = "recording"
         private const val NOTE_ID = 1
+        private const val END_NOTE_ID = 2
 
         /** For nativeRecover(serviceAlive) and Home's ＋ New / ■ Stop. */
         @Volatile var running = false
