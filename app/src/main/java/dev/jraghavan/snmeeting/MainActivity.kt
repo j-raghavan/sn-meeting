@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -54,9 +55,16 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
+        initCore()
         recorder = MeetingRecorder(this, outputDir)
         setContentView(buildView())
         render()
+    }
+
+    /** Starts the Rust core (F1-FR5). Queued first, so it runs before any other core job. */
+    private fun initCore() {
+        val dir = filesDir.absolutePath
+        CoreJobs.run({ NativeBridge.nativeInit(dir) }) { Log.i("Meetings", "nativeInit: $it") }
     }
 
     private fun buildView(): View {

@@ -88,6 +88,7 @@ class SettingsActivity : Activity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(0, ui.dim(10), 0, ui.dim(10))
                 addView(ui.body("Meetings v${ui.versionName()}", 16f))
+                addView(ui.note("Core v${coreVersion()}", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
                 addView(ui.note("Keys are read from MyStyle/SnCopilot (shared with SN-Copilot).", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
@@ -96,6 +97,13 @@ class SettingsActivity : Activity() {
         column.addView(ui.spacer(ui.dim(36)))
         column.addView(ui.closingMark())
         setContentView(ui.page(column))
+    }
+
+    /** The Rust core's version (F1-FR5); a cheap call, so it runs on the UI thread. */
+    private fun coreVersion(): String = try {
+        NativeBridge.nativeVersion()
+    } catch (t: Throwable) {
+        "unavailable (${t.javaClass.simpleName})" // libmeeting.so missing or not loadable
     }
 
     private fun LinearLayout.choice(label: String, hint: String?, selected: Boolean, enabled: Boolean = true, pick: () -> Unit) {
