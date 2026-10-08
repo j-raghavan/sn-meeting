@@ -7,6 +7,9 @@ import android.util.Log
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.CoreJson
+import dev.jraghavan.snmeeting.model.SettingsPatch
+import dev.jraghavan.snmeeting.model.SettingsView
 import org.json.JSONObject
 
 /**
@@ -26,6 +29,10 @@ class SettingsActivity : Activity() {
     private val results = mutableMapOf<String, String>()
     private val resultViews = mutableMapOf<String, TextView>()
 
+    /** settings.debug.segmentMs; the rows show once set, or after a long-press on the version. */
+    private var segmentMs: Long? = null
+    private var showSegmentLength = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
@@ -35,6 +42,29 @@ class SettingsActivity : Activity() {
     override fun onResume() {
         super.onResume()
         render() // the default template may have changed in Templates
+        CoreJobs.init(filesDir.absolutePath)
+        CoreJobs.run({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
+    }
+
+    private fun applySettings(json: String) {
+        val s = CoreJson.obj(json, SettingsView::from).getOrNull() ?: return
+        if (isDestroyed) return
+        segmentMs = s.segmentMsDebug
+        render()
+    }
+
+    /** F2-FR5 / F2-AC3: one-minute segments, to check rollover on the device. */
+    private fun segmentLength(card: LinearLayout) {
+        card.addView(ui.hairline())
+        card.addView(ui.eyebrow("Segment length").apply { setPadding(0, ui.dim(12), 0, 0) })
+        card.choice("Standard", "15 minutes, or less for a large file", segmentMs == null) { setSegmentMs(null) }
+        card.addView(ui.hairline())
+        card.choice("Short (1 min)", "For checking how recordings are split", segmentMs != null) { setSegmentMs(SHORT_SEGMENT_MS) }
+    }
+
+    private fun setSegmentMs(ms: Long?) {
+        segmentMs = ms
+        CoreJobs.run({ NativeBridge.nativeSetSettings(SettingsPatch.segmentMs(ms)) }) { applySettings(it) }
     }
 
     override fun finish() {
@@ -98,11 +128,15 @@ class SettingsActivity : Activity() {
             addView(LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(0, ui.dim(10), 0, ui.dim(10))
-                addView(ui.body("Meetings v${ui.versionName()}", 16f))
+                // Long-press reveals the segment length used by the rollover check (F2-AC3).
+                addView(ui.body("Meetings v${ui.versionName()}", 16f).apply {
+                    setOnLongClickListener { showSegmentLength = true; render(); true }
+                })
                 addView(ui.note("Core v${coreVersion()}", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
                 addView(ui.note("Keys are read from MyStyle/SnCopilot (shared with SN-Copilot).", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
+            if (showSegmentLength || segmentMs != null) segmentLength(this)
         }
 
         column.addView(ui.spacer(ui.dim(36)))
@@ -190,5 +224,9 @@ class SettingsActivity : Activity() {
             addView(result)
             if (footnote != null) addView(ui.note(footnote, 13f, ui.textMuted).apply { setPadding(0, 0, 0, ui.dim(10)) })
         }
+    }
+
+    companion object {
+        private const val SHORT_SEGMENT_MS = 60_000L
     }
 }

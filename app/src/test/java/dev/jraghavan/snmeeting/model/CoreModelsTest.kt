@@ -105,6 +105,8 @@ class CoreModelsTest {
         assertEquals("""{"summarise":{"model":null}}""", SettingsPatch.model("summarise", " "))
         assertEquals("""{"mic":"usb:USB \"Audio\""}""", SettingsPatch.mic(MicChoice.Usb("USB \"Audio\"")))
         assertEquals("""{"noticeShown":{"openai":true,"anthropic":true}}""", SettingsPatch.noticeShown(listOf("openai", "anthropic")))
+        assertEquals("""{"debug":{"segmentMs":60000}}""", SettingsPatch.segmentMs(60_000))
+        assertEquals("""{"debug":{"segmentMs":null}}""", SettingsPatch.segmentMs(null))
     }
 
     @Test fun testResultReadsSnakeCase() {

@@ -94,6 +94,8 @@ object SettingsPatch {
     /** Empty clears the override (JSON null removes the key). */
     fun model(role: String, m: String) = """{"$role":{"model":${if (m.isBlank()) "null" else CoreJson.quote(m.trim())}}}"""
     fun defaultTemplate(id: String) = """{"defaultTemplate":${CoreJson.quote(id)}}"""
+    /** F2-AC3's hidden segment length; null returns to the standard plan. */
+    fun segmentMs(ms: Long?) = """{"debug":{"segmentMs":${ms ?: "null"}}}"""
     fun noticeShown(providers: Collection<String>) =
         providers.joinToString(",", """{"noticeShown":{""", "}}") { "${CoreJson.quote(it)}:true" }
 }
