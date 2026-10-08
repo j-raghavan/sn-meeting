@@ -78,7 +78,7 @@ pub async fn transcribe(
             "no transcribe provider".into(),
         )));
     };
-    let (dir, pending) = locked(lock, || {
+    let (dir, pending, tid) = locked(lock, || {
         lib.update(id, |sc, dir| {
             let p = status::next(library::phase(sc), Event::StartTranscribe)?;
             library::set_phase(sc, p);
@@ -90,11 +90,12 @@ pub async fn transcribe(
                 model: model.clone(),
                 extra: Default::default(),
             });
-            Ok((dir.to_path_buf(), pending(sc)))
+            Ok((dir.to_path_buf(), pending(sc), sc.template_id.clone()))
         })
     })
     .map_err(JobError::NotStarted)?;
     let fail = |msg: String| finish(lib, lock, id, Event::TranscribeFailed, Some(msg));
+    let vocabulary = vocabulary(plan, tid.as_deref().unwrap_or_default());
     for seg in pending {
         if cancel.is_cancelled() {
             return fail("Cancelled".into());
@@ -108,7 +109,7 @@ pub async fn transcribe(
             let audio = AudioIn {
                 bytes: bytes.clone(),
                 file_name: seg.file.clone(),
-                prompt: String::new(),
+                prompt: vocabulary.clone(),
             };
             providers::transcribe(&plan.http, &plan.endpoints, key, model, audio)
         })
@@ -146,6 +147,18 @@ pub async fn transcribe(
         return Ok(p);
     }
     summarise(lib, lock, id, plan, cancel).await
+}
+
+/// F5-FR1: the meeting's template vocabulary as the transcription hint ("Priya, Supernote");
+/// General's when the template is gone, empty when there is none.
+fn vocabulary(plan: &JobPlan, template_id: &str) -> String {
+    let t = plan.templates.iter().find(|t| t.id == template_id);
+    let t = t.or_else(|| {
+        plan.templates
+            .iter()
+            .find(|t| t.id == crate::templates::DEFAULT_ID)
+    });
+    t.map(|t| t.vocabulary.join(", ")).unwrap_or_default()
 }
 
 fn pending(sc: &Sidecar) -> Vec<Pending> {
