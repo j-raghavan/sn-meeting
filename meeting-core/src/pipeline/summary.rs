@@ -107,7 +107,11 @@ pub async fn summarise(
         let done = lib.update(id, |cur, dir| {
             let mut next = cur.clone(); // a fresh read: a to-do ticked meanwhile survives
             summarise::merge(&mut next, x, &first_seen, summarise::new_todo_id);
-            next.template_id = Some(tpl.id.clone());
+            // Record the fallback only if the meeting still names the template the job began
+            // with: a template chosen meanwhile is the one the next run uses (F11-FR6).
+            if note.is_some() && next.template_id.as_deref() == Some(tid.as_str()) {
+                next.template_id = Some(tpl.id.clone());
+            }
             next.providers.summarise = Some(run);
             if let Some(n) = note {
                 next.note = Some(match next.note.take() {

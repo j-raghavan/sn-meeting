@@ -406,3 +406,35 @@ fn a_cancelled_or_undatable_summary_fails_summarising() {
     let m = fx.run(Job::Summarise)["meeting"].clone();
     assert_eq!(m["error"], "The meeting's start time can't be read");
 }
+
+#[test]
+fn a_template_chosen_mid_job_is_kept() {
+    // The job summarises with the template it started with; a choice made meanwhile is the
+    // one the next Summarise again uses (F11-FR6), not overwritten by the finishing job.
+    let fx = fixture(&["openai", "anthropic"]);
+    fx.summary(anthropic(SUMMARY).set_delay(Duration::from_millis(800)));
+    let (app, id) = (fx.app.clone(), fx.id.clone());
+    let job = std::thread::spawn(move || parse(&app.run_job_json(&id, Job::Transcribe)));
+    // Wait until the summary request is in flight: the job has read its template by then.
+    let t0 = std::time::Instant::now();
+    while fx.requests("/v1/messages").is_empty() {
+        assert!(t0.elapsed() < Duration::from_secs(10), "no summary request");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(
+        parse(&fx.app.set_template_json(&fx.id, "standup")),
+        json!({"ok": true})
+    );
+    let out = job.join().unwrap();
+    assert_eq!(out["meeting"]["status"], "done", "{out}");
+    assert_eq!(fx.meeting()["templateId"], "standup");
+    // The fallback still records General when the chosen template has gone.
+    fx.reset();
+    fx.summary(anthropic(SUMMARY));
+    fx.app.set_template_json(&fx.id, "general");
+    let mut sc = read_sidecar(&fx.dir, &fx.id);
+    sc.template_id = Some("gone".into());
+    meeting::sidecar::write(&fx.dir, &sc).unwrap();
+    fx.run(Job::Summarise);
+    assert_eq!(fx.meeting()["templateId"], "general");
+}
