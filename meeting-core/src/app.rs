@@ -17,6 +17,9 @@ pub struct App {
     pub storage_root: PathBuf,
     pub tz: Arc<dyn LocalTz>,
     state: Mutex<State>,
+    /// The one sidecar write lock (F3-FR2): held across load → change → write of every
+    /// mutation, so two threads never lose or tear each other's write. Taken before `state`.
+    write: Mutex<()>,
 }
 
 #[derive(Debug)]
@@ -44,6 +47,7 @@ impl App {
                 origin,
                 live: Liveness::default(),
             }),
+            write: Mutex::new(()),
         }
     }
 
@@ -55,6 +59,11 @@ impl App {
     /// Poison-tolerant: a panic caught by `api::guarded` must not wedge every later call.
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Hold this across every sidecar read-modify-write. Poison-tolerant, as `state`.
+    pub fn write_lock(&self) -> MutexGuard<'_, ()> {
+        self.write.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     pub fn settings(&self) -> (Settings, Origin) {
@@ -100,6 +109,7 @@ impl App {
             Ok(a) => a,
             Err(e) => return error_json(&format!("audioJson: {e}")),
         };
+        let _w = self.write_lock();
         let mut st = self.state();
         if let Some(active) = &st.live.recording {
             return error_json(&format!("already recording {active}"));
@@ -119,6 +129,7 @@ impl App {
 
     /// `nativeAddSegment`.
     pub fn add_segment_json(&self, id: &str, seg_path: &str, start_offset_ms: i64) -> String {
+        let _w = self.write_lock();
         let lib = self.library();
         reply(
             lib.add_segment(id, seg_path, start_offset_ms)
@@ -131,6 +142,7 @@ impl App {
         let Ok(index) = usize::try_from(index) else {
             return error_json("segIndex must be >= 0");
         };
+        let _w = self.write_lock();
         reply(
             self.library()
                 .close_segment(id, index, duration_ms)
@@ -141,6 +153,7 @@ impl App {
     /// `nativeFinishMeeting`; an empty `note` means none. The recording is over either way,
     /// so the meeting stops being live even if the sidecar can't be updated.
     pub fn finish_json(&self, id: &str, duration_ms: i64, note: &str) -> String {
+        let _w = self.write_lock();
         let mut st = self.state();
         if st.live.recording.as_deref() == Some(id) {
             st.live.recording = None;
@@ -169,6 +182,7 @@ impl App {
 
     /// `nativeSetTodoDone` (F6-FR2).
     pub fn set_todo_done_json(&self, id: &str, todo_id: &str, done: bool) -> String {
+        let _w = self.write_lock();
         reply(
             self.library()
                 .set_todo_done(id, todo_id, done)
@@ -178,16 +192,19 @@ impl App {
 
     /// `nativeRenameMeeting` (F7-FR5); an empty title clears it.
     pub fn rename_json(&self, id: &str, title: &str) -> String {
+        let _w = self.write_lock();
         reply(self.library().rename(id, title).map(|()| ok()))
     }
 
     /// `nativeSetMeetingTemplate` (F7-FR2).
     pub fn set_template_json(&self, id: &str, template_id: &str) -> String {
+        let _w = self.write_lock();
         reply(self.library().set_template(id, template_id).map(|()| ok()))
     }
 
     /// `nativeDeleteMeeting` (F7-FR4): `{ok, removed: [file names]}`.
     pub fn delete_json(&self, id: &str) -> String {
+        let _w = self.write_lock();
         let st = self.state();
         let lib = self.library_of(&st.settings);
         reply(
@@ -198,6 +215,7 @@ impl App {
 
     /// `nativeRecover(serviceAlive)` (F3-FR5). A dead service means nothing is recording.
     pub fn recover_json(&self, service_alive: bool) -> String {
+        let _w = self.write_lock();
         let mut st = self.state();
         if !service_alive {
             st.live.recording = None;

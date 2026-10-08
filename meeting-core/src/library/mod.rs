@@ -1,5 +1,5 @@
 //! F3: the meeting library. Folders are scanned on every call; there is no index (ADR D5). Every
-//! call runs on the shell's single CoreJobs thread, which serialises writes.
+//! read-modify-write of a sidecar runs under `App::write_lock`, whichever thread calls it.
 use crate::segment::{self, SegmentPlan};
 use crate::sidecar::{self, Audio, Mic, Segment, SegmentFlag, Sidecar, SidecarError};
 use crate::status::{self, Event, Illegal, Phase, Status};

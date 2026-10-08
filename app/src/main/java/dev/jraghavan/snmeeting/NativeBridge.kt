@@ -30,8 +30,8 @@ object NativeBridge {
     /** An RFC 7396 merge patch; replies as [nativeGetSettings], or `{error, field}`. */
     external fun nativeSetSettings(json: String): String
 
-    // Library (F3). Call these through CoreJobs: its single thread serialises every library
-    // write, so two calls never race on a sidecar. Not wired into the UI until M7.
+    // Library (F3). The core serialises every sidecar write under one lock, so these may be
+    // called from any background thread (CoreJobs in practice). Not wired into the UI until M7.
 
     /** Starts a meeting: `{id, firstSegmentPath, plan: {maxDurationMs, maxFileBytes}}`. */
     external fun nativeBeginMeeting(startedAtMs: Long, micJson: String, audioJson: String): String

@@ -115,7 +115,16 @@ impl Library<'_> {
         names.dedup();
         let side = sidecar::sidecar_file_name(id);
         names.push(sidecar::transcript_file_name(id));
-        names.push(format!("{side}.tmp"));
+        // Stray tmp files of this sidecar (an interrupted write), whatever their suffix.
+        if let Ok(rd) = std::fs::read_dir(&f.dir) {
+            let mut tmps: Vec<String> = rd
+                .filter_map(Result::ok)
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .filter(|n| crate::atomic::is_tmp_of(n, &side))
+                .collect();
+            tmps.sort();
+            names.extend(tmps);
+        }
         names.push(side);
         let mut removed = Vec::new();
         for n in names {
