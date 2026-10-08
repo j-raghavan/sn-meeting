@@ -13,6 +13,7 @@ pub mod segment;
 pub mod settings;
 pub mod sidecar;
 pub mod status;
+pub mod summarise;
 pub mod tz;
 
 #[cfg(feature = "jni-bridge")]

@@ -5,8 +5,9 @@
 use super::{ConnStatus, Endpoints, classify_http, classify_transport, rig_http};
 use crate::keyfile::{Provider, ProviderKey};
 use crate::scrub::scrub;
-use rig_core::completion::CompletionRequest;
-use rig_core::message::{AudioMediaType, Message, UserContent};
+use rig_core::completion::{CompletionRequest, FinishReason};
+use rig_core::message::{AudioMediaType, Message, StopReason, UserContent};
+use rig_core::providers::anthropic::AnthropicConfig;
 use rig_core::providers::gemini::GeminiConfig;
 use rig_core::providers::openai::OpenAIConfig;
 use rig_core::transcription::TranscriptionRequestBuilder;
@@ -132,6 +133,83 @@ pub async fn transcribe(
     let text = reply.map_err(|e| classify_call(key.provider, &e, &[key.expose()]))?;
     let text = text.trim();
     Ok(if text.is_empty() { NO_SPEECH } else { text }.to_owned())
+}
+
+/// The longest reply text kept; a structured summary of a long meeting is ~10 KB.
+pub const MAX_REPLY_CHARS: usize = 256 * 1024;
+
+/// One structured-output request (F5-FR4).
+pub struct JsonAsk {
+    pub system: String,
+    pub user: String,
+    pub schema: serde_json::Value,
+    pub max_tokens: u64,
+}
+
+/// F5-FR4: one structured completion; returns the model's JSON text, not yet validated.
+/// OpenAI goes through the Responses API (`text.format` json_schema strict; `store` is not
+/// sent). Anthropic gets rig's defaults for the model: adaptive thinking, no sampling params.
+pub async fn complete_json(
+    http: &Http,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: &str,
+    ask: &JsonAsk,
+) -> Result<String, CallError> {
+    let secret = [key.expose()];
+    let name = provider_name(key.provider);
+    let bad = |d: String| CallError::new(CallFail::BadResponse, scrub(&d, &secret));
+    let schema = rig_core::schemars::Schema::try_from(ask.schema.clone())
+        .map_err(|_| bad("internal: the schema is not an object".into()))?;
+    let req = CompletionRequest::new(Message::user(ask.user.clone()))
+        .preamble(ask.system.clone())
+        .max_tokens(ask.max_tokens)
+        .output_schema(schema);
+    let t = rig_http(http.clone());
+    let reply = match key.provider {
+        Provider::OpenAi => {
+            let c = OpenAIConfig::new(key.expose())
+                .with_base_url(&ep.openai)
+                .connect(t);
+            c.completion(model).call(req).await
+        }
+        Provider::Gemini => {
+            let c = GeminiConfig::new(key.expose())
+                .with_base_url(&ep.gemini)
+                .connect(t);
+            c.completion(model).call(req).await
+        }
+        Provider::Anthropic => {
+            let c = AnthropicConfig::new(key.expose())
+                .with_base_url(&ep.anthropic)
+                .connect(t);
+            c.completion(model).call(req).await
+        }
+    };
+    let r = reply.map_err(|e| classify_call(key.provider, &e, &secret))?;
+    match r.stop() {
+        StopReason::Stop => {}
+        StopReason::Length => return Err(bad("The summary was cut off".into())),
+        StopReason::Error(_)
+            if key.provider == Provider::Anthropic
+                && r.finish_reason() == Some(FinishReason::ContentFilter) =>
+        {
+            return Err(bad("Anthropic declined to summarise this meeting".into()));
+        }
+        other => return Err(bad(format!("{name} stopped: {}", stop_text(&other)))),
+    }
+    let text = r.text();
+    if text.chars().count() > MAX_REPLY_CHARS {
+        return Err(bad("The summary was too long".into()));
+    }
+    Ok(text)
+}
+
+fn stop_text(s: &StopReason) -> String {
+    match s {
+        StopReason::Error(m) | StopReason::Aborted(m) => m.clone(),
+        other => format!("{other:?}"),
+    }
 }
 
 pub fn provider_name(p: Provider) -> &'static str {

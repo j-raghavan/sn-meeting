@@ -8,8 +8,8 @@ use std::time::{Duration, Instant};
 
 mod calls;
 pub use calls::{
-    AudioIn, CallError, CallFail, GEMINI_TRANSCRIBE_SYSTEM, Http, NO_SPEECH, classify_call,
-    provider_name, transcribe,
+    AudioIn, CallError, CallFail, GEMINI_TRANSCRIBE_SYSTEM, Http, JsonAsk, MAX_REPLY_CHARS,
+    NO_SPEECH, classify_call, complete_json, provider_name, transcribe,
 };
 
 /// Test connection's whole-call budget (F10-FR5).
