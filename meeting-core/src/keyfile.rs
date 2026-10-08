@@ -1,10 +1,14 @@
 //! F4: sn-copilot `copilot-key-<provider>.txt` files (port of sn-copilot keyFiles.ts:43-226).
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where sn-copilot (and so Meetings) reads key files on the device (F4-FR2).
 pub const DEFAULT_KEY_DIR: &str = "/storage/emulated/0/MyStyle/SnCopilot";
+/// A key file is a few hundred bytes; anything bigger is not one.
+const MAX_FILE_BYTES: u64 = 64 * 1024;
+/// sn-copilot's encrypted vault, which Meetings v1 cannot read (F4-FR5).
+const VAULT_FILES: [&str; 2] = ["copilot-key.enc", ".copilot-key.enc"];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Provider {
@@ -161,4 +165,46 @@ pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
         source: PathBuf::new(),
         key: key.to_owned(),
     })
+}
+
+/// F4-FR2: find and parse `provider`'s file in `dir`. The canonical name wins over aliases;
+/// among aliases the lexically first name wins. DeepSeek files and directories are skipped.
+pub fn load(dir: &Path, provider: Provider) -> Result<ProviderKey, KeyError> {
+    let not_found = || KeyError::NotFound {
+        provider: provider.id(),
+        vault_present: VAULT_FILES.iter().any(|v| dir.join(v).is_file()),
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Err(not_found());
+    };
+    let canonical = provider.canonical_file_name();
+    let mut candidates: Vec<(bool, String, PathBuf)> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.path().is_file())
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            let matched = match_key_filename(&name) == Some(FileMatch::Provider(provider));
+            let alias = js_trim(&name.to_lowercase()) != canonical;
+            matched.then(|| (alias, name, e.path()))
+        })
+        .collect();
+    candidates.sort();
+    let Some((_, _, path)) = candidates.into_iter().next() else {
+        return Err(not_found());
+    };
+    let text = read_capped(&path)?;
+    let mut key = parse(&text, provider)?;
+    key.source = path;
+    Ok(key)
+}
+
+/// Read at most `MAX_FILE_BYTES`, decoding lossily as sn-copilot's `decodeUtf8` does. Errors
+/// carry the I/O kind only, never the path or contents.
+fn read_capped(path: &Path) -> Result<String, KeyError> {
+    let unreadable = |e: std::io::Error| KeyError::Unreadable(e.kind().to_string());
+    if std::fs::metadata(path).map_err(unreadable)?.len() > MAX_FILE_BYTES {
+        return Err(KeyError::Unreadable("file too large".into()));
+    }
+    let bytes = std::fs::read(path).map_err(unreadable)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
