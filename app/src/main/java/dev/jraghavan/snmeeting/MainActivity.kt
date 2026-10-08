@@ -22,6 +22,10 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import dev.jraghavan.snmeeting.model.CoreJson
+import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.HomeRows
+import dev.jraghavan.snmeeting.model.MeetingSummary
+import dev.jraghavan.snmeeting.model.TodoRef
 import dev.jraghavan.snmeeting.model.MicChoice
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
@@ -38,7 +42,7 @@ import dev.jraghavan.snmeeting.record.usbInputs
 /**
  * Home screen (spec F6) in the Inkwell style (F9): the recorder, the 5 most recent meetings,
  * and open to-dos from every meeting. Recording runs in [RecordingService], whose state arrives
- * through its hub; the lists show [MockData] until they are read from the core.
+ * through its hub; both lists are read from the core.
  */
 class MainActivity : Activity() {
 
@@ -48,8 +52,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var micName: TextView
     private lateinit var micHint: TextView
-    private lateinit var todoList: LinearLayout
-    private lateinit var todoTitle: TextView
+    private lateinit var lists: HomeLists
     private val handler = Handler(Looper.getMainLooper())
     private var rec: RecState = RecState.Idle(null, null)
     private var unobserve: (() -> Unit)? = null
@@ -79,8 +82,7 @@ class MainActivity : Activity() {
         timer = ui.body("", 44f).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         button = ui.pill("＋  New", size = 20f) { toggle() }
         status = ui.note("", 15f).apply { gravity = Gravity.CENTER }
-        todoList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        todoTitle = ui.eyebrowItalic("")
+        lists = HomeLists(this, ui, ::openMeeting)
 
         // Not a scrolling page: the header block is fixed and the two lists share the remaining
         // height equally, each scrolling inside its own card (F6-FR1, owner decision 2026-10-07).
@@ -101,15 +103,10 @@ class MainActivity : Activity() {
             addView(ui.spacer(ui.dim(16)))
             addView(status)
             addView(ui.spacer(ui.dim(36)))
-            val meetings = MockData.meetings.take(5)
-            addView(sideBySide(
-                section(ui.eyebrowItalic("Recent meetings  ·  ${meetings.size}"), meetingList(meetings)),
-                section(todoTitle, todoList),
-            ), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(lists.view, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
             addView(ui.spacer(ui.dim(28)))
             addView(ui.closingMark())
         }
-        fillTodos()
         // A subtle top-corner gear → Settings, as on inkread's home screen (F10-FR1).
         return FrameLayout(this).apply {
             setBackgroundColor(android.graphics.Color.WHITE)
@@ -120,85 +117,6 @@ class MainActivity : Activity() {
                 isClickable = true
                 setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)); overridePendingTransition(0, 0) }
             }, FrameLayout.LayoutParams(ui.dp(40), ui.dp(40), Gravity.TOP or Gravity.END).apply { topMargin = ui.dp(10); marginEnd = ui.dp(10) })
-        }
-    }
-
-    /** Two equal columns, equal heights, with a gutter (F6-FR1: meetings left, to-dos right). */
-    private fun sideBySide(left: View, right: View): View = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        addView(left, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = ui.dim(12) })
-        addView(right, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = ui.dim(12) })
-    }
-
-    /** Heading over a card that fills the column's height and scrolls inside. */
-    private fun section(title: TextView, rows: LinearLayout): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(title, ui.fullWidth())
-        addView(ui.spacer(ui.dim(14)))
-        addView(ui.scrollCard(rows), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-    }
-
-    /** The most recent meetings as keyline rows (F6-FR1). */
-    private fun meetingList(meetings: List<MockMeeting>): LinearLayout = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        meetings.forEachIndexed { i, m ->
-            if (i > 0) addView(ui.hairline())
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, ui.dim(14), 0, ui.dim(14))
-                isClickable = true
-                setOnClickListener { openMeeting(m.id) }
-                addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    // Title first (serif, bold); untitled meetings read muted until extraction names them.
-                    addView(ui.body(m.displayTitle, 18f, bold = m.title != null).apply {
-                        if (m.title == null) { setTextColor(ui.textMuted); typeface = ui.serifItalic }
-                    })
-                    addView(ui.eyebrow("${m.day}  ·  ${m.time}"), ui.wrap().apply { topMargin = ui.dim(4) })
-                    val todos = when {
-                        m.status != MockStatus.DONE -> ""
-                        m.openTodos == 0 -> "  ·  no open to-dos"
-                        m.openTodos == 1 -> "  ·  1 open to-do"
-                        else -> "  ·  ${m.openTodos} open to-dos"
-                    }
-                    addView(ui.note(m.duration + todos), ui.wrap().apply { topMargin = ui.dim(3) })
-                    // Half-width column: the status chip sits under the details, not beside them.
-                    addView(ui.chip(m.status.label, filled = m.status.attention), ui.wrap().apply { topMargin = ui.dim(8) })
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(ui.body("→", 18f).apply { setPadding(ui.dim(16), 0, 0, 0) })
-            })
-        }
-    }
-
-    /** Open to-dos from every meeting, not just the 5 listed (F6-FR1); ticking one hides it. */
-    private fun fillTodos() {
-        todoList.removeAllViews()
-        val open = MockData.meetings.flatMap { m -> m.todos.filter { !it.done }.map { m to it } }
-        todoTitle.text = "Open to-dos  ·  ${open.size}"
-        if (open.isEmpty()) {
-            todoList.addView(ui.note("Nothing open. To-dos appear here after a meeting is transcribed.").apply {
-                setPadding(0, ui.dim(14), 0, ui.dim(14))
-            })
-            return
-        }
-        open.forEachIndexed { i, (m, t) ->
-            if (i > 0) todoList.addView(ui.hairline())
-            todoList.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, ui.dim(14), 0, ui.dim(14))
-                addView(ui.checkbox(t.done).apply {
-                    isClickable = true
-                    setOnClickListener { t.done = true; fillTodos() }
-                })
-                addView(LinearLayout(this@MainActivity).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(ui.dim(16), 0, 0, 0)
-                    addView(ui.body(t.text, 17f))
-                    addView(ui.note("${m.day}  ·  ${t.meta}", 13f), ui.wrap().apply { topMargin = ui.dim(3) })
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            })
         }
     }
 
@@ -233,8 +151,8 @@ class MainActivity : Activity() {
         super.onResume()
         ensurePermissions()
         render()
-        fillTodos() // a to-do may have been ticked on the meeting screen
         recover()
+        refreshLists() // queued after recovery, so recovered meetings show their new status
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
             CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
         }
@@ -249,6 +167,24 @@ class MainActivity : Activity() {
         CoreJobs.exec {
             Recoverer(NativeBridge::nativeRecover, RetrieverDuration) { id, i, ms -> NativeBridge.nativeCloseSegment(id, i, ms) }
                 .run(alive)
+        }
+    }
+
+    /** F6-FR1: the five newest meetings and every open to-do, from the core. */
+    private fun refreshLists() {
+        CoreJobs.run({ NativeBridge.nativeListRecent(RECENT) }) { json ->
+            if (isDestroyed) return@run
+            when (val r = CoreJson.list(json, MeetingSummary::from)) {
+                is CoreResult.Ok -> lists.showMeetings(r.value.map(HomeRows::meeting))
+                is CoreResult.Err -> lists.showMeetings(emptyList(), r.message)
+            }
+        }
+        CoreJobs.run({ NativeBridge.nativeOpenTodos() }) { json ->
+            if (isDestroyed) return@run
+            when (val r = CoreJson.list(json, TodoRef::from)) {
+                is CoreResult.Ok -> lists.showTodos(r.value.map(HomeRows::todo))
+                is CoreResult.Err -> lists.showTodos(emptyList(), r.message)
+            }
         }
     }
 
@@ -322,5 +258,9 @@ class MainActivity : Activity() {
             return false
         }
         return true
+    }
+
+    companion object {
+        private const val RECENT = 5
     }
 }
