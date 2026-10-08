@@ -170,6 +170,11 @@ impl App {
         reply(self.library().rename(id, title).map(|()| ok()))
     }
 
+    /// `nativeSetMeetingTemplate` (F7-FR2).
+    pub fn set_template_json(&self, id: &str, template_id: &str) -> String {
+        reply(self.library().set_template(id, template_id).map(|()| ok()))
+    }
+
     /// Every provider's key status, read fresh (the user may add a file at any time).
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL

@@ -59,4 +59,7 @@ object NativeBridge {
 
     /** Names the meeting (`titleSource = user`); "" returns it to untitled. `{ok: true}`. */
     external fun nativeRenameMeeting(id: String, title: String): String
+
+    /** The template the next Transcribe or Summarise again uses. `{ok: true}`. */
+    external fun nativeSetMeetingTemplate(id: String, templateId: String): String
 }

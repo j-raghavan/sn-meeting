@@ -185,6 +185,11 @@ pub fn rename_meeting(id: &str, title: &str) -> String {
     with_app(|app| app.rename_json(id, title))
 }
 
+/// `nativeSetMeetingTemplate(id, templateId)` (F7-FR2).
+pub fn set_meeting_template(id: &str, template_id: &str) -> String {
+    with_app(|app| app.set_template_json(id, template_id))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

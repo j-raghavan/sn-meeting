@@ -1,4 +1,5 @@
-//! The meeting edits the UI makes: to-dos (F6-FR2) and the title (F7-FR5).
+//! The meeting edits the UI makes: to-dos (F6-FR2), the title (F7-FR5) and the template
+//! (F7-FR2).
 use super::list::Source;
 use super::{LibError, Library, invalid};
 use crate::sidecar::{self, TitleSource};
@@ -75,6 +76,19 @@ impl Library<'_> {
         } else {
             (Some(t.to_owned()), Some(TitleSource::User))
         };
+        sidecar::write(&dir, &sc)?;
+        Ok(())
+    }
+
+    /// F7-FR2 / F11-FR6: the template the next Transcribe or Summarise again uses. The id
+    /// must be a template id; whether that template exists is checked against the effective
+    /// templates in M5.
+    pub fn set_template(&self, id: &str, template_id: &str) -> Result<(), LibError> {
+        if !crate::settings::is_template_id(template_id) {
+            return Err(invalid("invalid template id"));
+        }
+        let (dir, mut sc) = self.load_for_write(id)?;
+        sc.template_id = Some(template_id.to_owned());
         sidecar::write(&dir, &sc)?;
         Ok(())
     }
