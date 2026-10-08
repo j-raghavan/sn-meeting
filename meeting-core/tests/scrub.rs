@@ -137,3 +137,20 @@ fn encoded_and_partial_keys() {
         "[redacted] abcdefghijk"
     );
 }
+
+#[test]
+fn a_window_from_the_middle_of_a_key_is_redacted() {
+    // Review 3 #5: 16 characters from inside a key, with neither end of it.
+    let key = "sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+    let middle = &key[10..26];
+    assert_eq!(middle.len(), 16);
+    let out = scrub(&format!("echo: {middle} end"), &[key]);
+    assert_eq!(out, "echo: [redacted] end");
+    assert!(meeting::scrub::contains_secret(
+        &format!("x{middle}y"),
+        &[key]
+    ));
+    // 15 characters from the middle are not enough to count as the key.
+    let short = &key[10..25];
+    assert_eq!(scrub(short, &[key]), short);
+}

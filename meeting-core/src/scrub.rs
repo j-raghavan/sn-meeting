@@ -12,9 +12,11 @@ const SCHEMES: [&str; 3] = ["bearer", "basic", "token"];
 
 /// The shortest run of a key, from its start or its end, that is redacted on its own.
 const MIN_RUN: usize = 12;
+/// Any run of this many characters from anywhere inside a key is redacted too.
+const MID_RUN: usize = 16;
 
-/// Scrub `text`: every `secret` occurrence (also percent-encoded, and any run of at least 12 of
-/// its first or last characters), then the values of the auth headers (as `name: v`, `name=v`
+/// Scrub `text`: every `secret` occurrence (also percent-encoded, any run of at least 12 of its
+/// first or last characters, and any 16 characters from inside it), then the values of the auth headers (as `name: v`, `name=v`
 /// or JSON `"name": "v"`), bearer tokens and `key=` values; then truncate. Idempotent.
 /// Every non-empty secret is replaced whatever its length: callers pass key values only.
 pub fn scrub(text: &str, secrets: &[&str]) -> String {
@@ -48,7 +50,8 @@ pub fn scrub(text: &str, secrets: &[&str]) -> String {
 }
 
 /// Whether `text` holds key material by [`scrub`]'s rule: a whole secret (also
-/// percent-encoded) or a run of at least 12 of its first or last characters.
+/// percent-encoded), a run of at least 12 of its first or last characters, or any 16 from
+/// inside it.
 pub fn contains_secret(text: &str, secrets: &[&str]) -> bool {
     secrets.iter().filter(|s| !s.is_empty()).any(|s| {
         [s.to_string(), percent(s, true), percent(s, false)]
@@ -58,14 +61,18 @@ pub fn contains_secret(text: &str, secrets: &[&str]) -> bool {
     })
 }
 
-/// Every run of `secret`'s first or last characters of at least [`MIN_RUN`], longest first.
+/// Every run of `secret`'s first or last characters of at least [`MIN_RUN`], longest first,
+/// then every [`MID_RUN`]-character window from inside it.
 fn runs(secret: &str) -> impl Iterator<Item = String> + '_ {
     let n = secret.chars().count();
-    (MIN_RUN..n).rev().flat_map(move |len| {
+    let ends = (MIN_RUN..n).rev().flat_map(move |len| {
         let head: String = secret.chars().take(len).collect();
         let tail: String = secret.chars().skip(n - len).collect();
         [head, tail]
-    })
+    });
+    let windows = (1..n.saturating_sub(MID_RUN))
+        .map(move |start| secret.chars().skip(start).take(MID_RUN).collect::<String>());
+    ends.chain(windows)
 }
 
 /// `s` percent-encoded (every byte outside the URL-unreserved set), in upper or lower hex.
@@ -82,7 +89,7 @@ fn percent(s: &str, upper: bool) -> String {
 }
 
 /// Replace every run of `secret`'s first or last `MIN_RUN`+ characters (a key cut short by a
-/// log line or a provider's echo), longest first.
+/// log line or a provider's echo), longest first, then any `MID_RUN` from inside it.
 fn redact_runs(text: &str, secret: &str) -> String {
     let mut out = text.to_owned();
     for run in runs(secret) {
