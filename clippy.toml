@@ -11,4 +11,10 @@ disallowed-methods = [
   { path = "rig_core::providers::gemini::GeminiConfig::client", reason = "uses the shared platform-verifier client" },
   { path = "rig_reqwest::reqwest::Client::new", reason = "platform verifier; use providers::http_client" },
   { path = "rig_reqwest::reqwest::get", reason = "platform verifier; use providers::http_client" },
+  { path = "rig_core::providers::openai::OpenAI::from_env", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::anthropic::Anthropic::from_env", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::gemini::Gemini::from_env", reason = "uses the shared platform-verifier client" },
+  { path = "rig_reqwest::reqwest::ClientBuilder::new", reason = "build clients only in providers::http_client" },
 ]
+# Trait impls (ReqwestClient::default, reqwest::Client::default) can't be named here; the
+# source scan in meeting-core/tests/no_shared_client.rs covers them.
