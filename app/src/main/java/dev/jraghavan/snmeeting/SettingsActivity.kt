@@ -3,14 +3,16 @@ package dev.jraghavan.snmeeting
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.json.JSONObject
 
 /**
  * Settings (spec F10) in the Inkwell style (F9): microphone, save folder, the transcribe and
- * summarise providers with Test connection, and templates. Layout mock-up: choices live in
- * [MockSettings] (memory only) until the core owns settings.json.
+ * summarise providers with Test connection, and templates. Choices still live in [MockSettings]
+ * (memory only) until the core owns settings.json; Test connection is real and runs in the core.
  */
 class SettingsActivity : Activity() {
 
@@ -99,6 +101,31 @@ class SettingsActivity : Activity() {
         setContentView(ui.page(column))
     }
 
+    /**
+     * F10-FR5 / F1-FR9: Test connection runs in the core, off the UI thread. The result's
+     * `detail` stays on screen until the next test; nothing is stored. The JSON never holds a key.
+     */
+    private fun testConnection(role: String, provider: String, result: TextView) {
+        result.text = "Testing…"
+        val dir = filesDir.absolutePath
+        CoreJobs.run({
+            // The process can restart straight into Settings; nativeInit is idempotent and cheap.
+            NativeBridge.nativeInit(dir)
+            NativeBridge.nativeTestConnection(role, provider)
+        }) { json ->
+            Log.i("Meetings", json)
+            if (!isDestroyed) result.text = resultText(json)
+        }
+    }
+
+    /** The line to show: the result's `detail`, else the core's `error`. */
+    private fun resultText(json: String): String = try {
+        val o = JSONObject(json)
+        o.optString("detail").ifEmpty { o.optString("error").ifEmpty { json } }
+    } catch (e: Exception) {
+        json
+    }
+
     /** The Rust core's version (F1-FR5); a cheap call, so it runs on the UI thread. */
     private fun coreVersion(): String = try {
         NativeBridge.nativeVersion()
@@ -132,8 +159,9 @@ class SettingsActivity : Activity() {
                     addView(ui.eyebrow("Model"))
                     addView(ui.body(model, 16f), ui.wrap().apply { topMargin = ui.dim(4) })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                // F10-FR5: lists models with the key (no audio, no cost). Mock-up shows a sample result.
-                addView(ui.pill("Test connection", size = 15f) { result.text = "Sample result — Connected · 312 ms" })
+                // F10-FR5: the core lists models with the key (no audio, no cost).
+                val role = if (title == "Transcription") "transcribe" else "summarise"
+                addView(ui.pill("Test connection", size = 15f) { testConnection(role, current, result) })
             })
             addView(result)
             if (footnote != null) addView(ui.note(footnote, 13f, ui.textMuted).apply { setPadding(0, 0, 0, ui.dim(10)) })
