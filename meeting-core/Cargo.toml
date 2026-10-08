@@ -20,6 +20,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+minijinja = { workspace = true }
 jni = { workspace = true, optional = true }
 
 [features]

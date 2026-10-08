@@ -1,4 +1,4 @@
-//! F5-FR2 / FR3: the transcribe job. Every sidecar change is one short read-modify-write under
+//! F5-FR2 / FR3: the transcribe job, then summarise (`summary.rs`, F5-FR8). Every sidecar change is one short read-modify-write under
 //! the core write lock (`Library::update`); no sidecar copy is held across an await, so an edit
 //! made while a request is in flight (a to-do ticked, a rename) is never overwritten.
 use crate::jobs::{self, Cancel};
@@ -9,6 +9,9 @@ use crate::sidecar::{ProviderRun, SegmentFlag, Sidecar};
 use crate::status::{self, Event, Phase};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
+
+mod summary;
+pub use summary::{context, summarise};
 
 /// OpenAI's per-file cap (C3). The recorder's plan keeps segments far below it (F2-FR5), so a
 /// bigger file is not sent at all.
@@ -22,8 +25,17 @@ pub struct JobPlan {
     pub endpoints: Endpoints,
     /// The transcribe provider's key and model; `None` for a summarise-only job.
     pub transcribe: Option<(ProviderKey, String)>,
+    /// The summarise provider's key and model.
+    pub summarise: Option<(ProviderKey, String)>,
+    /// Why there is no summarise provider, for a transcription that ends without a summary.
+    pub summarise_problem: Option<String>,
+    /// The summarise provider's named default, for the one retry when the model is rejected
+    /// (F4-FR3).
+    pub summarise_fallback: Option<String>,
     /// The template stamped on a meeting that has none yet (F11-FR6).
     pub default_template: String,
+    /// The effective templates at job start (F11-FR3).
+    pub templates: Vec<crate::templates::Template>,
 }
 
 /// Why a job stopped without a final status of its own.
@@ -119,7 +131,20 @@ pub async fn transcribe(
         })
         .map_err(JobError::Storage)?;
     }
-    finish(lib, lock, id, Event::AllSegmentsText, None)
+    let p = finish(lib, lock, id, Event::AllSegmentsText, None)?;
+    if plan.summarise.is_none() {
+        // Transcribed; Summarise again is offered once the key is there (F7-FR2).
+        let problem = plan.summarise_problem.clone();
+        locked(lock, || {
+            lib.update(id, |sc, _| {
+                sc.error = problem;
+                Ok(())
+            })
+        })
+        .map_err(JobError::Storage)?;
+        return Ok(p);
+    }
+    summarise(lib, lock, id, plan, cancel).await
 }
 
 fn pending(sc: &Sidecar) -> Vec<Pending> {
@@ -159,15 +184,22 @@ pub(crate) fn finish(
     event: Event,
     error: Option<String>,
 ) -> Result<Phase, JobError> {
-    locked(lock, || {
-        lib.update(id, |sc, _| {
-            let p = status::next(library::phase(sc), event)?;
-            library::set_phase(sc, p);
-            sc.error = error;
-            Ok(p)
-        })
+    locked(lock, || apply(lib, id, event, error)).map_err(JobError::Storage)
+}
+
+/// `finish` without taking the lock (the caller holds it).
+pub(crate) fn apply(
+    lib: &Library<'_>,
+    id: &str,
+    event: Event,
+    error: Option<String>,
+) -> Result<Phase, LibError> {
+    lib.update(id, |sc, _| {
+        let p = status::next(library::phase(sc), event)?;
+        library::set_phase(sc, p);
+        sc.error = error;
+        Ok(p)
     })
-    .map_err(JobError::Storage)
 }
 
 /// F5-AC10: `h:mm:ss` from milliseconds (1 800 400 → `0:30:00`); hours don't wrap at 60 min.

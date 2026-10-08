@@ -58,7 +58,11 @@ fn plan(uri: &str) -> JobPlan {
             anthropic: uri.into(),
         },
         transcribe: Some((key, "gpt-transcribe".into())),
+        summarise: None,
+        summarise_problem: None,
+        summarise_fallback: None,
         default_template: "general".into(),
+        templates: vec![],
     }
 }
 

@@ -39,3 +39,6 @@ dependencies are permissively licensed (MIT / Apache-2.0 / ISC / BSD style).
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | iana-time-zone, android_system_properties | 0.1 | MIT OR Apache-2.0 |
 | num-traits | 0.2 | MIT OR Apache-2.0 |
+| minijinja (template layouts, F11) | 2.24.0 | Apache-2.0 |
+| memo-map (minijinja dependency) | 0.3 | Apache-2.0 |
+| uuid (to-do ids) | 1 | Apache-2.0 OR MIT |

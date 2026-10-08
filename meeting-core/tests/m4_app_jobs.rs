@@ -106,11 +106,12 @@ async fn settings_changed_mid_job_do_not_reach_it() {
     let s = MockServer::start().await;
     openai_segment(&s, 1, Duration::ZERO).await;
     openai_segment(&s, 2, Duration::from_millis(600)).await;
+    openai_summary(&s).await;
     let fx = fixture(&s.uri(), &["openai", "gemini"]);
     let h = spawn(&fx);
     wait_for(&fx, |m| m["segments"][0]["text"] == "text 1");
-    let patch =
-        r#"{"transcribe":{"provider":"gemini","model":"other"},"defaultTemplate":"standup"}"#;
+    let patch = r#"{"transcribe":{"provider":"gemini","model":"other"},
+        "summarise":{"provider":"gemini"},"defaultTemplate":"standup"}"#;
     let r = parse(&fx.app.set_settings_json(patch));
     assert!(r.get("error").is_none(), "{r}");
     let out = parse(
@@ -118,19 +119,43 @@ async fn settings_changed_mid_job_do_not_reach_it() {
             .await
             .unwrap(),
     );
-    assert_eq!(out["meeting"]["status"], "transcribed", "{out}");
+    assert_eq!(out["meeting"]["status"], "done", "{out}");
     let m = meeting(&fx);
     assert_eq!(
         m["providers"]["transcribe"],
         json!({"provider": "openai", "model": "gpt-transcribe"})
     );
-    assert_eq!(m["templateId"], "general");
-    let reqs = s.received_requests().await.unwrap();
-    assert!(
-        reqs.iter()
-            .all(|r| r.url.path() == "/v1/audio/transcriptions")
+    assert_eq!(
+        m["providers"]["summarise"],
+        json!({"provider": "openai", "model": "gpt-4o-mini"})
     );
-    assert_eq!(reqs.len(), 2);
+    assert_eq!(m["templateId"], "general");
+    let paths: Vec<String> = s
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_owned())
+        .collect();
+    let t = "/v1/audio/transcriptions";
+    assert_eq!(paths, [t, t, "/v1/responses"]);
+}
+
+const SUMMARY: &str =
+    r#"{"title":"Deck review","summary":"S","decisions":[],"todos":[],"sections":[]}"#;
+
+async fn openai_summary(s: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": "resp_1", "object": "response", "created_at": 1, "status": "completed",
+            "model": "gpt-4o-mini",
+            "output": [{"type": "message", "id": "m", "status": "completed", "role": "assistant",
+                "content": [{"type": "output_text", "text": SUMMARY, "annotations": []}]}],
+            "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}
+        })))
+        .mount(s)
+        .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

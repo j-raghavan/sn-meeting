@@ -16,12 +16,15 @@ use serde_json::json;
 pub enum Job {
     /// Pending segments, then summarise.
     Transcribe,
+    /// "Summarise again" on the stored transcript (F5-FR8).
+    Summarise,
 }
 
 impl Job {
     fn label(self) -> &'static str {
         match self {
             Job::Transcribe => "Transcribe",
+            Job::Summarise => "Summarise again",
         }
     }
 }
@@ -30,6 +33,16 @@ impl Job {
 fn key_problem(p: Provider, e: keyfile::KeyError) -> String {
     let ks = settings::key_status_of(p, &Err(e));
     ks.detail().map(str::to_owned).unwrap_or_default()
+}
+
+/// The model a provider falls back to when it rejects the chosen one for structured output
+/// (F4-FR3).
+pub fn fallback_model(p: Provider) -> &'static str {
+    match p {
+        Provider::OpenAi => "gpt-4o-mini",
+        Provider::Gemini => "gemini-3.8-flash",
+        Provider::Anthropic => "claude-opus-5-5",
+    }
 }
 
 fn phase_word(p: Phase) -> &'static str {
@@ -62,12 +75,27 @@ impl App {
         let (s, _) = self.settings();
         let transcribe = match job {
             Job::Transcribe => Some(self.pick(&s, Role::Transcribe)?),
+            Job::Summarise => None,
         };
+        // Transcribe runs without a summarise key and stops at `transcribed`; Summarise
+        // again needs one (F7-FR2).
+        let (summarise, summarise_problem) = match self.pick(&s, Role::Summarise) {
+            Ok(k) => (Some(k), None),
+            Err(e) if job == Job::Transcribe => (None, Some(e)),
+            Err(e) => return Err(e),
+        };
+        let summarise_fallback = summarise
+            .as_ref()
+            .map(|(k, _)| fallback_model(k.provider).to_owned());
         Ok(JobPlan {
             http: providers::http_client(jobs::CONNECT_TIMEOUT, self.core.https_only)?,
             endpoints: self.core.endpoints.clone(),
             transcribe,
+            summarise,
+            summarise_problem,
+            summarise_fallback,
             default_template: s.default_template.clone(),
+            templates: crate::templates::builtins(),
         })
     }
 
@@ -83,10 +111,13 @@ impl App {
             Err(e) => return error_json(&e),
         };
         let lib = self.library();
-        let fut = match job {
-            Job::Transcribe => pipeline::transcribe(&lib, &self.write, id, &plan, &guard.cancel),
-        };
-        let r = crate::runtime::block_on(fut);
+        let cancel = &guard.cancel;
+        let r = crate::runtime::block_on(async {
+            match job {
+                Job::Transcribe => pipeline::transcribe(&lib, &self.write, id, &plan, cancel).await,
+                Job::Summarise => pipeline::summarise(&lib, &self.write, id, &plan, cancel).await,
+            }
+        });
         drop(guard);
         match r {
             Err(e) => error_json(&format!("runtime: {e}")),
