@@ -59,7 +59,8 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
             m.setAudioSamplingRate(spec.sampleRateHz)
             m.setAudioEncodingBitRate(spec.bitrateBps)
             m.setOutputFile(out)
-            inputById(am, deviceId)?.let { m.setPreferredDevice(it) }
+            val input = inputById(am, deviceId)
+            Pin.require(found = input != null, preferred = input != null && m.setPreferredDevice(input)) // INV1
             return m
         } catch (e: Exception) {
             m.release(); throw e
@@ -107,6 +108,9 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
         val l = AudioRouting.OnRoutingChangedListener { ar -> events.onRoutedTo(ar.routedDevice?.id) }
         m.addOnRoutingChangedListener(l, handler)
         r = m; this.path = path; routing = l
+        // INV1: already routed elsewhere at start? Reported once the recorder is RECORDING.
+        val routed = m.routedDevice?.id
+        if (Pin.routedAway(deviceId, routed)) handler.post { events.onRoutedTo(routed) }
     }
 
     override fun setNext(path: String): Boolean = try {

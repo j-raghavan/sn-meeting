@@ -86,3 +86,18 @@ interface WakePort {
     fun acquire(timeoutMs: Long)
     fun release()
 }
+
+/**
+ * INV1 (S14): the recorder uses the pinned input or nothing. setPreferredDevice is only a
+ * preference, so a pin the platform refuses, or an input already gone, is a recorder that
+ * won't start; and audio routed to any other input once started is mic loss.
+ */
+object Pin {
+    fun require(found: Boolean, preferred: Boolean) {
+        check(found) { "the pinned microphone is gone" }
+        check(preferred) { "the recorder refused the pinned microphone" }
+    }
+
+    /** null: not routed yet; the routing callback reports it when it is. */
+    fun routedAway(pinned: Int, routed: Int?): Boolean = routed != null && routed != pinned
+}
