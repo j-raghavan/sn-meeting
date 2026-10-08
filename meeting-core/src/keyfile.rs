@@ -1,0 +1,164 @@
+//! F4: sn-copilot `copilot-key-<provider>.txt` files (port of sn-copilot keyFiles.ts:43-226).
+use std::collections::BTreeMap;
+use std::fmt;
+use std::path::PathBuf;
+
+/// Where sn-copilot (and so Meetings) reads key files on the device (F4-FR2).
+pub const DEFAULT_KEY_DIR: &str = "/storage/emulated/0/MyStyle/SnCopilot";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Provider {
+    OpenAi,
+    Gemini,
+    Anthropic,
+}
+
+impl Provider {
+    pub const ALL: [Provider; 3] = [Provider::OpenAi, Provider::Gemini, Provider::Anthropic];
+
+    /// The canonical id: the `provider=` value and the JNI argument.
+    pub fn id(self) -> &'static str {
+        match self {
+            Provider::OpenAi => "openai",
+            Provider::Gemini => "gemini",
+            Provider::Anthropic => "anthropic",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Provider> {
+        Provider::ALL.into_iter().find(|p| p.id() == id)
+    }
+
+    pub fn canonical_file_name(self) -> String {
+        format!("copilot-key-{}.txt", self.id())
+    }
+}
+
+/// What a filename means (keyFiles.ts:56-79). DeepSeek is recognised and ignored.
+#[derive(Debug, PartialEq, Eq)]
+pub enum FileMatch {
+    Provider(Provider),
+    Ignored,
+}
+
+/// keyFiles.ts `matchKeyFilename`: case-insensitive, trimmed, `copilot-key-<alias>.txt`.
+pub fn match_key_filename(file_name: &str) -> Option<FileMatch> {
+    let lower = js_trim(&file_name.to_lowercase()).to_owned();
+    let suffix = lower.strip_prefix("copilot-key-")?.strip_suffix(".txt")?;
+    Some(match suffix {
+        "openai" | "gpt" | "chatgpt" => FileMatch::Provider(Provider::OpenAi),
+        "gemini" | "google" | "google-gemini" => FileMatch::Provider(Provider::Gemini),
+        "anthropic" | "claude" | "claude-ai" | "claude-anthropic" => {
+            FileMatch::Provider(Provider::Anthropic)
+        }
+        "deepseek" => FileMatch::Ignored,
+        _ => return None,
+    })
+}
+
+/// A parsed key file. The key is private and never printed (`Debug` redacts it, INV2).
+#[derive(Clone, PartialEq, Eq)]
+pub struct ProviderKey {
+    pub provider: Provider,
+    pub model: String,
+    /// Optional `transcribe_model=` line (F4-FR3); sn-copilot ignores unknown keys.
+    pub transcribe_model: Option<String>,
+    /// The file it came from; empty for text parsed directly.
+    pub source: PathBuf,
+    key: String,
+}
+
+impl ProviderKey {
+    /// The key itself: every call site is a place it can leak (INV2).
+    pub fn expose(&self) -> &str {
+        &self.key
+    }
+
+    /// The bare file name, for "Key found: copilot-key-openai.txt" (F4-FR4).
+    pub fn file_name(&self) -> String {
+        self.source
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+}
+
+impl fmt::Debug for ProviderKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProviderKey")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("transcribe_model", &self.transcribe_model)
+            .field("source", &self.source)
+            .field("key", &"[redacted]")
+            .finish()
+    }
+}
+
+/// Why a provider has no usable key. Messages match sn-copilot's parse-error reasons.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum KeyError {
+    #[error("no key file for {provider}")]
+    NotFound {
+        provider: &'static str,
+        /// `copilot-key.enc` / `.copilot-key.enc` exists (F4-FR5).
+        vault_present: bool,
+    },
+    #[error("missing required field: {0}")]
+    MissingField(&'static str),
+    #[error("provider=\"{found}\" mismatches filename suffix (expected canonical \"{expected}\")")]
+    ProviderMismatch {
+        expected: &'static str,
+        found: String,
+    },
+    #[error("key file unreadable: {0}")]
+    Unreadable(String),
+}
+
+/// JS `String.prototype.trim`: Rust's whitespace set minus U+0085, plus U+FEFF (the BOM).
+fn js_trim(s: &str) -> &str {
+    s.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}')
+}
+
+/// F4-FR1: parse one file's text for `provider` (keyFiles.ts:104-162).
+pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
+    let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
+    let mut fields: BTreeMap<&str, &str> = BTreeMap::new();
+    for raw in normalised.split('\n') {
+        let line = js_trim(raw);
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((k, v)) = line.split_once('=') else {
+            continue; // malformed line: ignored, as in sn-copilot
+        };
+        let k = js_trim(k);
+        if k.is_empty() {
+            continue;
+        }
+        fields.insert(k, js_trim(v)); // duplicate: last wins
+    }
+    let field = |name: &'static str| {
+        fields
+            .get(name)
+            .copied()
+            .filter(|v| !v.is_empty())
+            .ok_or(KeyError::MissingField(name))
+    };
+    let found = field("provider")?;
+    if found != provider.id() {
+        return Err(KeyError::ProviderMismatch {
+            expected: provider.id(),
+            found: found.to_owned(),
+        });
+    }
+    let key = field("key")?;
+    let model = field("model")?;
+    Ok(ProviderKey {
+        provider,
+        model: model.to_owned(),
+        transcribe_model: field("transcribe_model").ok().map(str::to_owned),
+        source: PathBuf::new(),
+        key: key.to_owned(),
+    })
+}

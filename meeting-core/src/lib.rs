@@ -1,5 +1,6 @@
 //! Meetings core (`libmeeting.so`).
 pub mod api;
+pub mod keyfile;
 pub mod providers;
 pub mod runtime;
 
