@@ -180,24 +180,58 @@ async fn a_413_fails_without_a_retry() {
 }
 
 #[tokio::test]
-async fn a_missing_segment_fails_the_meeting() {
-    // EC7: deleted on the desktop. Segment 1 is sent first; the job stops at segment 2.
+async fn a_missing_segment_is_marked_and_the_rest_transcribe() {
+    // EC7 (ruling 2026-10-08): deleted on the desktop. It is not sent, reads "(audio missing)"
+    // and is flagged; the other segments still transcribe, so the meeting can finish.
     let s = MockServer::start().await;
     segment(&s, 1, Duration::ZERO, "one").await;
+    segment(&s, 3, Duration::ZERO, "three").await;
     let fx = meeting();
     std::fs::remove_file(fx.dir.join(format!("{}-02.m4a", fx.id))).unwrap();
     let p = run(&fx, &s.uri(), &Cancel::default()).await.unwrap();
-    assert_eq!(p, Phase::Failed(FailedAt::Transcribing));
+    assert_eq!(p, Phase::Transcribed);
+    assert_eq!(sent(&s).await, [1, 3]);
     let v = sidecar(&fx);
-    assert_eq!(v["error"], "Segment 2 is missing");
-    assert_eq!(v["segments"][0]["text"], "one");
-    // A segment recovery flagged missing is not sent even if a file reappears.
+    assert_eq!(v["segments"][1]["text"], "(audio missing)");
+    assert_eq!(v["segments"][1]["flag"], "missing");
+    assert_eq!(v["segments"][2]["text"], "three");
+    assert!(v["error"].is_null());
+}
+
+#[tokio::test]
+async fn a_segment_flagged_missing_is_not_sent_even_if_a_file_reappears() {
+    let s = MockServer::start().await;
+    segment(&s, 1, Duration::ZERO, "one").await;
+    segment(&s, 2, Duration::ZERO, "two").await;
+    segment(&s, 3, Duration::ZERO, "three").await;
+    let fx = meeting();
     let mut sc = read_sidecar(&fx.dir, &fx.id);
     sc.segments[1].flag = Some(meeting::sidecar::SegmentFlag::Missing);
     meeting::sidecar::write(&fx.dir, &sc).unwrap();
-    std::fs::write(fx.dir.join(format!("{}-02.m4a", fx.id)), b"x").unwrap();
     run(&fx, &s.uri(), &Cancel::default()).await.unwrap();
-    assert_eq!(sidecar(&fx)["error"], "Segment 2 is missing");
+    assert_eq!(sent(&s).await, [1, 3]);
+    assert_eq!(sidecar(&fx)["segments"][1]["text"], "(audio missing)");
+}
+
+#[tokio::test]
+async fn an_empty_flagged_segment_is_not_sent_and_reads_no_speech() {
+    // Recovery flags a 0-byte segment `empty`; a provider rejects such a file as corrupt, so
+    // it is never sent and reads "(no speech detected)". An unflagged 0-byte file likewise.
+    let s = MockServer::start().await;
+    segment(&s, 1, Duration::ZERO, "one").await;
+    let fx = meeting();
+    std::fs::write(fx.dir.join(format!("{}-02.m4a", fx.id)), b"").unwrap();
+    std::fs::write(fx.dir.join(format!("{}-03.m4a", fx.id)), b"").unwrap();
+    let mut sc = read_sidecar(&fx.dir, &fx.id);
+    sc.segments[1].flag = Some(meeting::sidecar::SegmentFlag::Empty);
+    meeting::sidecar::write(&fx.dir, &sc).unwrap();
+    let p = run(&fx, &s.uri(), &Cancel::default()).await.unwrap();
+    assert_eq!(p, Phase::Transcribed);
+    assert_eq!(sent(&s).await, [1]);
+    let v = sidecar(&fx);
+    assert_eq!(v["segments"][1]["text"], "(no speech detected)");
+    assert_eq!(v["segments"][2]["text"], "(no speech detected)");
+    assert_eq!(v["segments"][1]["flag"], "empty");
 }
 
 #[tokio::test]

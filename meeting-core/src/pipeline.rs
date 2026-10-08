@@ -16,6 +16,9 @@ pub use summary::{context, summarise};
 /// A meeting with no segment at all (a recording that never produced a file).
 pub const NO_AUDIO: &str = "No audio was recorded";
 
+/// The text stored for a segment whose audio file is gone (EC7). Transcription carries on.
+pub const AUDIO_MISSING: &str = "(audio missing)";
+
 /// OpenAI's per-file cap (C3). The recorder's plan keeps segments far below it (F2-FR5), so a
 /// bigger file is not sent at all.
 pub const MAX_AUDIO_BYTES: u64 = 25 * 1024 * 1024;
@@ -64,7 +67,14 @@ struct Pending {
     index: usize,
     file: String,
     duration_ms: Option<u64>,
-    missing: bool,
+    flag: Option<SegmentFlag>,
+}
+
+/// What to do with a pending segment.
+enum Audio {
+    Send(Vec<u8>),
+    /// Not sent: store this text, and this flag (ruling 2026-10-08, EC6/EC7).
+    Skip(&'static str, SegmentFlag),
 }
 
 /// F5-FR1..FR3: send every segment whose `text` is still `null`, in order, storing each text as
@@ -108,7 +118,11 @@ pub async fn transcribe(
             return fail("Cancelled".into());
         }
         let bytes = match read_segment(&dir, &seg, key) {
-            Ok(b) => b,
+            Ok(Audio::Send(b)) => b,
+            Ok(Audio::Skip(text, flag)) => {
+                store(lib, lock, id, &seg, text.to_owned(), Some(flag))?;
+                continue;
+            }
             Err(msg) => return fail(msg),
         };
         let budget = plan.budgets.transcribe(seg.duration_ms);
@@ -125,20 +139,7 @@ pub async fn transcribe(
             Ok(t) => t,
             Err(e) => return fail(e.detail),
         };
-        locked(lock, || {
-            lib.update(id, |sc, _| {
-                // The sidecar is re-read: store the text only on the segment we sent.
-                if let Some(s) = sc
-                    .segments
-                    .get_mut(seg.index)
-                    .filter(|s| s.file == seg.file)
-                {
-                    s.text = Some(text);
-                }
-                Ok(())
-            })
-        })
-        .map_err(JobError::Storage)?;
+        store(lib, lock, id, &seg, text, None)?;
     }
     let p = finish(lib, lock, id, Event::AllSegmentsText, None)?;
     if plan.summarise.is_none() {
@@ -154,6 +155,35 @@ pub async fn transcribe(
         return Ok(p);
     }
     summarise(lib, lock, id, plan, cancel).await
+}
+
+/// Store `text` (and `flag`) on the segment. The sidecar is re-read: only the segment the job
+/// took is changed, and only if it is still the same file.
+fn store(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    seg: &Pending,
+    text: String,
+    flag: Option<SegmentFlag>,
+) -> Result<(), JobError> {
+    locked(lock, || {
+        lib.update(id, |sc, _| {
+            if let Some(s) = sc
+                .segments
+                .get_mut(seg.index)
+                .filter(|s| s.file == seg.file)
+            {
+                s.text = Some(text);
+                if flag.is_some() {
+                    s.flag = flag;
+                    s.duration_ms.get_or_insert(0);
+                }
+            }
+            Ok(())
+        })
+    })
+    .map_err(JobError::Storage)
 }
 
 /// F5-FR1: the meeting's template vocabulary as the transcription hint ("Priya, Supernote");
@@ -177,24 +207,36 @@ fn pending(sc: &Sidecar) -> Vec<Pending> {
             index,
             file: s.file.clone(),
             duration_ms: s.duration_ms,
-            missing: s.flag == Some(SegmentFlag::Missing),
+            flag: s.flag,
         })
         .collect()
 }
 
-/// The segment's bytes, or the user-facing reason it can't be sent (EC7).
-fn read_segment(dir: &Path, seg: &Pending, key: &ProviderKey) -> Result<Vec<u8>, String> {
+/// The segment's bytes; or, for one with no audio to send, the text it reads as: a missing
+/// file is "(audio missing)", an empty one "(no speech detected)" (a provider rejects a 0-byte
+/// file as corrupt, so it is never sent). Else the user-facing reason it can't be sent.
+fn read_segment(dir: &Path, seg: &Pending, key: &ProviderKey) -> Result<Audio, String> {
     let n = seg.index + 1;
     let path: PathBuf = dir.join(&seg.file);
-    let meta = match std::fs::metadata(&path) {
-        Ok(m) if !seg.missing => m,
-        _ => return Err(format!("Segment {n} is missing")),
+    let missing = Audio::Skip(AUDIO_MISSING, SegmentFlag::Missing);
+    let empty = Audio::Skip(providers::NO_SPEECH, SegmentFlag::Empty);
+    let meta = match (seg.flag, std::fs::metadata(&path)) {
+        (Some(SegmentFlag::Missing), _) => return Ok(missing),
+        (Some(SegmentFlag::Empty), _) => return Ok(empty),
+        (None, Err(e)) if e.kind() == std::io::ErrorKind::NotFound => return Ok(missing),
+        (None, Err(e)) => return Err(format!("Segment {n} can't be read ({:?})", e.kind())),
+        (None, Ok(m)) => m,
     };
+    if meta.is_file() && meta.len() == 0 {
+        return Ok(empty);
+    }
     if meta.len() > MAX_AUDIO_BYTES {
         let name = providers::provider_name(key.provider);
         return Err(format!("Segment too large for {name}"));
     }
-    std::fs::read(&path).map_err(|e| format!("Segment {n} can't be read ({:?})", e.kind()))
+    std::fs::read(&path)
+        .map(Audio::Send)
+        .map_err(|e| format!("Segment {n} can't be read ({:?})", e.kind()))
 }
 
 /// Apply `event` (and `error`) in one write; returns the phase reached.
