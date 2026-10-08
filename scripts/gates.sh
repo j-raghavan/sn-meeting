@@ -26,6 +26,7 @@ step "cargo clippy (jni-bridge)";    cargo clippy --all-targets --features jni-b
 step "cargo test";                   cargo test -p meeting-core
 step "cargo llvm-cov (>= 97% lines)"
 cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex 'meeting-core/src/jni\.rs$'
+step "install guard (stub adb)";     "$ROOT/scripts/test_install_guard.sh"
 step "gradle lintRelease (JDK $JDK)"
 JAVA_HOME="$JDK" ./gradlew -q lintRelease
 step "gradle :app:testDebugUnitTest"

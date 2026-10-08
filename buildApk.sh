@@ -151,20 +151,55 @@ report_sizes() {
 mb() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1048576 }'; }
 
 # =========================================================
+# audio_recording_state — F1-FR7 until RecordingService exists (M6): the spike records from
+# MainActivity, so look for our package among AudioService's recordings. Reads `dumpsys audio`
+# on stdin and prints yes / no / unknown.
+#
+# AOSP's RecordingActivityMonitor dumps "RecordActivityMonitor dump time: …", then per client
+# "riid <n>; active <bool>" and an indented "session:… -- pack:<package> …" line, then an event
+# log of past recordings (which must not count). Older releases list only the active clients,
+# without riid lines. The format on the Supernote is DEVICE-UNVERIFIED, so anything we can't
+# find is "unknown", which asks rather than passes.
+# =========================================================
+audio_recording_state() {
+    awk -v pkg="pack:$PKG_ID" '
+        /RecordActivityMonitor/ { insec = 1; seen = 1; state = "?"; next }
+        insec && (tolower($0) ~ /event log/ || /^[A-Z]/) { insec = 0 }
+        !insec { next }
+        /^[ \t]*riid / { state = ($0 ~ /active true/) ? "on" : "off"; next }
+        {
+            i = index($0, pkg)
+            if (i && substr($0, i + length(pkg), 1) !~ /[A-Za-z0-9._]/ && state != "off") active = 1
+        }
+        END { print (!seen ? "unknown" : active ? "yes" : "no") }'
+}
+
+# recording_state — yes / no / unknown for a recording by $PKG_ID on the device.
+recording_state() {
+    local services audio
+    # Captured first: under pipefail, `adb | grep -q` can fail on SIGPIPE after a match.
+    services="$(adb_dev shell dumpsys activity services "$PKG_ID" 2>/dev/null)" || { echo unknown; return 0; }
+    if grep -q RecordingService <<< "$services"; then echo yes; return 0; fi
+    audio="$(adb_dev shell dumpsys audio 2>/dev/null)" || { echo unknown; return 0; }
+    audio_recording_state <<< "$audio"
+}
+
+# =========================================================
 # confirm_no_recording — F1-FR7: installing force-stops the app, which ends a live recording
-# (seen on the device: installPackageLI killed one). If RecordingService is running, ask first;
-# anything but "y" (including no terminal) cancels.
+# (seen on the device: installPackageLI killed one). If a recording is running, or we couldn't
+# tell, ask first; anything but "y" (including no terminal) cancels.
 # =========================================================
 confirm_no_recording() {
-    local answer="" services
-    # Captured first: under pipefail, `adb | grep -q` can fail on SIGPIPE after a match.
-    services="$(adb_dev shell dumpsys activity services "$PKG_ID" 2>/dev/null || true)"
-    grep -q RecordingService <<< "$services" || return 0
-    write_color_output "A recording is in progress on the device; installing will stop it." "Yellow"
+    local answer=""
+    case "$(recording_state)" in
+        no) return 0 ;;
+        yes) write_color_output "A recording is in progress on the device; installing will stop it." "Yellow" ;;
+        *) write_color_output "Couldn't check the device for a recording in progress." "Yellow" ;;
+    esac
     read -r -p "Install anyway? [y/N] " answer || true
     case "$answer" in
-        y|Y|yes|YES) write_color_output "Installing over the running recording" "Yellow" ;;
-        *) die "Install cancelled; the recording is still running" ;;
+        y|Y|yes|YES) write_color_output "Installing anyway" "Yellow" ;;
+        *) die "Install cancelled" ;;
     esac
 }
 
@@ -212,4 +247,7 @@ main() {
     fi
 }
 
-main "$@"
+# Sourced by scripts/test_install_guard.sh for its functions; run as a script, it builds.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
