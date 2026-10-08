@@ -71,6 +71,9 @@ pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, Settings
     // Before creating anything: where the folder will really be is the existing part, resolved
     // through any links, plus the parts still to create (a link Document → MyStyle/SnCopilot
     // must not get MyStyle/SnCopilot/Meetings made).
+    if aliases_forbidden(root, probe) {
+        return Err(forbidden());
+    }
     let existing = probe.canonicalize().map_err(|_| outside())?;
     let rest = full.strip_prefix(probe).map_err(|_| outside())?;
     let target = existing.join(rest);
@@ -98,18 +101,67 @@ pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, Settings
     Ok(parts.join("/"))
 }
 
-/// Case-insensitive, as shared storage is.
+/// Lowercase, with every letter whose upper or lower case is ASCII replaced by that ASCII.
+fn fold(name: &str) -> String {
+    let ascii = |s: String| s.is_ascii().then(|| s.to_ascii_lowercase());
+    name.chars()
+        .map(|c| {
+            if c.is_ascii() {
+                c.to_ascii_lowercase().to_string()
+            } else {
+                ascii(c.to_uppercase().collect())
+                    .or_else(|| ascii(c.to_lowercase().collect()))
+                    .unwrap_or_else(|| c.to_lowercase().collect())
+            }
+        })
+        .collect()
+}
+
+fn forbidden() -> SettingsError {
+    err(
+        "saveFolder",
+        "can't save into MyStyle/SnCopilot or MyStyle/Meetings/templates",
+    )
+}
+
+/// Case-insensitive, as shared storage is. Android's storage folds case with full Unicode case
+/// folding, under which some non-ASCII letters equal ASCII ones ("ſ" is "s", the Kelvin sign
+/// is "k"), so those are folded too before comparing (DEVICE-UNVERIFIED on the device).
 fn check_forbidden(parts: &[&str]) -> Result<(), SettingsError> {
-    let lower: Vec<String> = parts.iter().map(|p| p.to_lowercase()).collect();
+    let lower: Vec<String> = parts.iter().map(|p| fold(p)).collect();
     for f in FORBIDDEN {
         if lower.len() >= f.len() && lower.iter().zip(f).all(|(a, b)| a == b) {
-            return Err(err(
-                "saveFolder",
-                "can't save into MyStyle/SnCopilot or MyStyle/Meetings/templates",
-            ));
+            return Err(forbidden());
         }
     }
     Ok(())
+}
+
+/// Whether `existing` or any folder above it (up to `root`) is a forbidden folder under
+/// another name: same device and inode, whatever the spelling, case folding or links.
+/// DEVICE-UNVERIFIED: Android's casefolded shared storage is not reproducible on the host.
+#[cfg(unix)]
+fn aliases_forbidden(root: &Path, existing: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let id = |p: &Path| std::fs::metadata(p).ok().map(|m| (m.dev(), m.ino()));
+    let names = [
+        ["MyStyle", "SnCopilot"].as_slice(),
+        &["MyStyle", "Meetings", "templates"],
+    ];
+    let bad: Vec<(u64, u64)> = names
+        .iter()
+        .filter_map(|f| id(&f.iter().fold(root.to_path_buf(), |p, c| p.join(c))))
+        .collect();
+    !bad.is_empty()
+        && existing
+            .ancestors()
+            .take_while(|a| a.starts_with(root) && *a != root)
+            .any(|a| id(a).is_some_and(|x| bad.contains(&x)))
+}
+
+#[cfg(not(unix))]
+fn aliases_forbidden(_: &Path, _: &Path) -> bool {
+    false
 }
 
 impl Settings {

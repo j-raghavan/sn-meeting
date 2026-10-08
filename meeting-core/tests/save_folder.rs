@@ -235,3 +235,33 @@ fn a_symlink_into_sncopilot_creates_nothing_there() {
     // A link to a harmless part of MyStyle/Meetings is fine.
     assert_eq!(check(root, "Notes/archive"), Ok("Notes/archive".into()));
 }
+
+#[test]
+fn long_s_alias_of_sncopilot_is_refused() {
+    // Unicode case folding makes "ſ" (U+017F) "s" and the Kelvin sign "k"; Android's
+    // casefolded storage may resolve these to the real folders (DEVICE-UNVERIFIED).
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    fs::create_dir_all(root.join("MyStyle/SnCopilot")).unwrap();
+    let refused = Err("can't save into MyStyle/SnCopilot or MyStyle/Meetings/templates".into());
+    for alias in [
+        "Myſtyle/ſnCopilot/x",
+        "MyStyle/ſnCopilot",
+        "mystyle/meetings/templateſ",
+    ] {
+        assert_eq!(check(root, alias), refused, "{alias}");
+    }
+    assert_eq!(
+        fs::read_dir(root.join("MyStyle")).unwrap().count(),
+        1,
+        "nothing created"
+    );
+    assert_eq!(fs::read_dir(root).unwrap().count(), 1);
+    // Other non-ASCII names are fine.
+    assert_eq!(
+        check(root, "Ｍystyle/x"),
+        Ok("Ｍystyle/x".into()),
+        "fullwidth does not fold"
+    );
+    assert_eq!(check(root, "Réunions/équipe"), Ok("Réunions/équipe".into()));
+}
