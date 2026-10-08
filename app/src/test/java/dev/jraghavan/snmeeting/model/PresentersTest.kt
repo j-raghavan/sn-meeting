@@ -48,4 +48,25 @@ class PresentersTest {
         assertEquals("Wed 7 Oct  ·  Due Fri 9 Oct  ·  Me", t.meta)
         assertEquals("Wed 7 Oct", HomeRows.todo(TodoRef("m", at, null, "t", "x", null, null)).meta)
     }
+
+    private fun sc(status: Status = Status.RECORDED, failedAt: FailedAt? = null, texts: List<String?> = listOf(null),
+                   title: String? = null, note: String? = null, mic: MicRef? = MicRef("usb", "USB-Audio - USB Audio")) = Sidecar(
+        "m", at, 2_530_000, status, failedAt, title, null, null, null, null, null, emptyList(), emptyList(), mic,
+        texts.mapIndexed { i, t -> Segment("m-0${i + 1}.m4a", i * 900_000L, 900_000, t, null) }, null, note, emptyList())
+
+    @Test fun meetingHeader() {
+        val h = MeetingHeader.of(sc(texts = listOf(null, null, null), note = "mic disconnected"))
+        assertEquals(Format.UNTITLED, h.title)
+        assertTrue(h.untitled)
+        assertEquals("Wednesday, 7 October  ·  21:17", h.stamp)
+        assertEquals("0:42:10  ·  3 segments", h.length)
+        assertEquals("USB — USB-Audio - USB Audio", h.mic)
+        assertEquals("Recording ended: mic disconnected", h.note)
+        val b = MeetingHeader.of(sc(title = "Hiring sync", mic = MicRef("bluetooth", "Jabra"), note = ""))
+        assertEquals("Hiring sync", b.title)
+        assertEquals("0:42:10  ·  1 segment", b.length)
+        assertEquals("Bluetooth — Jabra", b.mic)
+        assertEquals(null, b.note)
+        assertEquals(null, MeetingHeader.of(sc(mic = null)).mic) // legacy audio
+    }
 }

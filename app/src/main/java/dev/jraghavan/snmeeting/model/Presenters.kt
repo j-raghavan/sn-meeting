@@ -81,3 +81,21 @@ object HomeRows {
         return Todo(t.meetingId, t.todoId, t.text, parts.joinToString("  ·  "))
     }
 }
+
+/** F7-FR5: the meeting screen's heading and the mono eyebrows under it. */
+data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: String, val length: String, val mic: String?, val note: String?) {
+    companion object {
+        fun of(m: Sidecar): MeetingHeader {
+            val n = m.segments.size
+            val mic = m.mic?.let { (if (it.kind == "bluetooth") "Bluetooth" else "USB") + " — " + it.name }
+            return MeetingHeader(
+                title = m.title?.takeIf { it.isNotBlank() } ?: Format.UNTITLED,
+                untitled = m.title.isNullOrBlank(),
+                stamp = listOf(Format.dayLong(m.startedAt), Format.time(m.startedAt)).filter { it.isNotEmpty() }.joinToString("  ·  "),
+                length = "${Format.duration(m.durationMs)}  ·  ${Format.plural(n, "segment")}",
+                mic = mic,
+                note = m.note?.takeIf { it.isNotBlank() }?.let { "Recording ended: $it" },
+            )
+        }
+    }
+}
