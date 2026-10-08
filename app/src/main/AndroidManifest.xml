@@ -22,6 +22,13 @@
          this API-30 device, but lint requires it at targetSdk 34. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- F2-FR10: a Bluetooth headset mic (HFP/SCO). BLUETOOTH is the API-30 permission;
+         BLUETOOTH_CONNECT replaces it from API 31. MODIFY_AUDIO_SETTINGS starts SCO.
+         No scan or location permissions: pairing stays in Supernote Settings. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
     <application
         android:allowBackup="false"
         android:label="Meetings"

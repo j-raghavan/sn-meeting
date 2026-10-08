@@ -5,8 +5,12 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.bluetooth.BluetoothHeadset
+import android.bluetooth.BluetoothProfile
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -35,6 +39,10 @@ class RecordingService : Service() {
     private var recorder: SegmentedRecorder? = null
     /** The input the recording is pinned to (F2-FR3). */
     private var pinnedId: Int? = null
+    private var sco: ScoLink? = null
+    private var bt: BluetoothState? = null
+    /** Between ＋ New and the mic being picked (waiting for the headset proxy). */
+    private var picking = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -56,7 +64,7 @@ class RecordingService : Service() {
                 h.post { begin(choice) }
             }
             ACTION_STOP -> h.post {
-                val rec = recorder ?: return@post shutdown(RecState.Idle(null, null))
+                val rec = recorder ?: return@post shutdown(RecState.Idle(if (picking) "Recording cancelled" else null, null))
                 hub.publish(RecState.Stopping)
                 rec.stop()
             }
@@ -65,10 +73,25 @@ class RecordingService : Service() {
         return START_NOT_STICKY
     }
 
+    /**
+     * Opens Bluetooth and picks the mic once the headset proxy is bound (it arrives
+     * asynchronously), or after [BT_WAIT_MS]: a USB mic or a headset bound by then is offered.
+     */
     private fun begin(choice: MicChoice) {
-        if (recorder != null) return
+        if (recorder != null || picking) return
+        picking = true
         getSystemService(NotificationManager::class.java).cancel(END_NOTE_ID)
-        val pick = MicSelector.pick(usbInputs(am), BtSnapshot.NONE, choice)
+        val state = BluetoothState(this, h) { if (bt?.ready == true) go(choice) }
+        bt = state
+        guard.hold("bluetooth") { state.close() }
+        state.open()
+        if (state.ready) go(choice) else h.postDelayed({ go(choice) }, BT_WAIT_MS)
+    }
+
+    private fun go(choice: MicChoice) {
+        if (!picking) return
+        picking = false
+        val pick = MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, choice)
         val mic = pick.chosen ?: return shutdown(RecState.Idle(pick.reason, null))
         hub.publish(RecState.Starting(mic.label))
         val wake = WakeLease(AndroidWake(this)).also { it.begin(guard) } // F2-FR6: the screen may sleep
@@ -83,22 +106,57 @@ class RecordingService : Service() {
             })
         recorder = rec
         am.registerAudioDeviceCallback(devices, h); guard.hold("deviceCallback") { am.unregisterAudioDeviceCallback(devices) }
-        val id = mic.deviceId ?: return shutdown(RecState.Idle(MicSelector.NONE, null))
-        pinnedId = id
-        rec.start(mic, id, InputSource.MIC, listOf(AudioSpec.USB))
+        if (mic.kind == MicKind.USB) {
+            val id = mic.deviceId ?: return shutdown(RecState.Idle(MicSelector.NONE, null))
+            pinnedId = id
+            rec.start(mic, id, InputSource.MIC, listOf(AudioSpec.USB))
+            return
+        }
+        // F2-FR9: Bluetooth records only once SCO is up; nativeBeginMeeting waits for onReady.
+        val link = ScoLink(AndroidScoAudio(am), HandlerTimer(h), object : ScoLink.Listener {
+            override fun onReady(deviceId: Int) {
+                pinnedId = deviceId
+                rec.start(mic, deviceId, InputSource.VOICE_COMMUNICATION, listOf(AudioSpec.BLUETOOTH, AudioSpec.BLUETOOTH_FALLBACK))
+            }
+            override fun onFailed(reason: String) = shutdown(RecState.Idle(reason, null))
+            override fun onLost() = rec.onMicLost()
+        })
+        sco = link
+        // Registered before open(): the SCO state broadcast is sticky (ScoLink ignores its replay).
+        val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED).apply {
+            addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
+        }
+        registerReceiver(scoReceiver, filter, null, h); guard.hold("scoReceiver") { unregisterReceiver(scoReceiver) }
+        guard.hold("sco") { link.close() } // stopBluetoothSco, then MODE_NORMAL (INV7)
+        link.open()
     }
 
     /** F2-FR3, EC1, EC2: the pinned input going away ends the recording; nothing else is used. */
     private val devices = object : AudioDeviceCallback() {
         override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) {
             if (removed.any { it.id == pinnedId }) recorder?.onMicLost()
+            sco?.onInputsChanged()
+        }
+
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { sco?.onInputsChanged() }
+    }
+
+    /** EC10: SCO dropping or the headset disconnecting (out of range, battery). */
+    private val scoReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) {
+            when (i.action) {
+                AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED ->
+                    sco?.onScoState(i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, ScoState.ERROR))
+                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED ->
+                    if (i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1) == BluetoothProfile.STATE_DISCONNECTED) sco?.onHeadsetDisconnected()
+            }
         }
     }
 
     /** The one exit: release everything, publish, leave the foreground, stop. */
     private fun shutdown(end: RecState.Idle) {
         guard.releaseAll()
-        recorder = null; pinnedId = null
+        recorder = null; pinnedId = null; sco = null; bt = null; picking = false
         hub.publish(end)
         stopForeground(STOP_FOREGROUND_REMOVE)
         // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).
@@ -159,6 +217,7 @@ class RecordingService : Service() {
         private const val CHANNEL = "recording"
         private const val NOTE_ID = 1
         private const val END_NOTE_ID = 2
+        private const val BT_WAIT_MS = 1_500L
 
         /** For nativeRecover(serviceAlive) and Home's ＋ New / ■ Stop. */
         @Volatile var running = false

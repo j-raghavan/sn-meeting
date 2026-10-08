@@ -22,6 +22,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import dev.jraghavan.snmeeting.model.MicChoice
+import dev.jraghavan.snmeeting.record.BluetoothState
 import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicPick
 import dev.jraghavan.snmeeting.record.MicSelector
@@ -46,6 +47,7 @@ class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
     private var rec: RecState = RecState.Idle(null, null)
     private var unobserve: (() -> Unit)? = null
+    private var bt: BluetoothState? = null
 
     // Ticks once a second while recording — e-ink friendly (no faster redraws).
     private val tick = object : Runnable {
@@ -202,6 +204,7 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, handler)
+        bt = BluetoothState(this, handler) { if (!rec.busy) render() }.also { it.open() }
         unobserve = RecordingService.hub.observe { rec = it; render() }
         handler.post(tick)
     }
@@ -209,6 +212,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         handler.removeCallbacks(tick)
         unobserve?.invoke(); unobserve = null
+        bt?.close(); bt = null
         getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(deviceCallback)
         super.onStop()
     }
@@ -221,7 +225,10 @@ class MainActivity : Activity() {
     }
 
     /** The mic a new meeting would use now, or why there is none (F2-FR2). */
-    private fun pick(): MicPick = MicSelector.pick(usbInputs(getSystemService(AudioManager::class.java)), BtSnapshot.NONE, MicChoice.Auto)
+    private fun pick(): MicPick {
+        val am = getSystemService(AudioManager::class.java)
+        return MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, MicChoice.Auto)
+    }
 
     /** ＋ New starts the service; ■ Stop asks it to stop. The hub reports what happened. */
     private fun toggle() {
