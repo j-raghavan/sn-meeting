@@ -206,6 +206,7 @@ fn bad_role_provider_in_file_does_not_block_other_patches() {
     let ctx = settings::Ctx {
         storage_root: d.path(),
         key_status: &ks,
+        secrets: &[],
     };
     let next = settings::apply(&current, &serde_json::json!({"mic": "auto"}), &ctx).unwrap();
     assert_eq!(next.transcribe, current.transcribe);

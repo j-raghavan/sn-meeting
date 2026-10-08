@@ -334,9 +334,15 @@ impl App {
                 return json!({"error": e, "field": null}).to_string();
             }
             let ks = |p| settings::key_status(&self.core.key_dir, p);
+            let secrets: Vec<String> = Provider::ALL
+                .iter()
+                .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
+                .map(|k| k.expose().to_owned())
+                .collect();
             let ctx = Ctx {
                 storage_root: &self.storage_root,
                 key_status: &ks,
+                secrets: &secrets,
             };
             let next = match settings::apply(&st.settings, &patch, &ctx) {
                 Ok(n) => n,

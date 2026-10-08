@@ -288,6 +288,8 @@ pub fn merge_patch(target: &mut Value, patch: &Value) {
 pub struct Ctx<'a> {
     pub storage_root: &'a Path,
     pub key_status: &'a dyn Fn(Provider) -> KeyStatus,
+    /// Every key value the key files hold: a model override may not contain one (INV2).
+    pub secrets: &'a [String],
 }
 
 /// Merge-patch `patch` onto `current` and validate. `schema` and `previousFolders` are
@@ -359,6 +361,15 @@ fn check_role(
         && !model_ok(m)
     {
         return Err(err(mf, "model name is invalid"));
+    }
+    // A key pasted into the model field would be stored and shown; never echo it.
+    if let Some(m) = &rs.model
+        && ctx
+            .secrets
+            .iter()
+            .any(|k| !k.is_empty() && m.contains(k.as_str()))
+    {
+        return Err(err(mf, "that is an API key, not a model name"));
     }
     let Some(p) = rs.provider else {
         return Ok(());

@@ -307,3 +307,22 @@ fn key_files_with_every_fixture_key_never_leak_into_settings() {
     );
     assert_no_key(&e.saved());
 }
+
+#[test]
+fn a_key_typed_as_model_override_is_refused() {
+    // INV2: a key pasted into the model field is never stored or echoed.
+    let e = Env::new();
+    openai_only(&e);
+    let app = e.app();
+    for model in [OA.to_owned(), format!("x{OA}y")] {
+        let r = set(&app, json!({"summarise": {"model": model}}));
+        assert_eq!(
+            r,
+            json!({"error": "that is an API key, not a model name", "field": "summarise.model"})
+        );
+    }
+    assert!(!e.saved().contains(OA));
+    // A model that merely shares a few characters is fine.
+    let r = set(&app, json!({"summarise": {"model": "sk-test"}}));
+    assert_eq!(r["settings"]["summarise"]["model"], "sk-test");
+}
