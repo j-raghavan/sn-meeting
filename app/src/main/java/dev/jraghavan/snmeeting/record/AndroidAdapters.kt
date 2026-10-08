@@ -47,28 +47,45 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
     private var path: String? = null
     private var routing: AudioRouting.OnRoutingChangedListener? = null
 
+    /** A configured recorder; released again if any step throws (setAudioSource can, S11). */
     @Suppress("DEPRECATION") // MediaRecorder(Context) is API 31+ and crashed on this device (F2 Facts)
-    private fun configured(spec: AudioSpec, source: InputSource, deviceId: Int, out: String): MediaRecorder =
-        MediaRecorder().apply {
-            setAudioSource(if (source == InputSource.MIC) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION)
-            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            setAudioChannels(1)
-            setAudioSamplingRate(spec.sampleRateHz)
-            setAudioEncodingBitRate(spec.bitrateBps)
-            setOutputFile(out)
-            inputById(am, deviceId)?.let { setPreferredDevice(it) }
+    private fun configured(spec: AudioSpec, source: InputSource, deviceId: Int, out: String): MediaRecorder {
+        val m = MediaRecorder()
+        try {
+            m.setAudioSource(if (source == InputSource.MIC) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+            m.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            m.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            m.setAudioChannels(1)
+            m.setAudioSamplingRate(spec.sampleRateHz)
+            m.setAudioEncodingBitRate(spec.bitrateBps)
+            m.setOutputFile(out)
+            inputById(am, deviceId)?.let { m.setPreferredDevice(it) }
+            return m
+        } catch (e: Exception) {
+            m.release(); throw e
         }
+    }
 
+    /** Building and configuring can throw too: any throw is "no" (S11). */
     override fun accepts(spec: AudioSpec, source: InputSource, deviceId: Int): Boolean {
         val probe = File(ctx.cacheDir, "probe.m4a")
-        val m = configured(spec, source, deviceId, probe.path)
-        return try { m.prepare(); true } catch (e: Exception) { false } finally { m.release(); probe.delete() }
+        return try {
+            val m = configured(spec, source, deviceId, probe.path)
+            try { m.prepare(); true } finally { m.release() }
+        } catch (e: Exception) {
+            false
+        } finally {
+            probe.delete()
+        }
     }
 
     override fun start(spec: AudioSpec, source: InputSource, deviceId: Int, path: String, maxFileBytes: Long, maxDurationMs: Int, events: RecorderEvents) {
         check(r == null) { "already recording" }
-        val m = configured(spec, source, deviceId, path)
+        val m = try {
+            configured(spec, source, deviceId, path)
+        } catch (e: Exception) {
+            File(path).delete(); throw e
+        }
         try {
             m.setMaxFileSize(maxFileBytes)
             m.setMaxDuration(maxDurationMs)

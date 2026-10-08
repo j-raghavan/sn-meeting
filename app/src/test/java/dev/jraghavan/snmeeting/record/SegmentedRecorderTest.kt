@@ -81,6 +81,21 @@ class SegmentedRecorderTest {
         assertEquals(null to SegmentedRecorder.CANT_START, ended)
     }
 
+    @Test fun aProbeThatThrowsIsARecorderThatWontStart() { // S11: setAudioSource can throw
+        val throwing = object : RecorderPort by rec {
+            override fun accepts(spec: AudioSpec, source: InputSource, deviceId: Int): Boolean =
+                throw RuntimeException("setAudioSource failed")
+        }
+        val r = SegmentedRecorder(core, throwing, storage, clock, object : SegmentedRecorder.Listener {
+            override fun onRecording(id: String, startElapsedMs: Long) { log += "recording" }
+            override fun onSegmentStarted(index: Int) {}
+            override fun onEnded(id: String?, message: String) { ended = id to message }
+        })
+        r.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals(emptyList<String>(), log)
+        assertEquals(null to SegmentedRecorder.CANT_START, ended)
+    }
+
     @Test fun aRefusedBeginShowsTheCoreReason() {
         beginReply = CoreResult.Err("already recording meeting-x")
         sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))

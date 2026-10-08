@@ -64,7 +64,9 @@ class SegmentedRecorder(
         check(phase == Phase.IDLE) { "start twice" }
         this.deviceId = deviceId; this.source = source
         phase = Phase.BEGINNING
-        spec = candidates.firstOrNull { rec.accepts(it, source, deviceId) } ?: return abort(CANT_START)
+        // A probe that throws (setAudioSource can) is a spec the encoder won't take.
+        spec = candidates.firstOrNull { runCatching { rec.accepts(it, source, deviceId) }.getOrDefault(false) }
+            ?: return abort(CANT_START)
         core.begin(clock.wallMs(), mic.json(), spec.json()) { r ->
             when (r) {
                 is CoreResult.Err -> abort(r.message)
