@@ -134,6 +134,24 @@ strip_lib() {
     "$strip_bin" --strip-unneeded "$lib" && write_color_output "stripped $LIB" "Green"
 }
 
+# =========================================================
+# confirm_no_recording — F1-FR7: installing force-stops the app, which ends a live recording
+# (seen on the device: installPackageLI killed one). If RecordingService is running, ask first;
+# anything but "y" (including no terminal) cancels.
+# =========================================================
+confirm_no_recording() {
+    local answer="" services
+    # Captured first: under pipefail, `adb | grep -q` can fail on SIGPIPE after a match.
+    services="$(adb_dev shell dumpsys activity services "$PKG_ID" 2>/dev/null || true)"
+    grep -q RecordingService <<< "$services" || return 0
+    write_color_output "A recording is in progress on the device; installing will stop it." "Yellow"
+    read -r -p "Install anyway? [y/N] " answer || true
+    case "$answer" in
+        y|Y|yes|YES) write_color_output "Installing over the running recording" "Yellow" ;;
+        *) die "Install cancelled; the recording is still running" ;;
+    esac
+}
+
 main() {
     local root; root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local variant="release" install=0 gates=1
@@ -167,6 +185,7 @@ main() {
 
     if [[ "$install" == "1" ]]; then
         command -v adb >/dev/null 2>&1 || die "adb not found"
+        confirm_no_recording
         adb_dev install -r "$apk" || die "adb install failed (see --help for adb over Wi-Fi)"
         adb_dev shell pm grant "$PKG_ID" android.permission.RECORD_AUDIO
         adb_dev shell appops set "$PKG_ID" MANAGE_EXTERNAL_STORAGE allow
