@@ -21,7 +21,10 @@ import android.widget.LinearLayout
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.MicChoice
+import dev.jraghavan.snmeeting.model.SettingsPatch
+import dev.jraghavan.snmeeting.model.SettingsView
 import dev.jraghavan.snmeeting.record.BluetoothState
 import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicPick
@@ -42,12 +45,15 @@ class MainActivity : Activity() {
     private lateinit var timer: TextView
     private lateinit var status: TextView
     private lateinit var micName: TextView
+    private lateinit var micHint: TextView
     private lateinit var todoList: LinearLayout
     private lateinit var todoTitle: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var rec: RecState = RecState.Idle(null, null)
     private var unobserve: (() -> Unit)? = null
     private var bt: BluetoothState? = null
+    /** settings.mic, read on resume (F2-FR8); Automatic until the core answers. */
+    private var micChoice: MicChoice = MicChoice.Auto
 
     // Ticks once a second while recording — e-ink friendly (no faster redraws).
     private val tick = object : Runnable {
@@ -67,6 +73,7 @@ class MainActivity : Activity() {
 
     private fun buildView(): View {
         micName = ui.body("", 20f)
+        micHint = ui.note("", 13f).apply { visibility = View.GONE }
         timer = ui.body("", 44f).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         button = ui.pill("＋  New", size = 20f) { toggle() }
         status = ui.note("", 15f).apply { gravity = Gravity.CENTER }
@@ -82,6 +89,9 @@ class MainActivity : Activity() {
             addView(ui.card().apply {
                 addView(ui.eyebrow("Microphone"))
                 addView(micName, ui.wrap().apply { topMargin = ui.dim(6) })
+                addView(micHint, ui.wrap().apply { topMargin = ui.dim(4) })
+                isClickable = true
+                setOnClickListener { switchMic() }
             })
             addView(ui.spacer(ui.dim(28)))
             addView(timer)
@@ -222,12 +232,25 @@ class MainActivity : Activity() {
         ensurePermissions()
         render()
         fillTodos() // a to-do may have been ticked on the meeting screen
+        CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
+        }
+    }
+
+    /** F2-FR8: with two mics, tapping the card switches to the other and remembers it by name. */
+    private fun switchMic() {
+        if (rec.busy) return // the mic can't change mid-meeting
+        val next = pick().toggled() ?: return
+        micChoice = next; render()
+        CoreJobs.run({ NativeBridge.nativeSetSettings(SettingsPatch.mic(next)) }) { json ->
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; render() } }
+        }
     }
 
     /** The mic a new meeting would use now, or why there is none (F2-FR2). */
     private fun pick(): MicPick {
         val am = getSystemService(AudioManager::class.java)
-        return MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, MicChoice.Auto)
+        return MicSelector.pick(usbInputs(am), bt?.snapshot(am) ?: BtSnapshot.NONE, micChoice)
     }
 
     /** ＋ New starts the service; ■ Stop asks it to stop. The hub reports what happened. */
@@ -239,7 +262,7 @@ class MainActivity : Activity() {
         if (!ensurePermissions()) return
         val p = pick()
         if (!p.canRecord) return render()
-        RecordingService.start(this, MicChoice.Auto)
+        RecordingService.start(this, micChoice)
     }
 
     private fun render() {
@@ -255,6 +278,9 @@ class MainActivity : Activity() {
             is RecState.Recording -> r.mic
             else -> p.chosen?.label ?: p.reason
         }
+        val canSwitch = !r.busy && p.toggled() != null
+        micHint.visibility = if (canSwitch) View.VISIBLE else View.GONE
+        micHint.text = "Tap to switch microphone"
         status.text = when (r) {
             is RecState.Starting -> "Connecting the microphone…"
             is RecState.Recording -> "Recording. The screen can sleep; it carries on."
