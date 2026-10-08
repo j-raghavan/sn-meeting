@@ -200,4 +200,28 @@ class SegmentedRecorderTest {
         events.onRoutedTo(1)
         assertEquals("finish 0 'mic disconnected' discard=false", log.last())
     }
+
+    @Test fun storageFullAtTheLimit() { // EC5
+        startUsb(); free = 5_000_000
+        now += 800_000; events.onApproachingLimit(); events.onLimitReached()
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~800000", "finish 800000 'storage full' discard=false"), log)
+        assertEquals(id to "Storage full — recording saved", ended)
+    }
+
+    @Test fun aRecorderErrorWithNoRoomIsStorageFull() {
+        startUsb(); now += 1_000; free = 0; events.onError(1)
+        assertEquals("finish 1000 'storage full' discard=false", log.last())
+    }
+
+    @Test fun aRecorderErrorWithRoomIsARecorderError() {
+        startUsb(); events.onError(100)
+        assertEquals("finish 0 'recorder error' discard=false", log.last())
+    }
+
+    @Test fun noRoomToStartRecordsNothing() {
+        free = 11_000_000 // under 10.8 MB + the 1 MB margin
+        sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
+        assertEquals(listOf("close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log.drop(1))
+        assertEquals(null to "Storage full", ended)
+    }
 }

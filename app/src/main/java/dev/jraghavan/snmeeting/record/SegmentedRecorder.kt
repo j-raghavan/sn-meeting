@@ -9,6 +9,7 @@ import java.util.Locale
 enum class EndReason(val note: String, val message: String) {
     USER("", "Saved"),
     MIC_LOST("mic disconnected", "Microphone disconnected — recording saved"),
+    STORAGE_FULL("storage full", "Storage full — recording saved"),
     RECORDER_ERROR("recorder error", "The recorder stopped — recording saved"),
 }
 
@@ -67,6 +68,7 @@ class SegmentedRecorder(
         begun = b
         if (phase != Phase.BEGINNING) return cleanUp(b) // stopped while beginning: leave nothing live
         segBytes = segmentBytes(b, spec)
+        if (lowSpace()) return discard("Storage full")
         try {
             rec.start(spec, source, deviceId, b.firstSegmentPath, segBytes, safetyDurationMs(b), events)
         } catch (e: Exception) {
@@ -87,6 +89,7 @@ class SegmentedRecorder(
     private val events = object : RecorderEvents {
         override fun onApproachingLimit() {
             if (phase != Phase.RECORDING || armed != null) return
+            if (lowSpace()) return // no next file: the limit then ends it as storage full (EC5)
             val next = pathFor(index + 2)
             if (rec.setNext(next)) armed = next // else the limit arrives and we stop + restart
         }
@@ -100,6 +103,7 @@ class SegmentedRecorder(
 
         override fun onLimitReached() {
             if (phase != Phase.RECORDING) return
+            if (lowSpace()) return end(EndReason.STORAGE_FULL)
             // Fallback (R1): stop + restart; each gap < 1 s, measured from offsets and durations.
             closeCurrent(rec.stop())
             val next = pathFor(index + 2)
@@ -113,7 +117,7 @@ class SegmentedRecorder(
         }
 
         override fun onError(what: Int) {
-            end(EndReason.RECORDER_ERROR)
+            end(if (lowSpace()) EndReason.STORAGE_FULL else EndReason.RECORDER_ERROR)
         }
 
         /** F2-FR3: setPreferredDevice is only a preference; any other input is mic loss. */
@@ -175,7 +179,11 @@ class SegmentedRecorder(
 
     private fun abort(message: String) { phase = Phase.ENDED; listener.onEnded(null, message) }
 
+    /** Room for another whole segment plus a margin for the container (EC5). */
+    private fun lowSpace() = storage.usableBytes(begun.firstSegmentPath) < segBytes + RESERVE_BYTES
+
     companion object {
+        const val RESERVE_BYTES = 1_000_000L
         const val CANT_START = "Couldn't start the recorder"
         const val TOO_SHORT = "Too short — nothing saved"
 
