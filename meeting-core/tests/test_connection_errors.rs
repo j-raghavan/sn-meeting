@@ -210,11 +210,13 @@ async fn a_one_line_key_file_does_not_leak() {
         format!("provider=openai\u{2028}key={OA}\u{2028}model=m"),
         format!("provider={OA}\nkey={OA}\nmodel=m"),
         format!("provider=openai\nkey={OA}"),
+        "provider=sk-abcdefghijk\nkey=sk-abcdefghijk\nmodel=m".to_owned(),
     ] {
         std::fs::write(d.path().join("copilot-key-openai.txt"), &body).unwrap();
         // call() asserts no fixture key in the reply.
         let r = call(&c, "summarise", "openai").await;
         assert_eq!(r["status"], "key_file_error", "{body:?}");
+        assert!(!r.to_string().contains("abcdefghijk"), "{r}");
     }
 }
 

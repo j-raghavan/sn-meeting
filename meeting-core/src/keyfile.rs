@@ -128,13 +128,27 @@ fn js_trim(s: &str) -> &str {
     s.trim_matches(|c: char| (c.is_whitespace() && c != '\u{85}') || c == '\u{feff}')
 }
 
-/// The `provider=` value as it may appear in an error: only a plausible provider id is echoed.
+/// Every name a `provider=` line may legitimately hold (the alias table, keyFiles.ts:56-79).
+const KNOWN_PROVIDER_NAMES: [&str; 11] = [
+    "openai",
+    "gpt",
+    "chatgpt",
+    "gemini",
+    "google",
+    "google-gemini",
+    "anthropic",
+    "claude",
+    "claude-ai",
+    "claude-anthropic",
+    "deepseek",
+];
+
+/// The `provider=` value as it may appear in an error: only a known provider name is echoed.
 /// A one-line file (`provider=openai key=sk-… model=m`, or U+2028 separators, which JS trim
-/// strips but does not split on) or `provider=<key>` would otherwise put the key in the message.
+/// strips but does not split on) or `provider=<key>` (even a lowercase one such as
+/// `sk-abcdefghijk`) would otherwise put the key in the message.
 fn echoable(found: &str) -> String {
-    let plausible = (1..=32).contains(&found.len())
-        && found.bytes().all(|b| b.is_ascii_lowercase() || b == b'-');
-    if plausible {
+    if KNOWN_PROVIDER_NAMES.contains(&found) {
         found.to_owned()
     } else {
         "<invalid>".to_owned()
