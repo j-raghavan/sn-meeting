@@ -142,3 +142,30 @@ data class Actions(
         }
     }
 }
+
+/**
+ * Security: the one-time notice before the first job to each provider. It names every provider
+ * the job will send to (Transcribe also summarises when it can), and all of them are then
+ * marked shown in settings.json.
+ */
+data class ProviderNotice(val message: String, val providers: List<String>) {
+    companion object {
+        const val TITLE = "Before it's sent"
+        private const val RETENTION = " Each provider may keep what it receives under its own policy; Meetings can't prevent that."
+
+        fun of(job: Actions.Job, s: SettingsView): ProviderNotice? {
+            val summarise = s.effectiveSummarise.provider.takeIf { s.keys[it]?.usable == true }
+            val transcribe = s.effectiveTranscribe.provider.takeIf { job == Actions.Job.TRANSCRIBE }
+            val involved = listOfNotNull(transcribe, summarise).distinct()
+            if (involved.isEmpty() || involved.all { s.noticeShown[it] == true }) return null
+            val name = Format::providerName
+            val text = when {
+                transcribe == null -> "The transcript is sent to ${name(summarise!!)} using your key."
+                summarise == null -> "The audio is sent to ${name(transcribe)} using your key."
+                transcribe == summarise -> "The audio and its transcript are sent to ${name(transcribe)} using your key."
+                else -> "The audio is sent to ${name(transcribe)}, and the transcript to ${name(summarise)}, using your keys."
+            }
+            return ProviderNotice(text + RETENTION, involved)
+        }
+    }
+}

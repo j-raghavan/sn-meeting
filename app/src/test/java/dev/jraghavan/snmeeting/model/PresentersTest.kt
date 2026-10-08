@@ -111,4 +111,31 @@ class PresentersTest {
         assertTrue(Actions.of(sc(Status.RECORDED), false, found, missing).primaryEnabled) // transcribe needs only its own key
         assertEquals("Not transcribed yet.", Actions.of(sc(Status.RECORDED), false, found, found).note)
     }
+
+    private fun settings(t: String, sm: String, shown: Set<String> = emptySet(), keys: Set<String> = setOf("openai", "gemini", "anthropic")) = SettingsView(
+        MicChoice.Auto, "EXPORT/sn-meeting", emptyList(), RoleChoice(null, null), RoleChoice(null, null), "general",
+        SettingsView.PROVIDERS.associateWith { it in shown }, null, "file", Effective(t, "m", "default"), Effective(sm, "m", "default"),
+        "/s", "general", SettingsView.PROVIDERS.associateWith { if (it in keys) found else missing })
+
+    @Test fun theNoticeNamesEveryProviderTheJobSendsTo() { // Security
+        val both = ProviderNotice.of(Actions.Job.TRANSCRIBE, settings("gemini", "anthropic"))!!
+        assertTrue(both.message.startsWith("The audio is sent to Google Gemini, and the transcript to Anthropic, using your keys."))
+        assertEquals(listOf("gemini", "anthropic"), both.providers)
+        val one = ProviderNotice.of(Actions.Job.TRANSCRIBE, settings("openai", "openai"))!!
+        assertTrue(one.message.startsWith("The audio and its transcript are sent to OpenAI using your key."))
+        assertEquals(listOf("openai"), one.providers)
+        val again = ProviderNotice.of(Actions.Job.SUMMARISE, settings("openai", "anthropic"))!!
+        assertTrue(again.message.startsWith("The transcript is sent to Anthropic using your key."))
+        assertTrue(again.message.endsWith("Meetings can't prevent that."))
+    }
+
+    @Test fun theNoticeIsShownOnce() {
+        assertEquals(null, ProviderNotice.of(Actions.Job.TRANSCRIBE, settings("openai", "anthropic", shown = setOf("openai", "anthropic"))))
+        // A new provider in the job brings it back, naming both.
+        assertEquals(listOf("openai", "anthropic"), ProviderNotice.of(Actions.Job.TRANSCRIBE, settings("openai", "anthropic", shown = setOf("openai")))!!.providers)
+        // No summarise key: Transcribe stops at transcribed, so only the audio provider is named.
+        val audio = ProviderNotice.of(Actions.Job.TRANSCRIBE, settings("openai", "anthropic", keys = setOf("openai")))!!
+        assertEquals(listOf("openai"), audio.providers)
+        assertTrue(audio.message.startsWith("The audio is sent to OpenAI using your key."))
+    }
 }

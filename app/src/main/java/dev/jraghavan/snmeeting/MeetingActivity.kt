@@ -15,6 +15,8 @@ import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.MeetingHeader
 import dev.jraghavan.snmeeting.model.MeetingView
+import dev.jraghavan.snmeeting.model.ProviderNotice
+import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
 import dev.jraghavan.snmeeting.model.Sidecar
 import dev.jraghavan.snmeeting.model.Status
@@ -236,7 +238,7 @@ class MeetingActivity : Activity() {
         gravity = Gravity.CENTER_HORIZONTAL
         progress = null
         a.primary?.let { job ->
-            val pill = ui.pill(job.label, filled = a.primaryEnabled) { if (a.primaryEnabled) start(job) }
+            val pill = ui.pill(job.label, filled = a.primaryEnabled) { if (a.primaryEnabled) confirmThenStart(job) }
             if (!a.primaryEnabled) { pill.setTextColor(ui.textMuted); pill.isClickable = false }
             addView(pill, ui.wrap())
         }
@@ -247,6 +249,17 @@ class MeetingActivity : Activity() {
             if (a.canCancel) addView(ui.pill("Cancel", size = 15f) { cancel() }, ui.wrap().apply { topMargin = ui.dim(12) })
         }
         a.note?.let { addView(ui.note(it, 15f).apply { gravity = Gravity.CENTER }, ui.wrap().apply { topMargin = ui.dim(12) }) }
+    }
+
+    /** Security: the first job to a provider names it once, and nothing is sent without OK. */
+    private fun confirmThenStart(job: Actions.Job) {
+        val notice = settings?.let { ProviderNotice.of(job, it) } ?: return start(job)
+        InkDialog.notice(this, ProviderNotice.TITLE, notice.message, job.label) {
+            scope.core({ NativeBridge.nativeSetSettings(SettingsPatch.noticeShown(notice.providers)) }) { json ->
+                CoreJson.obj(json, SettingsView::from).getOrNull()?.let { settings = it }
+                start(job)
+            }
+        }
     }
 
     /** Runs on the job lane; the result is already in the sidecar, so the screen just re-reads it. */
