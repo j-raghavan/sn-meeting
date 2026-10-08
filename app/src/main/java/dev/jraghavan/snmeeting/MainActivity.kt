@@ -71,10 +71,11 @@ class MainActivity : Activity() {
     /** settings.saveFolder, for the line under ＋ New (F10-FR3). */
     private var saveFolder = "EXPORT/sn-meeting"
 
-    // Ticks once a second while recording — e-ink friendly (no faster redraws).
+    // Ticks once a second while recording, and only then — e-ink friendly (no faster redraws).
     private val tick = object : Runnable {
         override fun run() {
-            (rec as? RecState.Recording)?.let { timer.text = elapsed(it.startElapsedMs) }
+            val r = rec as? RecState.Recording ?: return
+            timer.text = elapsed(r.startElapsedMs)
             handler.postDelayed(this, 1000)
         }
     }
@@ -149,10 +150,14 @@ class MainActivity : Activity() {
         unobserve = RecordingService.hub.observe { next ->
             val changed = next.javaClass != rec.javaClass
             rec = next; render()
-            if (changed) gate.request() // a meeting began or ended: its row changes
+            if (changed) {
+                gate.request() // a meeting began or ended: its row changes
+                handler.removeCallbacks(tick)
+                if (next is RecState.Recording) handler.post(tick)
+            }
         }
         unlisten = LongJobs.lane.onFinished { gate.request() }
-        handler.post(tick)
+        if (rec is RecState.Recording) { handler.removeCallbacks(tick); handler.post(tick) }
     }
 
     override fun onStop() {

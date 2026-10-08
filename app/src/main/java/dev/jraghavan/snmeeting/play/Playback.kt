@@ -31,6 +31,7 @@ interface PlayerPort {
     fun start()
     fun pause()
     fun positionMs(): Long
+    fun seekTo(ms: Long)
     fun release()
 }
 
@@ -43,6 +44,8 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
         private set
     private var index = 0
     private var opened = false
+    /** Where in segment [index] to carry on after [release] (N10: leaving the screen). */
+    private var resumeAt = 0L
 
     val canPlay get() = list.items.isNotEmpty()
 
@@ -50,7 +53,11 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
 
     fun play() {
         if (playing || !canPlay) return
-        if (!opened && !openFrom(index)) return finished()
+        if (!opened) {
+            val (at, from) = resumeAt to index
+            if (!openFrom(index)) return finished()
+            if (at > 0 && index == from) port.seekTo(at) // not into the next one if it was skipped
+        }
         port.start(); playing = true
         onChange()
     }
@@ -62,11 +69,11 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
     }
 
     /** Elapsed time in the whole recording. */
-    fun positionMs(): Long = list.offsetOf(index) + if (opened) port.positionMs() else 0
+    fun positionMs(): Long = list.offsetOf(index) + if (opened) port.positionMs() else resumeAt
 
-    /** Leaving the screen. */
+    /** Leaving the screen: the place is kept, and the next play carries on from it. */
     fun release() {
-        if (opened) port.release()
+        if (opened) { resumeAt = port.positionMs(); port.release() }
         opened = false; playing = false
     }
 
@@ -75,7 +82,7 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
         for (i in from until list.items.size) {
             if (opened) { port.release(); opened = false }
             if (port.open(list.items[i].path) { next() }) {
-                index = i; opened = true
+                index = i; opened = true; resumeAt = 0
                 return true
             }
         }
@@ -93,7 +100,7 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
 
     private fun finished() {
         release()
-        index = 0
+        index = 0; resumeAt = 0
         onChange()
     }
 }

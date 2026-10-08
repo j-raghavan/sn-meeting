@@ -42,6 +42,10 @@ class RecordingService : Service() {
 
     /** Set in onDestroy: a late shutdown then only publishes (S12). */
     @Volatile private var destroyed = false
+    /** The newest start: stopSelf(lastStartId) never stops a service a later start wants (N10). */
+    @Volatile private var lastStartId = 0
+    /** The ongoing notification while a recording is under way; null once it ended. */
+    @Volatile private var shown: Notification? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -53,10 +57,13 @@ class RecordingService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         when (intent?.action) {
             ACTION_START -> {
-                // Foreground first: within 5 s of startForegroundService, before any work.
-                startForeground(NOTE_ID, notification("Starting…", null), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+                // Foreground first: within 5 s of startForegroundService, before any work. A
+                // second start while one is under way keeps the notification it already shows.
+                startForeground(NOTE_ID, shown ?: notification("Starting…", null).also { shown = it },
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
                 val choice = MicChoice.of(intent.getStringExtra(EXTRA_MIC))
                 h.post { begin(choice) }
             }
@@ -95,7 +102,8 @@ class RecordingService : Service() {
             return Cancel { unregisterReceiver(scoReceiver) }
         }
         override fun publish(s: RecState) = hub.publish(s)
-        override fun showRecording(label: String, startElapsedMs: Long) = notify(notification(label, startElapsedMs))
+        override fun showRecording(label: String, startElapsedMs: Long) =
+            notify(notification(label, startElapsedMs).also { shown = it })
         override fun ended(end: RecState.Idle) = shutdown(end)
     }
 
@@ -118,7 +126,7 @@ class RecordingService : Service() {
 
     /** The one exit, after the session released everything: leave the foreground, stop. */
     private fun shutdown(end: RecState.Idle) {
-        session = null
+        session = null; shown = null
         if (destroyed) return // a late reply after onDestroy (S12): nothing left to stop
         stopForeground(STOP_FOREGROUND_REMOVE)
         // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).
@@ -126,7 +134,7 @@ class RecordingService : Service() {
         if (reason != null && reason.leavesNotice) {
             getSystemService(NotificationManager::class.java).notify(END_NOTE_ID, ended(reason.message))
         }
-        stopSelf()
+        stopSelf(lastStartId)
     }
 
     override fun onDestroy() {

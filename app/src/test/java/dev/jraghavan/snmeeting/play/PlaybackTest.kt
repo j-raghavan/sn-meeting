@@ -20,6 +20,7 @@ class PlaybackTest {
         override fun start() { log += "start" }
         override fun pause() { log += "pause" }
         override fun positionMs() = pos
+        override fun seekTo(ms: Long) { log += "seek $ms"; pos = ms }
         override fun release() { log += "release" }
     }
     private val list = SegmentPlaylist(listOf(SegmentPlaylist.Item("a", 900_000), SegmentPlaylist.Item("b", 900_000), SegmentPlaylist.Item("c", 60_000)))
@@ -53,6 +54,20 @@ class PlaybackTest {
         assertTrue(p.playing)
         p.release()
         assertEquals("release", log.last())
+    }
+
+    @Test fun leavingTheScreenKeepsThePlaceInTheSegment() { // N10
+        p.play(); done!!() // into b
+        pos = 42_000
+        p.release()
+        assertEquals(900_000 + 42_000, p.positionMs())
+        log.clear()
+        p.play()
+        assertEquals(listOf("open b", "seek 42000", "start"), log)
+        // Played to the end: it starts over from the top.
+        done!!(); done!!()
+        log.clear(); p.play()
+        assertEquals(listOf("open a", "start"), log)
     }
 
     @Test fun anUnplayableSegmentIsSkipped() {
