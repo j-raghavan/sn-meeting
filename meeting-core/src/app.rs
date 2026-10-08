@@ -25,6 +25,8 @@ pub struct App {
     write: Mutex<()>,
     /// Transcribe/summarise jobs in flight, with their cancel flags (F5-FR7).
     pub jobs: crate::jobs::Registry,
+    /// Whole-call budgets for jobs (F5-FR7); only tests change them.
+    pub budgets: crate::jobs::Budgets,
 }
 
 #[derive(Debug)]
@@ -54,6 +56,7 @@ impl App {
             }),
             write: Mutex::new(()),
             jobs: Default::default(),
+            budgets: Default::default(),
         }
     }
 

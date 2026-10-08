@@ -96,6 +96,7 @@ impl App {
             summarise_fallback,
             default_template: s.default_template.clone(),
             templates: crate::templates::builtins(),
+            budgets: self.budgets,
         })
     }
 
@@ -103,6 +104,9 @@ impl App {
     /// nothing was started (busy, no key, not offered in this status). The final status is in
     /// the sidecar before this returns (F5-FR7).
     pub fn run_job_json(&self, id: &str, job: Job) -> String {
+        if !crate::sidecar::is_valid_id(id) {
+            return error_json("invalid meeting id");
+        }
         let Some(guard) = self.jobs.start(id) else {
             return error_json("meeting is busy");
         };

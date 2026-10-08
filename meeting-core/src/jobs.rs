@@ -21,8 +21,31 @@ const UNKNOWN_SEGMENT_MS: u64 = 15 * 60 * 1000;
 
 /// `60 s + duration / 4`: a 15-minute segment allows 4 min 45 s.
 pub fn transcribe_timeout(segment_ms: Option<u64>) -> Duration {
-    let ms = segment_ms.unwrap_or(UNKNOWN_SEGMENT_MS);
-    Duration::from_secs(60) + Duration::from_millis(ms / 4)
+    Budgets::default().transcribe(segment_ms)
+}
+
+/// A job's whole-call budgets. Fixed on the device; tests shorten them to reach a timeout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Budgets {
+    /// Added to a quarter of the segment's duration.
+    pub transcribe_base: Duration,
+    pub summarise: Duration,
+}
+
+impl Default for Budgets {
+    fn default() -> Self {
+        Budgets {
+            transcribe_base: Duration::from_secs(60),
+            summarise: SUMMARISE_TIMEOUT,
+        }
+    }
+}
+
+impl Budgets {
+    pub fn transcribe(&self, segment_ms: Option<u64>) -> Duration {
+        let ms = segment_ms.unwrap_or(UNKNOWN_SEGMENT_MS);
+        self.transcribe_base + Duration::from_millis(ms / 4)
+    }
 }
 
 /// The wait before the retry: `Retry-After` (5 s when absent), at most 30 s.

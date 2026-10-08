@@ -70,4 +70,20 @@ object NativeBridge {
     /** Crash recovery on launch and resume: `{recovered: [id], measure: [{id, index, path}],
      *  flagged: [{id, index, flag}]}`. Measure each listed file and close it. */
     external fun nativeRecover(serviceAlive: Boolean): String
+
+    // Providers (F5). Not wired into the UI until M7.
+
+    /**
+     * Transcribes the segments not yet done, then summarises. Blocking for minutes: call it on
+     * a job thread, never the UI thread. Progress is in the sidecar (poll [nativeGetMeeting]).
+     * `{meeting: <sidecar>}` once a job ran (its status says how it ended), or `{error}` when
+     * nothing started ("meeting is busy", "Add copilot-key-openai.txt to MyStyle/SnCopilot").
+     */
+    external fun nativeTranscribe(id: String): String
+
+    /** "Summarise again" on the stored transcript; blocking, same replies as [nativeTranscribe]. */
+    external fun nativeSummarise(id: String): String
+
+    /** Stops the meeting's running job: `{cancelled: bool}`. Returns at once, from any thread. */
+    external fun nativeCancel(id: String): String
 }

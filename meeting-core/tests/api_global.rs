@@ -31,6 +31,9 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ),
         ("deleteMeeting", api::delete_meeting("x")),
         ("recover", api::recover(true)),
+        ("transcribe", api::transcribe("x")),
+        ("summarise", api::summarise("x")),
+        ("cancel", api::cancel("x")),
     ]
 }
 
@@ -79,6 +82,16 @@ fn init_then_the_app_exports() {
         parse(&api::test_connection("x", "openai")),
         json!({"error": "unknown role"})
     );
+    // Jobs check the id before anything else (no key folder is read for a bad one).
+    assert_eq!(
+        parse(&api::transcribe("x")),
+        json!({"error": "invalid meeting id"})
+    );
+    assert_eq!(
+        parse(&api::summarise("../x")),
+        json!({"error": "invalid meeting id"})
+    );
+    assert_eq!(parse(&api::cancel("x")), json!({"cancelled": false}));
     // nativeInit loaded settings: none on this host, so defaults and no keys.
     let s = parse(&api::get_settings());
     assert_eq!(s["origin"], "defaults");

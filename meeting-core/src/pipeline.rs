@@ -36,6 +36,7 @@ pub struct JobPlan {
     pub default_template: String,
     /// The effective templates at job start (F11-FR3).
     pub templates: Vec<crate::templates::Template>,
+    pub budgets: jobs::Budgets,
 }
 
 /// Why a job stopped without a final status of its own.
@@ -102,7 +103,7 @@ pub async fn transcribe(
             Ok(b) => b,
             Err(msg) => return fail(msg),
         };
-        let budget = jobs::transcribe_timeout(seg.duration_ms);
+        let budget = plan.budgets.transcribe(seg.duration_ms);
         let r = jobs::with_retry(cancel, budget, || {
             let audio = AudioIn {
                 bytes: bytes.clone(),

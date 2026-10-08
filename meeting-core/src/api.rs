@@ -200,6 +200,21 @@ pub fn recover(service_alive: bool) -> String {
     with_app(|app| app.recover_json(service_alive))
 }
 
+/// `nativeTranscribe(id)` (F5): pending segments, then summarise. Blocking for minutes.
+pub fn transcribe(id: &str) -> String {
+    with_app(|app| app.run_job_json(id, crate::app::Job::Transcribe))
+}
+
+/// `nativeSummarise(id)`: "Summarise again" (F5-FR8). Blocking.
+pub fn summarise(id: &str) -> String {
+    with_app(|app| app.run_job_json(id, crate::app::Job::Summarise))
+}
+
+/// `nativeCancel(id)`: `{"cancelled": bool}`; returns at once, from any thread.
+pub fn cancel(id: &str) -> String {
+    with_app(|app| app.cancel_json(id))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

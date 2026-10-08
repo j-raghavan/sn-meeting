@@ -68,7 +68,7 @@ pub async fn summarise(
         let ask = &ask;
         async move {
             let f = || providers::complete_json(&plan.http, &plan.endpoints, key, &m, ask);
-            jobs::with_retry(cancel, jobs::SUMMARISE_TIMEOUT, f).await
+            jobs::with_retry(cancel, plan.budgets.summarise, f).await
         }
     };
     let mut ran = model.clone();
