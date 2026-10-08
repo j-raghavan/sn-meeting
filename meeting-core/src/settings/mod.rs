@@ -196,11 +196,56 @@ pub fn load(path: &Path) -> (Settings, Origin) {
             (Settings::default(), Origin::Defaults)
         }
         Ok(bytes) if newer(&bytes) => (Settings::default(), Origin::Newer),
-        Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
-            Ok(s) => (sanitised(s), Origin::File),
-            Err(_) => (Settings::default(), keep_bad(path)),
+        Ok(bytes) => match lenient(&bytes) {
+            Some(s) => (sanitised(s), Origin::File),
+            None => (Settings::default(), keep_bad(path)),
         },
         Err(_) => (Settings::default(), keep_bad(path)),
+    }
+}
+
+/// The file's settings, field by field: a value of the wrong type (a hand edit) reads as that
+/// field's default and every other field is kept, so one bad value can't lose the save folders.
+/// `None` when it isn't a settings file at all: not JSON, not an object, or a `schema` that
+/// isn't a number.
+fn lenient(bytes: &[u8]) -> Option<Settings> {
+    let Ok(Value::Object(file)) = serde_json::from_slice::<Value>(bytes) else {
+        return None;
+    };
+    if file.get("schema").is_some_and(|v| !v.is_u64()) {
+        return None;
+    }
+    let mut acc = serde_json::to_value(Settings::default()).ok()?;
+    for (k, v) in &file {
+        accept(&mut acc, &[k.as_str()], v);
+    }
+    serde_json::from_value(acc).ok()
+}
+
+/// Put `v` at `path` in `acc` if the result still reads as Settings; otherwise try an object's
+/// members one by one (a bad `noticeShown.openai` keeps `noticeShown.gemini`).
+fn accept(acc: &mut Value, path: &[&str], v: &Value) {
+    let mut trial = acc.clone();
+    let mut slot = &mut trial;
+    for k in path {
+        if !slot.is_object() {
+            *slot = Value::Object(Map::new());
+        }
+        slot = slot
+            .as_object_mut()
+            .expect("made an object above")
+            .entry((*k).to_owned())
+            .or_insert(Value::Null);
+    }
+    *slot = v.clone();
+    if serde_json::from_value::<Settings>(trial.clone()).is_ok() {
+        *acc = trial;
+    } else if let Value::Object(members) = v {
+        for (k, m) in members {
+            let mut sub = path.to_vec();
+            sub.push(k);
+            accept(acc, &sub, m);
+        }
     }
 }
 

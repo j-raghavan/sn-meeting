@@ -245,3 +245,46 @@ fn newer_schema_is_not_silently_rewritten() {
     fs::write(&p, r#"{"saveFolder": "Notes"}"#).unwrap();
     assert_eq!(load(&p).1, Origin::File);
 }
+
+#[test]
+fn a_wrongly_typed_field_reads_as_its_default_and_keeps_the_folders() {
+    // A hand edit with one bad value must not reset everything: losing saveFolder and
+    // previousFolders would make meetings vanish from Home.
+    let d = tempfile::tempdir().unwrap();
+    let p = settings::path_in(d.path());
+    let v = json!({
+        "schema": 1, "mic": "bt:Jabra", "saveFolder": "Document/Meetings",
+        "previousFolders": ["EXPORT/sn-meeting"],
+        "transcribe": {"provider": "gemini", "model": 42},
+        "summarise": "anthropic",
+        "defaultTemplate": "standup",
+        "noticeShown": {"openai": "yes", "gemini": true},
+        "debug": {"segmentMs": -5},
+        "extra": {"kept": true}
+    });
+    fs::write(&p, v.to_string()).unwrap();
+    let (s, origin) = load(&p);
+    assert_eq!(origin, Origin::File);
+    assert_eq!(s.save_folder, "Document/Meetings");
+    assert_eq!(s.previous_folders, ["EXPORT/sn-meeting"]);
+    assert_eq!(s.mic, settings::MicChoice::Bluetooth("Jabra".into()));
+    assert_eq!(
+        s.transcribe.provider,
+        Some(meeting::keyfile::Provider::Gemini)
+    );
+    assert_eq!(s.transcribe.model, None);
+    assert_eq!(s.summarise, Settings::default().summarise);
+    assert_eq!(s.default_template, "standup");
+    assert!(!s.notice_shown.openai);
+    assert!(s.notice_shown.gemini);
+    assert_eq!(s.debug.segment_ms, None);
+    assert!(!d.path().join("settings.json.bad").exists());
+    // And the other way round: the folders themselves wrongly typed read as their defaults.
+    let v = json!({"schema": 1, "saveFolder": 7, "previousFolders": "EXPORT", "defaultTemplate": "lecture"});
+    fs::write(&p, v.to_string()).unwrap();
+    let (s, origin) = load(&p);
+    assert_eq!(origin, Origin::File);
+    assert_eq!(s.save_folder, "EXPORT/sn-meeting");
+    assert!(s.previous_folders.is_empty());
+    assert_eq!(s.default_template, "lecture");
+}
