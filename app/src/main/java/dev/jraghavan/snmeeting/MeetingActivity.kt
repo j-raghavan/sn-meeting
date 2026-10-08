@@ -328,6 +328,13 @@ class MeetingActivity : Activity() {
 
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(32)))
+            if (actions?.canDelete == true) {
+                addView(ui.eyebrow("Delete meeting", ui.textMuted).apply {
+                    gravity = Gravity.CENTER; setPadding(0, ui.dim(8), 0, ui.dim(20))
+                    isClickable = true
+                    setOnClickListener { delete(v) }
+                }, ui.fullWidth())
+            }
             addView(ui.closingMark())
         }
         show(column)
@@ -338,6 +345,22 @@ class MeetingActivity : Activity() {
         scope.core({ NativeBridge.nativeSetTodoDone(id, t.id, !t.done) }) { json ->
             (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't change the to-do", it.message) }
             load()
+        }
+    }
+
+    /** F7-FR4: after confirmation, the core removes the audio, sidecar and transcript. */
+    private fun delete(v: MeetingView) {
+        val what = Format.plural(v.meeting.segments.size, "audio file")
+        InkDialog.confirm(this, "Delete this meeting?",
+            "Its $what, transcript and to-dos are removed from ${v.dir.substringAfter("/storage/emulated/0/")}. This can't be undone.",
+            "Delete") {
+            playback?.release()
+            scope.core({ NativeBridge.nativeDeleteMeeting(id) }) { json ->
+                when (val r = CoreJson.ok(json)) {
+                    is CoreResult.Ok -> finish()
+                    is CoreResult.Err -> InkDialog.error(this, "Couldn't delete it", r.message)
+                }
+            }
         }
     }
 
