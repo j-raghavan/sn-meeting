@@ -10,6 +10,9 @@ use serde_json::{Map, Value, json};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+mod run;
+pub use run::Job;
+
 #[derive(Debug)]
 pub struct App {
     pub core: Core,
@@ -20,6 +23,8 @@ pub struct App {
     /// The one sidecar write lock (F3-FR2): held across load → change → write of every
     /// mutation, so two threads never lose or tear each other's write. Taken before `state`.
     write: Mutex<()>,
+    /// Transcribe/summarise jobs in flight, with their cancel flags (F5-FR7).
+    pub jobs: crate::jobs::Registry,
 }
 
 #[derive(Debug)]
@@ -48,6 +53,7 @@ impl App {
                 live: Liveness::default(),
             }),
             write: Mutex::new(()),
+            jobs: Default::default(),
         }
     }
 
@@ -71,13 +77,19 @@ impl App {
         (st.settings.clone(), st.origin)
     }
 
-    /// What is live right now.
+    /// What is live right now: the recording, and every meeting with a job in flight.
     pub fn liveness(&self) -> Liveness {
-        self.state().live.clone()
+        Self::live_of(&self.state(), &self.jobs)
     }
 
-    /// Mark a transcribe/summarise job as running (`true`) or finished. M4's jobs call this;
-    /// recovery and delete leave a running job's meeting alone.
+    fn live_of(st: &State, jobs: &crate::jobs::Registry) -> Liveness {
+        let mut live = st.live.clone();
+        live.jobs.extend(jobs.running());
+        live
+    }
+
+    /// Mark a job run outside the registry as running (`true`) or finished; recovery and
+    /// delete leave a running job's meeting alone. Registry jobs are counted without it.
     pub fn set_job(&self, id: &str, running: bool) {
         let mut st = self.state();
         if running {
@@ -208,7 +220,7 @@ impl App {
         let st = self.state();
         let lib = self.library_of(&st.settings);
         reply(
-            lib.delete(id, &st.live)
+            lib.delete(id, &Self::live_of(&st, &self.jobs))
                 .map(|removed| json!({"ok": true, "removed": removed})),
         )
     }
@@ -221,7 +233,7 @@ impl App {
             st.live.recording = None;
         }
         let lib = self.library_of(&st.settings);
-        json!(lib.recover(&st.live)).to_string()
+        json!(lib.recover(&Self::live_of(&st, &self.jobs))).to_string()
     }
 
     /// Every provider's key status, read fresh (the user may add a file at any time).
