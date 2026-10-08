@@ -41,7 +41,12 @@ pub fn parse(text: &str) -> Result<Template, TemplateError> {
     if text.len() > MAX_FILE_BYTES {
         return Err(err("The file is larger than 64 KB", None, None));
     }
-    let text = text.replace("\r\n", "\n");
+    // A desktop editor's UTF-8 BOM, and CRLF or old-Mac lone-CR line endings, read as plain lines.
+    let text = text
+        .strip_prefix('\u{feff}')
+        .unwrap_or(text)
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
     let lines: Vec<&str> = text.split('\n').collect();
     if lines[0].trim_end() != "---" {
         let e = "The file must start with a --- line";

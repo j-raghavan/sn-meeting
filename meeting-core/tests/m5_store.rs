@@ -167,3 +167,33 @@ fn a_job_uses_the_effective_set_taken_at_its_start() {
     assert_eq!(t.instructions, "Customised.");
     assert_eq!(app.templates.dir(), e.root.path().join(USER_DIR));
 }
+
+#[test]
+fn a_bom_user_copy_is_used() {
+    // Desktop editors may save with a UTF-8 BOM, or with old-Mac lone-CR line endings.
+    let e = Env::new();
+    let dir = e.root.path().join(USER_DIR);
+    let mut su = standup();
+    su.instructions = "Saved with a BOM.".into();
+    write(&dir, "standup.md", &format!("\u{feff}{}", to_file(&su)));
+    let mut retro = standup();
+    retro.id = "retro".into();
+    retro.name = "Retro".into();
+    write(&dir, "retro.md", &to_file(&retro).replace('\n', "\r"));
+    let l = Store::new(dir).list();
+    let get = |id: &str| l.iter().find(|x| x.template.id == id).unwrap().clone();
+    let st = get("standup");
+    assert_eq!(
+        (st.origin, st.problem.clone()),
+        (Origin::Customised, None),
+        "{st:?}"
+    );
+    assert_eq!(st.template.instructions, "Saved with a BOM.");
+    let r = get("retro");
+    assert_eq!(
+        (r.origin, r.problem.clone()),
+        (Origin::Yours, None),
+        "{r:?}"
+    );
+    assert_eq!(r.template.layout, standup().layout);
+}
