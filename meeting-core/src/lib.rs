@@ -6,6 +6,7 @@ pub mod keyfile;
 pub mod providers;
 pub mod runtime;
 pub mod scrub;
+pub mod segment;
 pub mod settings;
 pub mod sidecar;
 pub mod status;
