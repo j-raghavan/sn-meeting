@@ -35,16 +35,39 @@ pub fn is_tmp_of(name: &str, target: &str) -> bool {
             })
 }
 
+/// A new tmp file, never an existing one: a file or symlink already at `tmp` is refused
+/// (`AlreadyExists`), so a planted link can't make the write truncate what it points to.
+fn create_tmp(tmp: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(tmp)
+}
+
+/// Tmp names tried before giving up when each is already taken.
+const TMP_TRIES: usize = 8;
+
 /// Write `bytes` to `path` atomically. A crash leaves either the old file or the new one; a
 /// stray `.tmp` is ignored by readers (F3-AC3). Concurrent writers each use their own tmp, so
 /// the file is always one writer's whole content; callers that read-modify-write still need
 /// a lock to not lose each other's changes (`App`'s write lock).
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    let tmp = tmp_path(path);
-    let written = std::fs::File::create(&tmp).and_then(|mut f| {
-        f.write_all(bytes)?;
-        f.sync_all()
-    });
+    let mut tmp = tmp_path(path);
+    let mut file = create_tmp(&tmp);
+    for _ in 1..TMP_TRIES {
+        match &file {
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                tmp = tmp_path(path);
+                file = create_tmp(&tmp);
+            }
+            _ => break,
+        }
+    }
+    let Ok(mut f) = file else {
+        return file.map(|_| ()); // never created: nothing of ours to remove
+    };
+    let written = f.write_all(bytes).and_then(|()| f.sync_all());
+    drop(f);
     if let Err(e) = written.and_then(|()| std::fs::rename(&tmp, path)) {
         let _ = std::fs::remove_file(&tmp); // a unique name would otherwise linger
         return Err(e);
@@ -156,6 +179,33 @@ mod tests {
         );
         let left: Vec<_> = std::fs::read_dir(d.path()).unwrap().collect();
         assert_eq!(left.len(), 1, "no tmp files left behind");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_tmp_link_is_never_written_through() {
+        // N2: a symlink at the tmp path must not let the write truncate what it points to.
+        let d = tempfile::tempdir().unwrap();
+        let victim = d.path().join("victim");
+        std::fs::write(&victim, b"keep me").unwrap();
+        let p = d.path().join("a.json");
+        let t = tmp_path(&p);
+        std::os::unix::fs::symlink(&victim, &t).unwrap();
+        assert_eq!(
+            create_tmp(&t).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        // write_atomic's next tmp name, planted too: it moves on to a fresh one.
+        let next = {
+            let mut s = p.as_os_str().to_owned();
+            let n = NEXT_TMP.load(Ordering::Relaxed);
+            s.push(format!(".{}-{n}.tmp", std::process::id()));
+            PathBuf::from(s)
+        };
+        std::os::unix::fs::symlink(&victim, &next).unwrap();
+        write_atomic(&p, b"new").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"new");
+        assert_eq!(std::fs::read(&victim).unwrap(), b"keep me");
     }
 
     #[test]
