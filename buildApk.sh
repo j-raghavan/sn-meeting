@@ -9,7 +9,8 @@ set -euo pipefail
 #   2. cargo-ndk  → build the Rust core (libmeeting.so) into app/src/main/jniLibs, prune any
 #                   other .so cargo-ndk copies there, strip with the NDK's llvm-strip
 #   3. gradle     → assembleRelease (or assembleDebug)
-#   4. (opt)      → --install: adb install, grant permissions, launch
+#   4. sizes      → libmeeting.so and APK bytes, and the .so's entry in the APK (F1-FR10)
+#   5. (opt)      → --install: adb install, grant permissions, launch
 #
 # Usage:
 #   ./buildApk.sh                 # gates, then a release build
@@ -29,6 +30,7 @@ PKG_ID="dev.jraghavan.snmeeting"
 ABI="arm64-v8a"          # the Supernote is arm64; nothing else ships (F1-FR1)
 ANDROID_PLATFORM="30"    # Android 11
 LIB="libmeeting.so"
+APK_BUDGET_BYTES=$((25 * 1024 * 1024))   # F1-FR10 recommendation; re-baseline after measuring
 
 write_color_output() {
     local message="${1:-}" color="${2:-}"
@@ -135,6 +137,25 @@ strip_lib() {
 }
 
 # =========================================================
+# report_sizes — F1-FR10: record the .so and APK sizes, and prove the .so is packaged.
+# =========================================================
+report_sizes() {
+    local lib="$1" apk="$2" lib_bytes apk_bytes entry
+    lib_bytes="$(wc -c < "$lib" | tr -d ' ')"
+    apk_bytes="$(wc -c < "$apk" | tr -d ' ')"
+    entry="$(unzip -l "$apk" | grep "lib/$ABI/$LIB" || true)"
+    [[ -n "$entry" ]] || die "lib/$ABI/$LIB is missing from $apk"
+    write_color_output "size: $LIB $lib_bytes bytes ($(mb "$lib_bytes") MB)" "Blue"
+    write_color_output "size: APK $apk_bytes bytes ($(mb "$apk_bytes") MB; budget $(mb "$APK_BUDGET_BYTES") MB)" "Blue"
+    write_color_output "in APK: $(echo "$entry" | sed -E 's/^ +//; s/ +/ /g')" "Blue"
+    if [[ "$apk_bytes" -gt "$APK_BUDGET_BYTES" ]]; then
+        write_color_output "APK is over the F1-FR10 budget" "Yellow"
+    fi
+}
+
+mb() { awk -v b="$1" 'BEGIN { printf "%.2f", b / 1048576 }'; }
+
+# =========================================================
 # confirm_no_recording — F1-FR7: installing force-stops the app, which ends a live recording
 # (seen on the device: installPackageLI killed one). If RecordingService is running, ask first;
 # anything but "y" (including no terminal) cancels.
@@ -182,6 +203,7 @@ main() {
     local apk; apk="$(find "$root/app/build/outputs/apk/$variant" -name '*.apk' -print -quit)"
     [[ -n "$apk" ]] || die "No APK under app/build/outputs/apk/$variant"
     write_color_output "APK: $apk" "Green"
+    report_sizes "$root/app/src/main/jniLibs/$ABI/$LIB" "$apk"
 
     if [[ "$install" == "1" ]]; then
         command -v adb >/dev/null 2>&1 || die "adb not found"
