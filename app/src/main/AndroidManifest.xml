@@ -10,6 +10,15 @@
     <!-- The Rust core calls the provider APIs over HTTPS (Test connection, transcription). -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- F2-FR1: recording runs in a foreground service of type microphone.
+         FOREGROUND_SERVICE_MICROPHONE is required from targetSdk 34. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- The ongoing recording notification. A runtime grant only from API 33; nothing to ask on
+         this API-30 device, but lint requires it at targetSdk 34. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:allowBackup="false"
         android:label="Meetings"
@@ -40,5 +49,11 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- F2-FR1: one recording at a time. Not exported: only our activity and notification start it. -->
+        <service
+            android:name=".record.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 </manifest>

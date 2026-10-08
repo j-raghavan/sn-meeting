@@ -2,8 +2,10 @@ package dev.jraghavan.snmeeting
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Runs blocking core calls off the UI thread (ADR D7): one background thread, so jobs run in
@@ -24,6 +26,15 @@ class Jobs(private val worker: Executor, private val post: (Runnable) -> Unit) {
         }
     }
 
+    /** Fire and forget, still in queue order (the recorder's close/add/finish). Never throws. */
+    fun exec(work: () -> Unit) = worker.execute {
+        try {
+            work()
+        } catch (t: Throwable) {
+            // A broken core can't be reported from here; the next call that replies will say so.
+        }
+    }
+
     companion object {
         /** `{"error": "<exception class>"}`; the class name needs no JSON escaping. */
         fun errorJson(t: Throwable): String = "{\"error\":\"core unavailable: ${t.javaClass.simpleName}\"}"
@@ -37,6 +48,18 @@ object CoreJobs {
         val main = Handler(Looper.getMainLooper())
         Jobs(worker) { main.post(it) }
     }
+    private val initQueued = AtomicBoolean(false)
 
     fun run(work: () -> String, done: (String) -> Unit) = jobs.run(work, done)
+    fun exec(work: () -> Unit) = jobs.exec(work)
+
+    /**
+     * Queues nativeInit once per process, ahead of anything queued after it. Every entry point
+     * (an activity the system restores, the service) calls this first; nativeInit is idempotent.
+     */
+    fun init(appDataDir: String) {
+        if (initQueued.compareAndSet(false, true)) {
+            exec { Log.i("Meetings", "nativeInit: " + NativeBridge.nativeInit(appDataDir)) }
+        }
+    }
 }

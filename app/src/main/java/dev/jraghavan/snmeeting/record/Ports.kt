@@ -77,3 +77,6 @@ interface RecorderCore {
     /** finish, then (if [discard]) nativeDeleteMeeting: a meeting with no audio leaves nothing behind. */
     fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit)
 }
+
+/** Measures a finalised file (MediaMetadataRetriever METADATA_KEY_DURATION); null if unreadable. */
+fun interface DurationPort { fun durationMs(path: String): Long? }

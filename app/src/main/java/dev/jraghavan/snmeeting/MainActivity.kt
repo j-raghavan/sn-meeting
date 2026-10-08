@@ -14,27 +14,29 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
-import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
-import java.io.File
+import dev.jraghavan.snmeeting.model.MicChoice
+import dev.jraghavan.snmeeting.record.BtSnapshot
+import dev.jraghavan.snmeeting.record.MicPick
+import dev.jraghavan.snmeeting.record.MicSelector
+import dev.jraghavan.snmeeting.record.RecState
+import dev.jraghavan.snmeeting.record.RecordingService
+import dev.jraghavan.snmeeting.record.usbInputs
 
 /**
  * Home screen (spec F6) in the Inkwell style (F9): the recorder, the 5 most recent meetings,
- * and open to-dos from every meeting. The recorder is real; the lists show [MockData] until the
- * Rust core's library (F3) exists.
+ * and open to-dos from every meeting. Recording runs in [RecordingService], whose state arrives
+ * through its hub; the lists show [MockData] until they are read from the core.
  */
 class MainActivity : Activity() {
 
-    private val outputDir = File(Environment.getExternalStorageDirectory(), "EXPORT/sn-meeting")
     private lateinit var ui: Inkwell
-    private lateinit var recorder: MeetingRecorder
     private lateinit var button: TextView
     private lateinit var timer: TextView
     private lateinit var status: TextView
@@ -42,12 +44,13 @@ class MainActivity : Activity() {
     private lateinit var todoList: LinearLayout
     private lateinit var todoTitle: TextView
     private val handler = Handler(Looper.getMainLooper())
-    private var startedAt = 0L
+    private var rec: RecState = RecState.Idle(null, null)
+    private var unobserve: (() -> Unit)? = null
 
     // Ticks once a second while recording — e-ink friendly (no faster redraws).
     private val tick = object : Runnable {
         override fun run() {
-            timer.text = elapsed()
+            (rec as? RecState.Recording)?.let { timer.text = elapsed(it.startElapsedMs) }
             handler.postDelayed(this, 1000)
         }
     }
@@ -55,16 +58,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
-        initCore()
-        recorder = MeetingRecorder(this, outputDir)
+        CoreJobs.init(filesDir.absolutePath) // F1-FR5: queued first, so it runs before any other core job
         setContentView(buildView())
         render()
-    }
-
-    /** Starts the Rust core (F1-FR5). Queued first, so it runs before any other core job. */
-    private fun initCore() {
-        val dir = filesDir.absolutePath
-        CoreJobs.run({ NativeBridge.nativeInit(dir) }) { Log.i("Meetings", "nativeInit: $it") }
     }
 
     private fun buildView(): View {
@@ -108,9 +104,7 @@ class MainActivity : Activity() {
                 setImageResource(R.drawable.ic_settings)
                 val p = ui.dp(8); setPadding(p, p, p, p)
                 isClickable = true
-                setOnClickListener {
-                    if (!recorder.isRecording) { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)); overridePendingTransition(0, 0) }
-                }
+                setOnClickListener { startActivity(Intent(this@MainActivity, SettingsActivity::class.java)); overridePendingTransition(0, 0) }
             }, FrameLayout.LayoutParams(ui.dp(40), ui.dp(40), Gravity.TOP or Gravity.END).apply { topMargin = ui.dp(10); marginEnd = ui.dp(10) })
         }
     }
@@ -195,23 +189,26 @@ class MainActivity : Activity() {
     }
 
     private fun openMeeting(id: String) {
-        if (recorder.isRecording) return
         startActivity(Intent(this, MeetingActivity::class.java).putExtra(MeetingActivity.EXTRA_ID, id))
         overridePendingTransition(0, 0)
     }
 
     // Refresh the mic card the moment a USB mic is plugged in or pulled out.
     private val deviceCallback = object : AudioDeviceCallback() {
-        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { if (!recorder.isRecording) render() }
-        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { if (!recorder.isRecording) render() }
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { if (!rec.busy) render() }
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { if (!rec.busy) render() }
     }
 
     override fun onStart() {
         super.onStart()
         getSystemService(AudioManager::class.java).registerAudioDeviceCallback(deviceCallback, handler)
+        unobserve = RecordingService.hub.observe { rec = it; render() }
+        handler.post(tick)
     }
 
     override fun onStop() {
+        handler.removeCallbacks(tick)
+        unobserve?.invoke(); unobserve = null
         getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(deviceCallback)
         super.onStop()
     }
@@ -219,55 +216,48 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         ensurePermissions()
-        if (!recorder.isRecording) render()
+        render()
         fillTodos() // a to-do may have been ticked on the meeting screen
     }
 
-    override fun onDestroy() {
-        handler.removeCallbacks(tick)
-        recorder.stop()
-        super.onDestroy()
-    }
+    /** The mic a new meeting would use now, or why there is none (F2-FR2). */
+    private fun pick(): MicPick = MicSelector.pick(usbInputs(getSystemService(AudioManager::class.java)), BtSnapshot.NONE, MicChoice.Auto)
 
+    /** ＋ New starts the service; ■ Stop asks it to stop. The hub reports what happened. */
     private fun toggle() {
-        if (recorder.isRecording) {
-            handler.removeCallbacks(tick)
-            val file = recorder.stop()
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            render(if (file != null) "Saved " + file.name + "  ·  " + elapsed() else "Too short — nothing saved")
+        if (rec.busy) {
+            if (rec !is RecState.Stopping) RecordingService.stop(this)
             return
         }
         if (!ensurePermissions()) return
-        if (recorder.usbInput() == null) {
-            render("Plug in the USB microphone first")
-            return
-        }
-        try {
-            recorder.start()
-        } catch (e: Exception) {
-            render("Could not start: " + e.message)
-            return
-        }
-        startedAt = SystemClock.elapsedRealtime()
-        // Keep the device awake for the length of the meeting.
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        render("Recording to " + recorder.currentFile?.name)
-        handler.post(tick)
+        val p = pick()
+        if (!p.canRecord) return render()
+        RecordingService.start(this, MicChoice.Auto)
     }
 
-    private fun render(message: String? = null) {
-        val recording = recorder.isRecording
+    private fun render() {
+        val r = rec
+        val p = pick()
         // Idle: white pill (inkread's Open button). Recording: solid black (its Open → button).
-        ui.stylePill(button, if (recording) "■  Stop" else "＋  New", filled = recording)
-        timer.visibility = if (recording) View.VISIBLE else View.GONE
-        if (recording) timer.text = elapsed()
-        micName.text = recorder.usbInput()?.productName?.toString()?.let { "USB — $it" } ?: "None — plug in a USB microphone"
-        if (message != null) status.text = message
-        else if (!recording) status.text = "Recordings are saved to EXPORT/sn-meeting"
+        ui.stylePill(button, if (r.busy) "■  Stop" else "＋  New", filled = r.busy)
+        if (!r.busy && !p.canRecord) button.setTextColor(ui.textMuted) // F2-AC1: disabled, reason in the mic card
+        timer.visibility = if (r is RecState.Recording) View.VISIBLE else View.GONE
+        if (r is RecState.Recording) timer.text = elapsed(r.startElapsedMs)
+        micName.text = when (r) {
+            is RecState.Starting -> r.mic
+            is RecState.Recording -> r.mic
+            else -> p.chosen?.label ?: p.reason
+        }
+        status.text = when (r) {
+            is RecState.Starting -> "Connecting the microphone…"
+            is RecState.Recording -> "Recording. The screen can sleep; it carries on."
+            RecState.Stopping -> "Saving…"
+            is RecState.Idle -> r.message ?: "Recordings are saved to EXPORT/sn-meeting"
+        }
     }
 
-    private fun elapsed(): String {
-        val s = (SystemClock.elapsedRealtime() - startedAt) / 1000
+    private fun elapsed(startElapsedMs: Long): String {
+        val s = (SystemClock.elapsedRealtime() - startElapsedMs) / 1000
         return "%d:%02d:%02d".format(s / 3600, (s / 60) % 60, s % 60)
     }
 
