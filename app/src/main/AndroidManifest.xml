@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- All-files access: recordings go to the public, Partner-synced
+         /storage/emulated/0/EXPORT/sn-meeting folder (same approach as inkread's PDF export). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Meetings"
+        android:theme="@style/Meetings">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="portrait">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- One meeting: play, transcribe, transcript, to-dos (spec F7). Not exported. -->
+        <activity
+            android:name=".MeetingActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <!-- Settings (spec F10) and templates (F11). Not exported. -->
+        <activity android:name=".SettingsActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity android:name=".TemplatesActivity" android:exported="false" android:screenOrientation="portrait" />
+        <activity
+            android:name=".TemplateEditorActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize" />
+    </application>
+</manifest>

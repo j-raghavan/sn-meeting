@@ -1,0 +1,15 @@
+.gradle/
+build/
+local.properties
+*.apk
+spec/
+app/src/main/jniLibs/
+target/
+.kotlin/
+*.so
+.DS_Store
+# Claude Code / Ruflo working config (per-machine, not project source)
+CLAUDE*
+.claude/
+.claude-flow/
+.mcp*

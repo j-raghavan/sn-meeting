@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same base as inkread's InkRead theme: full-screen white paper, no title bar, so the first
+         frame is never a black page on e-ink. No window animations. -->
+    <style name="Meetings" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowBackground">@android:color/white</item>
+        <item name="android:textColor">@android:color/black</item>
+        <item name="android:windowAnimationStyle">@null</item>
+    </style>
+</resources>
