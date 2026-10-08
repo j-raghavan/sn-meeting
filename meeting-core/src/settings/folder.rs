@@ -23,20 +23,11 @@ pub(super) fn remember(current: &Settings, new: &str) -> Vec<String> {
     out
 }
 
-/// F10-FR3: `input` relative to `root` (or absolute under it) → the normalised relative path.
-/// The folder must resolve inside `root`, also through symlinks, must not be `root` itself or
-/// inside MyStyle/SnCopilot or MyStyle/Meetings/templates, and must be creatable and
-/// writable. It is created here.
-pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, SettingsError> {
+/// The path's names, checked without touching the filesystem: no `..`, no control characters
+/// or backslashes, not the top level, not a forbidden folder by name.
+fn relative_parts(rel: &str) -> Result<Vec<&str>, SettingsError> {
     const F: &str = "saveFolder";
     let outside = || err(F, OUTSIDE);
-    let trimmed = input.trim();
-    let root_s = root.to_string_lossy();
-    let rel = match trimmed.strip_prefix(root_s.as_ref()) {
-        Some(r) if r.is_empty() || r.starts_with('/') => r,
-        _ if trimmed.starts_with('/') => return Err(outside()),
-        _ => trimmed,
-    };
     if rel.chars().any(|c| c.is_control() || c == '\\') {
         return Err(err(F, "folder name has invalid characters"));
     }
@@ -55,6 +46,30 @@ pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, Settings
         ));
     }
     check_forbidden(&parts)?;
+    Ok(parts)
+}
+
+/// Whether a stored (relative) save folder could have passed `validate_save_folder`; used
+/// when loading settings.json, which may have been edited by hand.
+pub(super) fn plausible(rel: &str) -> bool {
+    !rel.starts_with('/') && relative_parts(rel).is_ok_and(|p| p.join("/") == rel)
+}
+
+/// F10-FR3: `input` relative to `root` (or absolute under it) → the normalised relative path.
+/// The folder must resolve inside `root`, also through symlinks, must not be `root` itself or
+/// inside MyStyle/SnCopilot or MyStyle/Meetings/templates, and must be creatable and
+/// writable. It is created here.
+pub fn validate_save_folder(root: &Path, input: &str) -> Result<String, SettingsError> {
+    const F: &str = "saveFolder";
+    let outside = || err(F, OUTSIDE);
+    let trimmed = input.trim();
+    let root_s = root.to_string_lossy();
+    let rel = match trimmed.strip_prefix(root_s.as_ref()) {
+        Some(r) if r.is_empty() || r.starts_with('/') => r,
+        _ if trimmed.starts_with('/') => return Err(outside()),
+        _ => trimmed,
+    };
+    let parts = relative_parts(rel)?;
     let canon_root = root
         .canonicalize()
         .map_err(|_| err(F, "internal storage is not available"))?;

@@ -192,11 +192,37 @@ pub fn load(path: &Path) -> (Settings, Origin) {
             (Settings::default(), Origin::Defaults)
         }
         Ok(bytes) => match serde_json::from_slice::<Settings>(&bytes) {
-            Ok(s) => (s, Origin::File),
+            Ok(s) => (sanitised(s), Origin::File),
             Err(_) => (Settings::default(), keep_bad(path)),
         },
         Err(_) => (Settings::default(), keep_bad(path)),
     }
+}
+
+/// A hand-edited file may hold values a patch could never set: each such field reads as its
+/// default (an escaping or forbidden save folder, a role provider that can't do the role, a
+/// malformed model), so it can neither point the library outside storage nor block patches.
+fn sanitised(mut s: Settings) -> Settings {
+    if !folder::plausible(&s.save_folder) {
+        s.save_folder = DEFAULT_SAVE_FOLDER.into();
+    }
+    s.previous_folders.retain(|f| folder::plausible(f));
+    for role in Role::ALL {
+        let rs = s.role_mut(role);
+        if rs.provider.is_some_and(|p| !role.providers().contains(&p)) {
+            rs.provider = None;
+        }
+        if rs.model.as_deref().is_some_and(|m| !model_ok(m)) {
+            rs.model = None;
+        }
+    }
+    s
+}
+
+fn model_ok(m: &str) -> bool {
+    !m.is_empty()
+        && m.len() <= MAX_MODEL_LEN
+        && !m.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
 /// Move the bad file aside for diagnosis; the next save writes a fresh one.
@@ -305,6 +331,11 @@ fn check_role(
         Role::Transcribe => ("transcribe.provider", "transcribe.model"),
         Role::Summarise => ("summarise.provider", "summarise.model"),
     };
+    // Only a changed role is checked, so a value that is already stored never blocks a patch
+    // to something else.
+    if next.role(role) == current.role(role) {
+        return Ok(());
+    }
     let rs = next.role_mut(role);
     rs.model = rs
         .model
@@ -312,7 +343,7 @@ fn check_role(
         .map(|m| m.trim().to_owned())
         .filter(|m| !m.is_empty());
     if let Some(m) = &rs.model
-        && (m.len() > MAX_MODEL_LEN || m.chars().any(|c| c.is_whitespace() || c.is_control()))
+        && !model_ok(m)
     {
         return Err(err(mf, "model name is invalid"));
     }

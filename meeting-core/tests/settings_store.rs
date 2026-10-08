@@ -151,3 +151,68 @@ fn the_app_loads_settings_from_its_data_dir() {
     );
     assert_eq!(dev.settings().1, Origin::Defaults);
 }
+
+#[test]
+fn invalid_folder_in_file_reads_as_default() {
+    let d = tempfile::tempdir().unwrap();
+    let p = settings::path_in(d.path());
+    fs::write(
+        &p,
+        r#"{"saveFolder": "../../../etc", "previousFolders": ["Document/Meetings", "/abs",
+            "MyStyle/SnCopilot", "a/../b", "", "Notes"],
+            "transcribe": {"model": "has space"}, "summarise": {"model": "gpt-x"}}"#,
+    )
+    .unwrap();
+    let (s, origin) = load(&p);
+    assert_eq!(origin, Origin::File);
+    assert_eq!(s.save_folder, "EXPORT/sn-meeting");
+    assert_eq!(s.previous_folders, ["Document/Meetings", "Notes"]);
+    assert_eq!(s.transcribe.model, None);
+    assert_eq!(s.summarise.model.as_deref(), Some("gpt-x"));
+    let core = Core::device(d.path().to_str().unwrap());
+    let app = App::new(core, "/storage/emulated/0".into());
+    let v: serde_json::Value = serde_json::from_str(&app.get_settings_json()).unwrap();
+    assert_eq!(
+        v["effective"]["saveFolderPath"],
+        "/storage/emulated/0/EXPORT/sn-meeting"
+    );
+}
+
+#[test]
+fn bad_role_provider_in_file_does_not_block_other_patches() {
+    let d = tempfile::tempdir().unwrap();
+    let p = settings::path_in(d.path());
+    fs::write(&p, r#"{"transcribe": {"provider": "anthropic"}}"#).unwrap();
+    assert_eq!(
+        load(&p).0.transcribe.provider,
+        None,
+        "anthropic can't transcribe"
+    );
+    let mut core = Core::device(d.path().to_str().unwrap());
+    core.key_dir = d.path().join("no-keys");
+    let app = App::new(core, d.path().into());
+    let r: serde_json::Value =
+        serde_json::from_str(&app.set_settings_json(r#"{"mic": "auto"}"#)).unwrap();
+    assert!(r.get("error").is_none(), "{r}");
+    // A stored value is only re-checked when its role changes.
+    let current = Settings {
+        transcribe: serde_json::from_value(
+            serde_json::json!({"provider": "anthropic", "model": "x y"}),
+        )
+        .unwrap(),
+        ..Settings::default()
+    };
+    let ks = |p| settings::key_status(&d.path().join("no-keys"), p);
+    let ctx = settings::Ctx {
+        storage_root: d.path(),
+        key_status: &ks,
+    };
+    let next = settings::apply(&current, &serde_json::json!({"mic": "auto"}), &ctx).unwrap();
+    assert_eq!(next.transcribe, current.transcribe);
+    let e = settings::apply(
+        &current,
+        &serde_json::json!({"transcribe": {"model": "y z"}}),
+        &ctx,
+    );
+    assert_eq!(e.unwrap_err().field, Some("transcribe.model"));
+}
