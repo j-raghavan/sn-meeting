@@ -944,6 +944,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "uuid",
  "webpki-root-certs",
  "wiremock",
 ]
