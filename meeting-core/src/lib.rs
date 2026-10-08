@@ -3,6 +3,7 @@ pub mod api;
 pub mod keyfile;
 pub mod providers;
 pub mod runtime;
+pub mod scrub;
 
 #[cfg(feature = "jni-bridge")]
 mod jni;
