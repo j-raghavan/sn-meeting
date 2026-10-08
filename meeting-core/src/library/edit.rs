@@ -92,7 +92,7 @@ impl Library<'_> {
         Ok(())
     }
 
-    /// F7-FR4: remove the meeting's audio, transcript and sidecar (and a stray `.tmp`). Only
+    /// F7-FR4: remove the meeting's audio, transcript and sidecar (and stray `.tmp`s of both). Only
     /// names that belong to this exact id are touched, so `…211706b` survives deleting
     /// `…211706`. Refused while it is recording or a job is running on it. Audio goes first and
     /// the sidecar last, so a failure part-way leaves a listed meeting, not hidden audio.
@@ -113,17 +113,25 @@ impl Library<'_> {
         names.sort();
         names.dedup();
         let side = sidecar::sidecar_file_name(id);
-        names.push(sidecar::transcript_file_name(id));
-        // Stray tmp files of this sidecar (an interrupted write), whatever their suffix.
-        if let Ok(rd) = std::fs::read_dir(&f.dir) {
-            let mut tmps: Vec<String> = rd
+        let transcript = sidecar::transcript_file_name(id);
+        // Stray tmp files of this transcript or sidecar (an interrupted write), whatever their
+        // suffix; the transcript's after it, the sidecar's just before it.
+        let tmps_of = |target: &str| -> Vec<String> {
+            let Ok(rd) = std::fs::read_dir(&f.dir) else {
+                return Vec::new();
+            };
+            let mut t: Vec<String> = rd
                 .filter_map(Result::ok)
                 .map(|e| e.file_name().to_string_lossy().into_owned())
-                .filter(|n| crate::atomic::is_tmp_of(n, &side))
+                .filter(|n| crate::atomic::is_tmp_of(n, target))
                 .collect();
-            tmps.sort();
-            names.extend(tmps);
-        }
+            t.sort();
+            t
+        };
+        let transcript_tmps = tmps_of(&transcript);
+        names.push(transcript);
+        names.extend(transcript_tmps);
+        names.extend(tmps_of(&side));
         names.push(side);
         let mut removed = Vec::new();
         for n in names {

@@ -24,6 +24,8 @@ fn only_this_meetings_files_go() {
         format!("{ID0}.json.tmp"),
         format!("{ID0}.json.77-3.tmp"),
         format!("{B}.json.77-4.tmp"),
+        format!("{ID0}.transcript.md.77-5.tmp"),
+        format!("{B}.transcript.md.77-6.tmp"),
         format!("{B}-01.m4a"),
         format!("{B}.transcript.md"),
         "notes.txt".into(),
@@ -35,8 +37,8 @@ fn only_this_meetings_files_go() {
     assert_eq!(
         r,
         json!({"ok": true, "removed": [format!("{ID0}-01.m4a"), format!("{ID0}-02.m4a"),
-            format!("{ID0}.transcript.md"), format!("{ID0}.json.77-3.tmp"), format!("{ID0}.json.tmp"),
-            format!("{ID0}.json")]})
+            format!("{ID0}.transcript.md"), format!("{ID0}.transcript.md.77-5.tmp"),
+            format!("{ID0}.json.77-3.tmp"), format!("{ID0}.json.tmp"), format!("{ID0}.json")]})
     );
     let mut left: Vec<String> = fs::read_dir(&dir)
         .unwrap()
@@ -51,6 +53,7 @@ fn only_this_meetings_files_go() {
             format!("{B}.json"),
             format!("{B}.json.77-4.tmp"),
             format!("{B}.transcript.md"),
+            format!("{B}.transcript.md.77-6.tmp"),
             "notes.txt".into()
         ]
     );
