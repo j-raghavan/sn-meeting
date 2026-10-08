@@ -196,6 +196,16 @@ impl App {
         )
     }
 
+    /// `nativeRecover(serviceAlive)` (F3-FR5). A dead service means nothing is recording.
+    pub fn recover_json(&self, service_alive: bool) -> String {
+        let mut st = self.state();
+        if !service_alive {
+            st.live.recording = None;
+        }
+        let lib = self.library_of(&st.settings);
+        json!(lib.recover(&st.live)).to_string()
+    }
+
     /// Every provider's key status, read fresh (the user may add a file at any time).
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL

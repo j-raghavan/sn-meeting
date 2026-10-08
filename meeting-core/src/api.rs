@@ -195,6 +195,11 @@ pub fn delete_meeting(id: &str) -> String {
     with_app(|app| app.delete_json(id))
 }
 
+/// `nativeRecover(serviceAlive)` (F3-FR5): `{recovered, measure, flagged}`.
+pub fn recover(service_alive: bool) -> String {
+    with_app(|app| app.recover_json(service_alive))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

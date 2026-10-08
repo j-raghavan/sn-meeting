@@ -30,6 +30,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
             api::set_meeting_template("x", "general"),
         ),
         ("deleteMeeting", api::delete_meeting("x")),
+        ("recover", api::recover(true)),
     ]
 }
 

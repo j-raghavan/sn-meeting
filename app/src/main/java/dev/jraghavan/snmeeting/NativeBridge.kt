@@ -66,4 +66,8 @@ object NativeBridge {
     /** Removes the meeting's audio, sidecar and transcript; refused while recording or a job
      *  runs. `{ok: true, removed: [file names]}`. */
     external fun nativeDeleteMeeting(id: String): String
+
+    /** Crash recovery on launch and resume: `{recovered: [id], measure: [{id, index, path}],
+     *  flagged: [{id, index, flag}]}`. Measure each listed file and close it. */
+    external fun nativeRecover(serviceAlive: Boolean): String
 }

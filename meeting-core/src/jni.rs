@@ -228,3 +228,15 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeDeleteMee
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRecover<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    service_alive: jboolean,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::recover(service_alive))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
