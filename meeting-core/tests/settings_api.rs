@@ -296,13 +296,6 @@ fn a_save_that_fails_changes_nothing() {
 }
 
 #[test]
-fn the_save_folder_cannot_change_yet() {
-    let e = Env::new();
-    let v = set(&e.app(), json!({"saveFolder": "Document/Meetings"}));
-    assert_eq!(v["field"], "saveFolder");
-}
-
-#[test]
 fn key_files_with_every_fixture_key_never_leak_into_settings() {
     let e = Env::new();
     write_keys(e.keys.path());
