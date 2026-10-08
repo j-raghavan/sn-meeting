@@ -174,8 +174,12 @@ pub fn load(dir: &Path, provider: Provider) -> Result<ProviderKey, KeyError> {
         provider: provider.id(),
         vault_present: VAULT_FILES.iter().any(|v| dir.join(v).is_file()),
     };
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Err(not_found());
+    // A missing folder means "no key yet"; any other failure (all-files access not granted)
+    // must not tell the user to add a file that is already there.
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(not_found()),
+        Err(e) => return Err(KeyError::Unreadable(e.kind().to_string())),
     };
     let canonical = provider.canonical_file_name();
     let mut candidates: Vec<(bool, String, PathBuf)> = entries

@@ -188,3 +188,21 @@ fn an_unreadable_file_names_the_io_kind_only() {
     assert_eq!(err, KeyError::Unreadable("permission denied".into()));
     assert_eq!(err.to_string(), "key file unreadable: permission denied");
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unlistable_dir_is_unreadable_not_missing() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("SnCopilot");
+    fs::create_dir(&dir).unwrap();
+    write(
+        &dir,
+        "copilot-key-openai.txt",
+        "provider=openai\nkey=k\nmodel=m",
+    );
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o000)).unwrap();
+    let got = load_unit(&dir, Provider::OpenAi);
+    fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(got, Err(KeyError::Unreadable("permission denied".into())));
+}
