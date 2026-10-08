@@ -10,7 +10,11 @@ const MAX_FILE_BYTES: u64 = 64 * 1024;
 /// sn-copilot's encrypted vault, which Meetings v1 cannot read (F4-FR5).
 const VAULT_FILES: [&str; 2] = ["copilot-key.enc", ".copilot-key.enc"];
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Serialised as its canonical id (settings.json, sidecars, JSON replies).
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "lowercase")]
 pub enum Provider {
     OpenAi,
     Gemini,

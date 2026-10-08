@@ -1,4 +1,5 @@
 //! The JNI-shaped API: strings in, JSON out, never a panic, never a key. `jni.rs` only marshals.
+use crate::app::App;
 use crate::keyfile::{self, KeyError, Provider};
 use crate::providers::{self, Endpoints};
 use serde_json::json;
@@ -30,7 +31,8 @@ impl Core {
     }
 }
 
-static CORE: OnceLock<Core> = OnceLock::new();
+/// The process's app, created by `nativeInit`. Every other export needs it.
+static APP: OnceLock<App> = OnceLock::new();
 
 /// OpenAI and Gemini transcription defaults (F4-FR3).
 const OPENAI_TRANSCRIBE: &str = "gpt-transcribe";
@@ -51,8 +53,16 @@ pub fn version_json() -> String {
     crate::version().to_owned()
 }
 
-/// `nativeInit(appDataDir)`: build the runtime and remember the app data dir. Idempotent: a
-/// second call keeps the first directory.
+/// `guarded(f(app))`, or the "not initialised" envelope before `nativeInit`.
+fn with_app(f: impl FnOnce(&App) -> String) -> String {
+    guarded(|| match APP.get() {
+        Some(app) => f(app),
+        None => error_json("nativeInit has not run"),
+    })
+}
+
+/// `nativeInit(appDataDir)`: build the runtime and the app, which loads `settings.json` from
+/// the app data dir (F10-FR7). Idempotent: a second call keeps the first directory.
 pub fn init(app_data_dir: &str) -> String {
     guarded(|| {
         if app_data_dir.is_empty() || !app_data_dir.starts_with('/') {
@@ -61,18 +71,15 @@ pub fn init(app_data_dir: &str) -> String {
         if let Err(e) = crate::runtime::get() {
             return error_json(&format!("runtime: {e}"));
         }
-        let core = CORE.get_or_init(|| Core::device(app_data_dir));
-        json!({ "ok": true, "version": crate::version(), "appDataDir": core.app_data_dir })
+        let app = APP.get_or_init(|| App::device(app_data_dir));
+        json!({ "ok": true, "version": crate::version(), "appDataDir": app.core.app_data_dir })
             .to_string()
     })
 }
 
 /// `nativeTestConnection(role, provider)`; blocking, so call it off the UI thread.
 pub fn test_connection(role: &str, provider: &str) -> String {
-    guarded(|| match CORE.get() {
-        Some(core) => test_connection_with(core, role, provider),
-        None => error_json("nativeInit has not run"),
-    })
+    with_app(|app| app.test_connection(role, provider))
 }
 
 /// `test_connection` against an explicit `Core`. Must not be called on a runtime thread.
