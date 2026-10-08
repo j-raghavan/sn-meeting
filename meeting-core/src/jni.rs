@@ -131,3 +131,28 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeFinishMee
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeListRecent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    limit: jint,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::list_recent(limit))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeGetMeeting<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::get_meeting(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

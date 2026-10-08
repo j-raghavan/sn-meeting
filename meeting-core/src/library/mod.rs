@@ -8,6 +8,9 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod list;
+pub use list::{MeetingSummary, MeetingView, Source};
+
 const MAX_MIC_NAME: usize = 200;
 const MAX_CODEC: usize = 32;
 const MAX_NOTE: usize = 200;
@@ -109,7 +112,10 @@ impl Library<'_> {
                 continue; // a folder that is gone or unreadable lists nothing
             };
             let mut here: BTreeMap<String, Found> = BTreeMap::new();
-            for e in entries.filter_map(Result::ok) {
+            for e in entries
+                .filter_map(Result::ok)
+                .filter(|e| e.path().is_file())
+            {
                 let name = e.file_name().to_string_lossy().into_owned();
                 let Some((id, is_sidecar)) = owner_of(&name) else {
                     continue;

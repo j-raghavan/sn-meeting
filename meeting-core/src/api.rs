@@ -160,6 +160,16 @@ pub fn close_segment(id: &str, seg_index: i32, duration_ms: i64) -> String {
     with_app(|app| app.close_segment_json(id, seg_index, duration_ms))
 }
 
+/// `nativeListRecent(limit)` (F3-FR3).
+pub fn list_recent(limit: i32) -> String {
+    with_app(|app| app.list_recent_json(limit))
+}
+
+/// `nativeGetMeeting(id)`.
+pub fn get_meeting(id: &str) -> String {
+    with_app(|app| app.get_meeting_json(id))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

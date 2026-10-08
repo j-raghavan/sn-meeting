@@ -138,6 +138,19 @@ impl App {
         reply(lib.finish(id, duration_ms, Some(note)).map(|()| ok()))
     }
 
+    /// `nativeListRecent(limit)`: the newest meetings across every save folder.
+    pub fn list_recent_json(&self, limit: i32) -> String {
+        match usize::try_from(limit) {
+            Ok(n) => json!(self.library().list_recent(n)).to_string(),
+            Err(_) => error_json("limit must be >= 0"),
+        }
+    }
+
+    /// `nativeGetMeeting`.
+    pub fn get_meeting_json(&self, id: &str) -> String {
+        reply(self.library().get(id).map(|v| json!(v)))
+    }
+
     /// Every provider's key status, read fresh (the user may add a file at any time).
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL

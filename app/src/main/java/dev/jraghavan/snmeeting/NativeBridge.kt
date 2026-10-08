@@ -44,4 +44,10 @@ object NativeBridge {
 
     /** Recording stopped; `note` is why ("mic disconnected"), "" for none. `{ok: true}`. */
     external fun nativeFinishMeeting(id: String, durationMs: Long, note: String): String
+
+    /** The `limit` newest meetings across the current and previous save folders. */
+    external fun nativeListRecent(limit: Int): String
+
+    /** `{meeting: <sidecar>, source, dir, segmentPaths, transcriptPath}`. */
+    external fun nativeGetMeeting(id: String): String
 }
