@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 mod run;
+mod templates;
 pub use run::Job;
 
 #[derive(Debug)]

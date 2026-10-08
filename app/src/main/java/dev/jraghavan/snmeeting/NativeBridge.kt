@@ -86,4 +86,23 @@ object NativeBridge {
 
     /** Stops the meeting's running job: `{cancelled: bool}`. Returns at once, from any thread. */
     external fun nativeCancel(id: String): String
+
+    // Templates (F11). Not wired into the UI until M7.
+
+    /** Every template, built-ins first: `[{id, name, description, …, origin, builtin,
+     *  customised, problem, path}]`; origin is `builtin`, `customised` or `yours`. */
+    external fun nativeListTemplates(): String
+
+    /** The effective version of one template, as a [nativeListTemplates] row. */
+    external fun nativeGetTemplate(id: String): String
+
+    /** Validates and writes the user copy; replies as [nativeGetTemplate], or
+     *  `{error, line, field}` and nothing is written. Duplicate is a save under a new id. */
+    external fun nativeSaveTemplate(json: String): String
+
+    /** Deletes the user's file (a built-in goes back to the original): `{ok, origin}`. */
+    external fun nativeResetTemplate(id: String): String
+
+    /** Renders the layout against the sample meeting: `{markdown}` or `{error, line, field}`. */
+    external fun nativePreviewTemplate(json: String): String
 }

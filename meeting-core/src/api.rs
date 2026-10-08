@@ -215,6 +215,31 @@ pub fn cancel(id: &str) -> String {
     with_app(|app| app.cancel_json(id))
 }
 
+/// `nativeListTemplates()` (F11-FR5).
+pub fn list_templates() -> String {
+    with_app(App::list_templates_json)
+}
+
+/// `nativeGetTemplate(id)`: the effective version.
+pub fn get_template(id: &str) -> String {
+    with_app(|app| app.get_template_json(id))
+}
+
+/// `nativeSaveTemplate(json)`: Template | `{error, line, field}`.
+pub fn save_template(json: &str) -> String {
+    with_app(|app| app.save_template_json(json))
+}
+
+/// `nativeResetTemplate(id)`: `{ok, origin}`.
+pub fn reset_template(id: &str) -> String {
+    with_app(|app| app.reset_template_json(id))
+}
+
+/// `nativePreviewTemplate(json)`: `{markdown}` | `{error, line, field}`.
+pub fn preview_template(json: &str) -> String {
+    with_app(|app| app.preview_template_json(json))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))

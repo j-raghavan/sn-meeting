@@ -34,6 +34,11 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("transcribe", api::transcribe("x")),
         ("summarise", api::summarise("x")),
         ("cancel", api::cancel("x")),
+        ("listTemplates", api::list_templates()),
+        ("getTemplate", api::get_template("general")),
+        ("saveTemplate", api::save_template("{}")),
+        ("resetTemplate", api::reset_template("../x")),
+        ("previewTemplate", api::preview_template("{}")),
     ]
 }
 
@@ -92,6 +97,10 @@ fn init_then_the_app_exports() {
         json!({"error": "invalid meeting id"})
     );
     assert_eq!(parse(&api::cancel("x")), json!({"cancelled": false}));
+    assert_eq!(
+        parse(&api::reset_template("../x")),
+        json!({"error": "invalid template id"})
+    );
     // nativeInit loaded settings: none on this host, so defaults and no keys.
     let s = parse(&api::get_settings());
     assert_eq!(s["origin"], "defaults");
