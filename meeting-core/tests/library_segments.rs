@@ -234,10 +234,13 @@ fn unknown_bad_and_unreadable_meetings() {
         "{broken",
         "a bad sidecar is never overwritten"
     );
-    // Audio with no sidecar can't be recorded into.
+    // Legacy audio (no sidecar) is recorded already: it can't take a new segment.
     fs::write(e.export().join("meeting-20261007-111111.m4a"), b"x").unwrap();
+    let dir = e.export();
+    let next = dir.join("meeting-20261007-111111-01.m4a");
     assert_eq!(
-        parse(&app.close_segment_json("meeting-20261007-111111", 0, 1)),
-        json!({"error": "meeting not found"})
+        parse(&app.add_segment_json("meeting-20261007-111111", next.to_str().unwrap(), 1)),
+        json!({"error": "meeting is not recording"})
     );
+    assert!(!dir.join("meeting-20261007-111111.json").exists());
 }

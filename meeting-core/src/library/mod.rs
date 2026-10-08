@@ -147,14 +147,16 @@ impl Library<'_> {
         self.scan().remove(id).ok_or(LibError::NotFound)
     }
 
-    /// A meeting's folder and sidecar, to change and write back. A sidecar that can't be read
-    /// is never overwritten.
+    /// A meeting's folder and sidecar, to change and write back. Legacy audio gets its first
+    /// sidecar here (`recorded`, mic and audio unknown, EC4); a sidecar that can't be read is
+    /// never overwritten.
     pub(crate) fn load_for_write(&self, id: &str) -> Result<(PathBuf, Sidecar), LibError> {
         let f = self.find(id)?;
-        if !f.has_sidecar {
-            return Err(LibError::NotFound);
-        }
-        let sc = sidecar::read(&f.dir, id)?;
+        let sc = if f.has_sidecar {
+            sidecar::read(&f.dir, id)?
+        } else {
+            self.infer(id, &f.audio)
+        };
         Ok((f.dir, sc))
     }
 

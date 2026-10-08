@@ -1,4 +1,5 @@
-//! F3-FR3: listing meetings across every library folder, and one meeting in full.
+//! F3-FR3 / F3-FR4: listing meetings across every library folder (legacy audio included), and
+//! one meeting in full.
 use super::{Found, LibError, Library};
 use crate::sidecar::{self, Sidecar};
 use crate::status::{FailedAt, Status};
@@ -69,16 +70,16 @@ impl Library<'_> {
         }
     }
 
-    /// The sidecar to show for a found meeting, and where it came from. `None` for files we
-    /// don't list yet.
-    pub(crate) fn view_of(&self, id: &str, f: &Found) -> Option<(Sidecar, Source)> {
+    /// The sidecar to show for a found meeting, and where it came from. Audio with no sidecar
+    /// is a legacy meeting (EC4): listed, but no sidecar is written until the user acts on it.
+    pub(crate) fn view_of(&self, id: &str, f: &Found) -> (Sidecar, Source) {
         if !f.has_sidecar {
-            return None;
+            return (self.infer(id, &f.audio), Source::Legacy);
         }
-        Some(match sidecar::read(&f.dir, id) {
+        match sidecar::read(&f.dir, id) {
             Ok(sc) => (sc, Source::Sidecar),
             Err(_) => (self.infer(id, &f.audio), Source::Corrupt),
-        })
+        }
     }
 
     /// Every listable meeting with its sidecar, newest first (`startedAt`, then id).
@@ -86,9 +87,9 @@ impl Library<'_> {
         let mut v: Vec<(MeetingSummary, Sidecar)> = self
             .scan()
             .into_iter()
-            .filter_map(|(id, f)| {
-                let (sc, source) = self.view_of(&id, &f)?;
-                Some((self.summary(&id, &f, &sc, source), sc))
+            .map(|(id, f)| {
+                let (sc, source) = self.view_of(&id, &f);
+                (self.summary(&id, &f, &sc, source), sc)
             })
             .collect();
         v.sort_by(|a, b| (b.0.started_at_ms, &b.0.id).cmp(&(a.0.started_at_ms, &a.0.id)));
@@ -123,10 +124,11 @@ impl Library<'_> {
     /// `nativeGetMeeting`. A sidecar that can't be read is an error here, with its reason.
     pub fn get(&self, id: &str) -> Result<MeetingView, LibError> {
         let f = self.find(id)?;
-        if !f.has_sidecar {
-            return Err(LibError::NotFound);
-        }
-        let (sc, source) = (sidecar::read(&f.dir, id)?, Source::Sidecar);
+        let (sc, source) = if f.has_sidecar {
+            (sidecar::read(&f.dir, id)?, Source::Sidecar)
+        } else {
+            (self.infer(id, &f.audio), Source::Legacy)
+        };
         let path = |n: &str| f.dir.join(n).to_string_lossy().into_owned();
         Ok(MeetingView {
             segment_paths: sc.segments.iter().map(|s| path(&s.file)).collect(),
