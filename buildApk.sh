@@ -51,22 +51,17 @@ ADB_DEVICE=()
 adb_dev() { adb ${ADB_DEVICE[@]+"${ADB_DEVICE[@]}"} "$@"; }
 
 # =========================================================
-# select_jdk — Gradle needs JDK 17–21. If the JDK it would use (JAVA_HOME, else java on PATH)
-# is newer, switch to an installed 21 (then 17), as inkread does.
+# select_jdk — Gradle needs JDK 17–21; scripts/jdk.sh picks one (shared with scripts/gates.sh).
 # =========================================================
 select_jdk() {
-    local java_bin="java" jmajor jh v
-    [[ -n "${JAVA_HOME:-}" ]] && java_bin="$JAVA_HOME/bin/java"
-    jmajor="$("$java_bin" -version 2>&1 | sed -nE 's/.*version "([0-9]+).*/\1/p' | head -1 || true)"
-    [[ -n "$jmajor" && "$jmajor" -ge 17 && "$jmajor" -le 21 ]] && return 0
-    for v in 21 17; do
-        if jh="$(/usr/libexec/java_home -v "$v" 2>/dev/null)"; then
-            export JAVA_HOME="$jh"
-            write_color_output "JDK ${jmajor:-?} unsupported by Gradle; using JDK $v: $JAVA_HOME" "Yellow"
-            return 0
-        fi
-    done
-    die "Gradle needs JDK 17–21 (found ${jmajor:-none}). Install JDK 21 or set JAVA_HOME."
+    local root="$1" home
+    # shellcheck source=scripts/jdk.sh
+    source "$root/scripts/jdk.sh"
+    home="$(gradle_jdk_home)" || die "Gradle needs JDK 17–21. Install JDK 21 or set JAVA_HOME."
+    if [[ "$home" != "${JAVA_HOME:-}" ]]; then
+        write_color_output "Using JDK $(jdk_major "$home/bin/java") for Gradle: $home" "Yellow"
+    fi
+    export JAVA_HOME="$home"
 }
 
 # =========================================================
@@ -189,7 +184,7 @@ main() {
         shift
     done
 
-    select_jdk
+    select_jdk "$root"
     if [[ "$gates" == "1" ]]; then run_gates "$root"; fi
     build_rust "$root"
 
