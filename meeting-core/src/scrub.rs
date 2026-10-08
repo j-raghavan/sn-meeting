@@ -47,6 +47,27 @@ pub fn scrub(text: &str, secrets: &[&str]) -> String {
     truncate(&out, MAX_LEN)
 }
 
+/// Whether `text` holds key material by [`scrub`]'s rule: a whole secret (also
+/// percent-encoded) or a run of at least 12 of its first or last characters.
+pub fn contains_secret(text: &str, secrets: &[&str]) -> bool {
+    secrets.iter().filter(|s| !s.is_empty()).any(|s| {
+        [s.to_string(), percent(s, true), percent(s, false)]
+            .iter()
+            .any(|f| text.contains(f.as_str()))
+            || runs(s).any(|r| text.contains(&r))
+    })
+}
+
+/// Every run of `secret`'s first or last characters of at least [`MIN_RUN`], longest first.
+fn runs(secret: &str) -> impl Iterator<Item = String> + '_ {
+    let n = secret.chars().count();
+    (MIN_RUN..n).rev().flat_map(move |len| {
+        let head: String = secret.chars().take(len).collect();
+        let tail: String = secret.chars().skip(n - len).collect();
+        [head, tail]
+    })
+}
+
 /// `s` percent-encoded (every byte outside the URL-unreserved set), in upper or lower hex.
 fn percent(s: &str, upper: bool) -> String {
     s.bytes()
@@ -63,15 +84,10 @@ fn percent(s: &str, upper: bool) -> String {
 /// Replace every run of `secret`'s first or last `MIN_RUN`+ characters (a key cut short by a
 /// log line or a provider's echo), longest first.
 fn redact_runs(text: &str, secret: &str) -> String {
-    let n = secret.chars().count();
     let mut out = text.to_owned();
-    for len in (MIN_RUN..n).rev() {
-        let head: String = secret.chars().take(len).collect();
-        let tail: String = secret.chars().skip(n - len).collect();
-        for run in [head, tail] {
-            if out.contains(&run) {
-                out = out.replace(&run, REDACTED);
-            }
+    for run in runs(secret) {
+        if out.contains(&run) {
+            out = out.replace(&run, REDACTED);
         }
     }
     out

@@ -407,12 +407,11 @@ fn check_role(
     {
         return Err(err(mf, "model name is invalid"));
     }
-    // A key pasted into the model field would be stored and shown; never echo it.
+    // A key (or a cut of one, by scrub's rule) pasted into the model field would be stored
+    // and shown; never echo it.
+    let secrets: Vec<&str> = ctx.secrets.iter().map(String::as_str).collect();
     if let Some(m) = &rs.model
-        && ctx
-            .secrets
-            .iter()
-            .any(|k| !k.is_empty() && m.contains(k.as_str()))
+        && crate::scrub::contains_secret(m, &secrets)
     {
         return Err(err(mf, "that is an API key, not a model name"));
     }

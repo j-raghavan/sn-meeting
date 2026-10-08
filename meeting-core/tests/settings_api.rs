@@ -326,3 +326,27 @@ fn a_key_typed_as_model_override_is_refused() {
     let r = set(&app, json!({"summarise": {"model": "sk-test"}}));
     assert_eq!(r["settings"]["summarise"]["model"], "sk-test");
 }
+
+#[test]
+fn a_cut_key_typed_as_model_is_refused() {
+    // INV2, scrub's rule: 12 or more of a key's first or last characters are key material.
+    let e = Env::new();
+    openai_only(&e);
+    let app = e.app();
+    let n = OA.chars().count();
+    let head: String = OA.chars().take(12).collect();
+    let tail: String = OA.chars().skip(n - 13).collect();
+    for model in [head.clone(), format!("m-{tail}")] {
+        let r = set(&app, json!({"transcribe": {"model": model}}));
+        assert_eq!(
+            r,
+            json!({"error": "that is an API key, not a model name", "field": "transcribe.model"}),
+            "{model}"
+        );
+    }
+    assert!(!e.saved().contains(&head));
+    // Eleven characters are not enough to be key material.
+    let short: String = OA.chars().take(11).collect();
+    let r = set(&app, json!({"transcribe": {"model": short.clone()}}));
+    assert_eq!(r["settings"]["transcribe"]["model"], short);
+}
