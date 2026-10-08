@@ -13,6 +13,7 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
@@ -195,11 +196,9 @@ class SettingsActivity : Activity() {
 
         saveSection(column)
 
-        providerSection(column, "Transcription", MockSettings.transcribeChoices, MockSettings.transcribe,
-            "Anthropic can't transcribe audio, so it is offered for summaries only.") { MockSettings.transcribe = it }
-        providerSection(column, "Summary & to-dos", MockSettings.summariseChoices, MockSettings.summarise, null) {
-            MockSettings.summarise = it
-        }
+        providerSection(column, "Transcription", SettingsView.TRANSCRIBE,
+            "Anthropic can't transcribe audio, so it is offered for summaries only.")
+        providerSection(column, "Summary & to-dos", SettingsView.SUMMARISE, null)
 
         ui.section(column, "Templates").apply {
             val def = MockTemplates.byId(MockSettings.defaultTemplate)
@@ -285,34 +284,47 @@ class SettingsActivity : Activity() {
     }
 
     /** One provider role: a radio per provider with its key status, the model, and Test connection (F10-FR4/FR5). */
-    private fun providerSection(column: LinearLayout, title: String, choices: List<String>, current: String, footnote: String?, pick: (String) -> Unit) {
+    /**
+     * F10-FR4: a radio per provider with its key status (one without a key can't be chosen),
+     * the model that will run and an optional override (empty = the key file's or the
+     * default), and Test connection (F10-FR5).
+     */
+    private fun providerSection(column: LinearLayout, title: String, role: String, footnote: String?) {
+        val s = settings ?: return
         ui.section(column, title).apply {
-            choices.forEachIndexed { i, id ->
-                val p = MockSettings.provider(id)
+            ProviderRows.of(role, s).forEachIndexed { i, row ->
                 if (i > 0) addView(ui.hairline())
-                val hint = if (p.hasKey) "Key found: ${p.keyFile}" else "Add ${p.keyFile} to MyStyle/SnCopilot"
-                choice(p.name, hint, current == id, enabled = p.hasKey) { pick(id) }
+                choice(row.name, row.hint, row.selected, enabled = row.enabled || row.selected) { patch(SettingsPatch.provider(role, row.id)) }
             }
+            errors["$role.provider"]?.let { addView(error(it)) }
             addView(ui.hairline())
-            val chosen = MockSettings.provider(current)
-            val model = if (title == "Transcription") chosen.model else if (chosen.id == "openai") "gpt-4o-mini" else chosen.model
-            val role = if (title == "Transcription") "transcribe" else "summarise"
+            val current = s.effective(role).provider
             val resultKey = "$role/$current"
             val result: TextView = ui.note(results[resultKey] ?: "", 13f).apply { setPadding(0, 0, 0, ui.dim(6)) }
             resultViews[resultKey] = result
             addView(LinearLayout(this@SettingsActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, ui.dim(12), 0, ui.dim(12))
+                setPadding(0, ui.dim(12), 0, ui.dim(8))
                 addView(LinearLayout(this@SettingsActivity).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(ui.eyebrow("Model"))
-                    addView(ui.body(model, 16f), ui.wrap().apply { topMargin = ui.dim(4) })
+                    addView(ui.body(ProviderRows.model(role, s) ?: "None until a key file is added", 16f), ui.wrap().apply { topMargin = ui.dim(4) })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 // F10-FR5: the core lists models with the key (no audio, no cost).
                 addView(ui.pill("Test connection", size = 15f) { testConnection(role, current) })
             })
             addView(result)
+            val field = ui.field(s.choice(role).model ?: "").apply { hint = "Use the key file's model" }
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, ui.dim(4), 0, ui.dim(10))
+                addView(field, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(ui.pill("Set", size = 15f) { patch(SettingsPatch.model(role, field.text.toString())) },
+                    ui.wrap().apply { marginStart = ui.dim(12) })
+            })
+            errors["$role.model"]?.let { addView(error(it)) }
             if (footnote != null) addView(ui.note(footnote, 13f, ui.textMuted).apply { setPadding(0, 0, 0, ui.dim(10)) })
         }
     }

@@ -122,3 +122,32 @@ object SaveFolders {
     fun previous(folders: List<String>): String? =
         if (folders.isEmpty()) null else "Meetings in ${folders.joinToString(" and ")} stay listed."
 }
+
+/** F10-FR4: one role's provider rows and the model that will run. */
+object ProviderRows {
+    data class Row(val id: String, val name: String, val hint: String, val selected: Boolean, val enabled: Boolean)
+
+    /** A provider without a usable key can't be chosen; the one in use stays shown as chosen. */
+    fun of(role: String, s: SettingsView): List<Row> = SettingsView.providersFor(role).map { p ->
+        val key = s.keys[p]
+        val hint = when (key) {
+            is KeyStatus.Found -> "Key found: ${key.file}"
+            is KeyStatus.Problem -> key.detail
+            null -> "Checking the key…"
+        }
+        val selected = s.effective(role).provider == p
+        Row(p, Format.providerName(p), hint, selected, key?.usable == true && !selected)
+    }
+
+    /** "gpt-4o-mini · from the key file"; null when no model can run (summarise without a key). */
+    fun model(role: String, s: SettingsView): String? {
+        val e = s.effective(role)
+        val m = e.model ?: return null
+        val from = when (e.modelSource) {
+            "override" -> "your choice"
+            "keyFile" -> "from the key file"
+            else -> "the default"
+        }
+        return "$m  ·  $from"
+    }
+}

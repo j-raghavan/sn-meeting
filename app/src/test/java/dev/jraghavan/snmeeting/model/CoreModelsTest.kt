@@ -131,4 +131,23 @@ class CoreModelsTest {
         assertEquals("Meetings in EXPORT/sn-meeting stay listed.", SaveFolders.previous(listOf("EXPORT/sn-meeting")))
         assertEquals("""{"saveFolder":"Notes/Meetings"}""", SettingsPatch.saveFolder("Notes/Meetings"))
     }
+
+    @Test fun providerRows() { // F10-FR4, F10-AC1
+        val j = """{"settings":{"mic":"auto","saveFolder":"EXPORT/sn-meeting","transcribe":{},"summarise":{}},
+          "effective":{"transcribe":{"provider":"openai","model":"gpt-transcribe","modelSource":"default"},
+          "summarise":{"provider":"openai","model":"gpt-4o-mini","modelSource":"keyFile"}},
+          "keys":{"openai":{"status":"found","file":"copilot-key-openai.txt","model":"gpt-4o-mini","transcribeModel":null},
+                  "gemini":{"status":"missing","file":"copilot-key-gemini.txt","detail":"Add copilot-key-gemini.txt to MyStyle/SnCopilot"},
+                  "anthropic":{"status":"missing","file":"copilot-key-anthropic.txt","detail":"Add copilot-key-anthropic.txt to MyStyle/SnCopilot"}}}"""
+        val s = CoreJson.obj(j, SettingsView::from).getOrNull()!!
+        val t = ProviderRows.of("transcribe", s)
+        assertEquals(listOf("OpenAI", "Google Gemini"), t.map { it.name }) // Anthropic takes no audio
+        assertEquals(ProviderRows.Row("openai", "OpenAI", "Key found: copilot-key-openai.txt", true, false), t[0])
+        assertEquals(ProviderRows.Row("gemini", "Google Gemini", "Add copilot-key-gemini.txt to MyStyle/SnCopilot", false, false), t[1])
+        assertEquals(3, ProviderRows.of("summarise", s).size)
+        assertEquals("gpt-transcribe  ·  the default", ProviderRows.model("transcribe", s))
+        assertEquals("gpt-4o-mini  ·  from the key file", ProviderRows.model("summarise", s))
+        assertEquals("""{"transcribe":{"provider":"gemini"}}""", SettingsPatch.provider("transcribe", "gemini"))
+        assertEquals("""{"transcribe":{"model":"whisper-1"}}""", SettingsPatch.model("transcribe", " whisper-1 "))
+    }
 }
