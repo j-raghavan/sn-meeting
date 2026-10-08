@@ -1,7 +1,7 @@
 //! F11-FR4: rendering a layout with minijinja. Templates are untrusted text: the engine has no
 //! loader (no filesystem or network), runs on a fuel budget with a recursion limit, and its
 //! output is capped. A layout only reads the context built here from the sidecar.
-use minijinja::{AutoEscape, Environment, UndefinedBehavior};
+use minijinja::{AutoEscape, Environment, UndefinedBehavior, Value, escape_formatter};
 use serde::Serialize;
 
 /// Enough for a 3-hour transcript through the standard layout many times over; stops a runaway
@@ -24,6 +24,12 @@ fn env() -> Environment<'static> {
     e.set_fuel(Some(FUEL));
     e.set_recursion_limit(RECURSION_LIMIT);
     e.set_keep_trailing_newline(true);
+    // A null value (an untitled meeting, a to-do with no owner) prints as nothing, like a
+    // missing one, rather than "none".
+    e.set_formatter(|out, state, v| {
+        let v = if v.is_none() { &Value::UNDEFINED } else { v };
+        escape_formatter(out, state, v)
+    });
     e
 }
 
@@ -108,6 +114,52 @@ pub fn duration_label(ms: u64) -> String {
         format!("{m} min")
     } else {
         format!("{} h {:02} min", m / 60, m % 60)
+    }
+}
+
+/// The sample meeting a layout must render before it is used or saved, and that Preview shows
+/// (F11-FR5). Every variable has a value.
+pub fn sample_context() -> Context {
+    let para = |ms: u64, text: &str| CtxPara {
+        marker: crate::pipeline::marker(ms),
+        text: text.into(),
+    };
+    Context {
+        title: Some("Sample: weekly planning".into()),
+        date: "2026-10-07".into(),
+        weekday: "Wednesday".into(),
+        time: "21:17".into(),
+        duration: duration_label(1_920_000),
+        mic: "USB — USB-Audio".into(),
+        template: "Sample".into(),
+        providers: CtxProviders {
+            transcribe: "openai gpt-transcribe".into(),
+            summarise: "anthropic claude-opus-5-5".into(),
+        },
+        summary: "The team agreed the Q4 scope and who sends the deck.".into(),
+        decisions: vec!["Ship the reader before the editor".into()],
+        todos: vec![
+            CtxTodo {
+                text: "Send the deck to Priya".into(),
+                owner: Some("me".into()),
+                due: Some("2026-10-09".into()),
+                done: false,
+            },
+            CtxTodo {
+                text: "Book the review room".into(),
+                owner: None,
+                due: None,
+                done: true,
+            },
+        ],
+        sections: vec![CtxSection {
+            heading: "Blockers".into(),
+            body: "- None raised.".into(),
+        }],
+        transcript: vec![
+            para(0, "Let's start with the plan."),
+            para(900_000, "I'll send the deck to Priya by Friday."),
+        ],
     }
 }
 

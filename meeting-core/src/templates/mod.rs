@@ -3,9 +3,15 @@
 //! It changes only the prompt text and the layout (INV9).
 use serde::Serialize;
 
+mod file;
 mod render;
+pub use file::{
+    MAX_DESCRIPTION, MAX_FILE_BYTES, MAX_INSTRUCTIONS, MAX_LAYOUT, MAX_LIST_ITEM, MAX_LIST_ITEMS,
+    MAX_NAME, TemplateError, parse, validate,
+};
 pub use render::{
-    Context, CtxPara, CtxProviders, CtxSection, CtxTodo, RenderError, duration_label, render,
+    Context, CtxPara, CtxProviders, CtxSection, CtxTodo, FUEL, MAX_OUTPUT, RenderError,
+    duration_label, render, sample_context,
 };
 
 pub const DEFAULT_ID: &str = "general";
@@ -24,42 +30,26 @@ pub struct Template {
     pub layout: String,
 }
 
-/// Split a template file into its parts. `None` when a part is missing.
-pub fn parse(text: &str) -> Option<Template> {
-    let text = text.replace("\r\n", "\n");
-    let body = text.strip_prefix("---\n")?;
-    let (front, rest) = body.split_once("\n---\n")?;
-    let mut t = Template {
-        id: String::new(),
-        name: String::new(),
-        description: String::new(),
-        vocabulary: Vec::new(),
-        sections: Vec::new(),
-        instructions: String::new(),
-        layout: String::new(),
-    };
-    for line in front.lines() {
-        let Some((k, v)) = line.split_once(':') else {
-            continue;
-        };
-        let v = v.trim();
-        match k.trim() {
-            "id" => t.id = v.into(),
-            "name" => t.name = v.into(),
-            "description" => t.description = v.into(),
-            _ => {}
+impl Template {
+    pub(crate) fn empty() -> Template {
+        Template {
+            id: String::new(),
+            name: String::new(),
+            description: String::new(),
+            vocabulary: Vec::new(),
+            sections: Vec::new(),
+            instructions: String::new(),
+            layout: String::new(),
         }
     }
-    let rest = rest.strip_prefix("# Instructions\n")?;
-    let (ins, layout) = rest.split_once("\n# Layout\n")?;
-    t.instructions = ins.trim().into();
-    t.layout = layout.into();
-    Some(t)
 }
 
 /// The built-in templates, parsed.
 pub fn builtins() -> Vec<Template> {
-    BUILTINS.iter().filter_map(|(_, src)| parse(src)).collect()
+    BUILTINS
+        .iter()
+        .filter_map(|(_, src)| parse(src).ok())
+        .collect()
 }
 
 #[cfg(test)]
@@ -88,7 +78,7 @@ mod tests {
             "---\nid: x\n---\nno headings",
             "---\n---\n# Instructions\nx",
         ] {
-            assert!(parse(bad).is_none(), "{bad}");
+            assert!(parse(bad).is_err(), "{bad}");
         }
     }
 }
