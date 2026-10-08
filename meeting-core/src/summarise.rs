@@ -211,12 +211,17 @@ fn cap(s: &str, n: usize) -> String {
     s.chars().take(n).collect()
 }
 
-/// TODO identity (F5-FR5): Unicode lowercase; every char that is neither alphanumeric nor
-/// whitespace dropped ("I'll" → "ill", "follow-up" → "followup"); whitespace runs collapsed to
-/// one space; trimmed.
+/// TODO identity (F5-FR5): NFC, so a composed and a decomposed "é" are the same letter; Unicode
+/// lowercase with "ß" folded to "ss" (so "Straße" matches "STRASSE"); every char that is neither
+/// alphanumeric nor whitespace dropped ("I'll" → "ill", "follow-up" → "followup"); whitespace
+/// runs collapsed to one space; trimmed.
 pub fn normalise(text: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
     let kept: String = text
+        .nfc()
+        .collect::<String>()
         .to_lowercase()
+        .replace('ß', "ss")
         .chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
         .collect();

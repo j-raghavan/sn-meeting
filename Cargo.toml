@@ -32,6 +32,8 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock", "s
 minijinja = { version = "=2.24.0", default-features = false, features = ["builtins", "serde", "fuel"] }
 # TODO ids (F5-FR5); already in the graph through rig. v4 only.
 uuid = { version = "1", default-features = false, features = ["v4"] }
+# NFC for the to-do merge key (F5-FR5), so composed and decomposed accents match.
+unicode-normalization = "0.1.25"
 jni = "0.22.4"
 wiremock = "0.6"
 tempfile = "3"

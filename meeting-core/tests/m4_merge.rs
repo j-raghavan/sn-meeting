@@ -228,3 +228,39 @@ fn todos_with_no_words_are_dropped_when_parsed() {
     let e = parse(&reply.to_string()).unwrap();
     assert_eq!(e.todos, vec![todo("🎉 Ship it", None, None)]);
 }
+
+#[test]
+fn unicode_forms_match() {
+    // F5-FR5's identity is by meaning, not bytes: a composed and a decomposed "é" are one
+    // letter (NFC), and "ß" matches "SS" (case folding).
+    assert_eq!(
+        summarise::normalise("Book the Café"),
+        summarise::normalise("book the cafe\u{301}")
+    );
+    assert_eq!(
+        summarise::normalise("Send the Straße map"),
+        summarise::normalise("SEND THE STRASSE MAP")
+    );
+    let mut s = sc();
+    merge(
+        &mut s,
+        x(
+            None,
+            vec![
+                todo("Send the Straße map", None, None),
+                todo("Book the Café", None, None),
+            ],
+        ),
+        "t0",
+        counter(),
+    );
+    s.todos[0].done = true;
+    let again = vec![
+        todo("SEND THE STRASSE MAP", Some("me"), None),
+        todo("Book the cafe\u{301}", None, None),
+    ];
+    merge(&mut s, x(None, again), "t1", counter());
+    assert_eq!(s.todos.len(), 2, "{:?}", s.todos);
+    assert!(s.todos[0].done);
+    assert_eq!(s.todos[0].owner.as_deref(), Some("me"));
+}

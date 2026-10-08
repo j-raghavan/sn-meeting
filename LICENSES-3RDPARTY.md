@@ -42,3 +42,5 @@ dependencies are permissively licensed (MIT / Apache-2.0 / ISC / BSD style).
 | minijinja (template layouts, F11) | 2.24.0 | Apache-2.0 |
 | memo-map (minijinja dependency) | 0.3 | Apache-2.0 |
 | uuid (to-do ids) | 1 | Apache-2.0 OR MIT |
+| unicode-normalization (NFC for the to-do merge key) | 0.1.25 | MIT OR Apache-2.0 |
+| tinyvec (unicode-normalization dependency) | 1.13.3 | Zlib OR Apache-2.0 OR MIT |
