@@ -230,6 +230,43 @@ fn model_overrides_win_and_clear() {
 }
 
 #[test]
+fn a_model_override_is_cleared_when_its_provider_changes() {
+    // S2: an OpenAI model name must not be sent to Gemini.
+    let e = Env::new();
+    openai_only(&e);
+    e.key(
+        "copilot-key-gemini.txt",
+        &format!("provider=gemini\nkey={GE}\nmodel=gemini-3.8-flash\n"),
+    );
+    let app = e.app();
+    set(
+        &app,
+        json!({"summarise": {"provider": "openai", "model": "gpt-x"}}),
+    );
+    let s = set(&app, json!({"summarise": {"provider": "gemini"}}));
+    assert_eq!(s["settings"]["summarise"]["model"], json!(null), "{s}");
+    assert_eq!(
+        s["effective"]["summarise"],
+        json!({"provider": "gemini", "model": "gemini-3.8-flash", "modelSource": "keyFile"})
+    );
+    // Clearing the provider back to automatic clears it too.
+    set(
+        &app,
+        json!({"transcribe": {"provider": "openai", "model": "whisper-1"}}),
+    );
+    let s = set(&app, json!({"transcribe": {"provider": null}}));
+    assert_eq!(s["settings"]["transcribe"]["model"], json!(null));
+    // A model sent with the new provider is kept; an unrelated patch keeps both.
+    let s = set(
+        &app,
+        json!({"transcribe": {"provider": "gemini", "model": "gemini-x"}}),
+    );
+    assert_eq!(s["settings"]["transcribe"]["model"], "gemini-x");
+    let s = set(&app, json!({"mic": "auto"}));
+    assert_eq!(s["settings"]["transcribe"]["model"], "gemini-x");
+}
+
+#[test]
 fn core_owned_fields_and_bad_patches() {
     let e = Env::new();
     let app = e.app();

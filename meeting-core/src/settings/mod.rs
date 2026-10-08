@@ -397,7 +397,13 @@ fn check_role(
     if next.role(role) == current.role(role) {
         return Ok(());
     }
+    let old = current.role(role);
     let rs = next.role_mut(role);
+    // S2: a model override belongs to its provider; switching provider without naming a
+    // model drops it (an OpenAI model name must not be sent to Gemini).
+    if rs.provider != old.provider && rs.model == old.model {
+        rs.model = None;
+    }
     rs.model = rs
         .model
         .take()
