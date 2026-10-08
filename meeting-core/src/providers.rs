@@ -44,6 +44,10 @@ impl Default for Endpoints {
 /// `WebPkiServerVerifier` and never reaches rustls-platform-verifier (reqwest async_impl/client.rs
 /// `tls_certs_only`). Only the connect phase has a reqwest timeout; callers bound the whole call
 /// with one `tokio::time::timeout`.
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the one place a reqwest client is built (F1-FR9)"
+)]
 pub fn http_client(connect_timeout: Duration, https_only: bool) -> Result<reqwest::Client, String> {
     let roots = webpki_root_certs::TLS_SERVER_ROOT_CERTS
         .iter()

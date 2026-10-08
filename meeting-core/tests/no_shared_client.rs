@@ -7,22 +7,41 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Client-construction routes, and where each is allowed (file, enclosing fn). Explicit.
+/// Matched with all whitespace removed, so `builder ()` and `Client as Default` are caught.
 const RULES: &[(&str, &[(&str, &str)])] = &[
     ("ReqwestClient::default", &[]),
     ("Client::default", &[]),
+    ("Http::default", &[]), // providers' alias for reqwest::Client
     ("ClientBuilder::default", &[]),
     ("ClientBuilder::new", &[]),
-    ("Client as Default>", &[]), // <reqwest::Client as Default>, <ReqwestClient as Default>
-    ("reqwest::Client as", &[]), // use …::reqwest::Client as Http;
-    ("ReqwestClient as", &[]),   // use rig_reqwest::ReqwestClient as Transport;
+    ("ClientasDefault>", &[]), // <reqwest::Client as Default>, <ReqwestClient as Default>
+    ("reqwest::Clientas", &[]), // use …::reqwest::Client as Http;
+    ("ReqwestClientas", &[]),  // use rig_reqwest::ReqwestClient as Transport;
     ("providers::registry", &[]), // registry::connect / ProviderRef: the shared client
     ("registry::connect", &[]),
     (".completion_model()", &[]), // ProviderRef::completion_model, credentials from env
+    // Called or named (`let f = Client::builder; f()`).
     (
-        "Client::builder()",
+        "Client::builder",
         &[("providers.rs", "pub fn http_client(")],
     ),
 ];
+
+/// In the providers module, where a client type is in scope, a bare `Default::default()` can
+/// build one (`fn a() -> reqwest::Client { Default::default() }`); only `..Default::default()`
+/// (struct update) is allowed there.
+fn bare_defaults(name: &str, squeezed: &str) -> usize {
+    if name != "providers.rs" && !name.starts_with("providers/") {
+        return 0;
+    }
+    let all = squeezed.matches("Default::default()").count();
+    all - squeezed.matches("..Default::default()").count()
+}
+
+/// `s` with every whitespace character removed.
+fn squeeze(s: &str) -> String {
+    s.chars().filter(|c| !c.is_whitespace()).collect()
+}
 
 /// Every `.rs` under `dir`, as (path relative to src, contents).
 fn sources(dir: &Path, base: &Path, out: &mut Vec<(String, String)>) {
@@ -57,17 +76,21 @@ fn code(src: &str) -> String {
 /// Every rule `src` (file `name`) breaks.
 fn violations(name: &str, src: &str) -> Vec<String> {
     let src = code(src);
+    let squeezed = squeeze(&src);
     let mut out = Vec::new();
     for (pattern, allowed) in RULES {
         let allowed_hits: usize = allowed
             .iter()
             .filter(|(f, _)| *f == name)
             .filter_map(|(_, sig)| function(&src, sig))
-            .map(|body| body.matches(pattern).count())
+            .map(|body| squeeze(body).matches(pattern).count())
             .sum();
-        if src.matches(pattern).count() > allowed_hits {
+        if squeezed.matches(pattern).count() > allowed_hits {
             out.push(format!("{pattern} in src/{name}"));
         }
+    }
+    if bare_defaults(name, &squeezed) > 0 {
+        out.push(format!("a bare Default::default() in src/{name}"));
     }
     out
 }
@@ -117,6 +140,28 @@ fn every_route_is_flagged() {
     for f in fixtures {
         assert!(!violations("app.rs", f).is_empty(), "not flagged: {f}");
     }
+    // Review 3: a client from a bare Default, the builder by name, or with a space.
+    for f in [
+        "fn a() -> reqwest::Client { Default::default() }",
+        "fn b() -> rig_reqwest::ReqwestClient { Default::default() }",
+        "let f = reqwest::Client::builder; f().build()",
+        "reqwest::Client::builder ().build()",
+        "let c = Http::default();",
+    ] {
+        for file in ["providers.rs", "providers/calls.rs"] {
+            assert!(
+                !violations(file, f).is_empty(),
+                "not flagged in {file}: {f}"
+            );
+        }
+    }
+    // The builder by name or spaced is flagged anywhere, inside http_client or not.
+    let named = "pub fn http_client(t: u8) -> X {\n    let f = reqwest::Client::builder;\n    f().build()\n}\n";
+    assert!(
+        violations("providers.rs", named).is_empty(),
+        "allowed in http_client"
+    );
+    assert!(!violations("app.rs", named).is_empty());
     // Client::builder() is fine inside http_client in providers.rs, and only there.
     let ok = "pub fn http_client(t: u8) -> X {\n    reqwest::Client::builder().build()\n}\n";
     assert_eq!(violations("providers.rs", ok), Vec::<String>::new());
@@ -138,6 +183,9 @@ fn struct_defaults_and_comments_are_not_flagged() {
     ] {
         assert_eq!(violations("app.rs", f), Vec::<String>::new(), "{f}");
     }
+    // In the providers module a struct update default is still fine.
+    let ok = "let r = CallError { kind, ..Default::default() };\nlet e = Endpoints::default();";
+    assert_eq!(violations("providers.rs", ok), Vec::<String>::new());
 }
 
 /// R8 / ADR D1: rig and reqwest are named only inside the providers module (`providers.rs`
