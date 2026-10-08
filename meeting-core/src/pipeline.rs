@@ -4,7 +4,7 @@
 use crate::jobs::{self, Cancel};
 use crate::keyfile::ProviderKey;
 use crate::library::{self, LibError, Library};
-use crate::providers::{self, AudioIn, Endpoints, Http};
+use crate::providers::{self, AudioIn, CallFail, Endpoints, Http};
 use crate::sidecar::{ProviderRun, SegmentFlag, Sidecar};
 use crate::status::{self, Event, Phase};
 use std::path::{Path, PathBuf};
@@ -35,6 +35,9 @@ pub struct JobPlan {
     pub summarise: Option<(ProviderKey, String)>,
     /// Why there is no summarise provider, for a transcription that ends without a summary.
     pub summarise_problem: Option<String>,
+    /// The transcription model for the one retry when the account can't use the chosen one
+    /// (D1).
+    pub transcribe_fallback: Option<String>,
     /// The summarise provider's named default, for the one retry when the model is rejected
     /// (F4-FR3).
     pub summarise_fallback: Option<String>,
@@ -113,6 +116,8 @@ pub async fn transcribe(
         return fail(NO_AUDIO.into());
     }
     let vocabulary = vocabulary(plan, tid.as_deref().unwrap_or_default());
+    let mut model = model.clone();
+    let mut fallback = plan.transcribe_fallback.clone().filter(|f| *f != model);
     for seg in pending {
         if cancel.is_cancelled() {
             return fail("Cancelled".into());
@@ -126,15 +131,31 @@ pub async fn transcribe(
             Err(msg) => return fail(msg),
         };
         let budget = plan.budgets.transcribe(seg.duration_ms);
-        let r = jobs::with_retry(cancel, budget, || {
-            let audio = AudioIn {
-                bytes: bytes.clone(),
-                file_name: seg.file.clone(),
-                prompt: vocabulary.clone(),
-            };
-            providers::transcribe(&plan.http, &plan.endpoints, key, model, audio)
-        })
-        .await;
+        let call = |m: String| {
+            let (bytes, vocabulary) = (&bytes, &vocabulary);
+            let file = seg.file.clone();
+            async move {
+                let f = || {
+                    let audio = AudioIn {
+                        bytes: bytes.clone(),
+                        file_name: file.clone(),
+                        prompt: vocabulary.clone(),
+                    };
+                    providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio)
+                };
+                jobs::with_retry(cancel, budget, f).await
+            }
+        };
+        let mut r = call(model.clone()).await;
+        // D1: a model the account can't use is retried once, for good, with the fallback.
+        if let Err(e) = &r
+            && e.kind == CallFail::ModelRejected
+            && let Some(fb) = fallback.take()
+        {
+            model = fb;
+            ran_with(lib, lock, id, key, &model)?;
+            r = call(model.clone()).await;
+        }
         let text = match r {
             Ok(t) => t,
             Err(e) => return fail(e.detail),
@@ -155,6 +176,27 @@ pub async fn transcribe(
         return Ok(p);
     }
     summarise(lib, lock, id, plan, cancel).await
+}
+
+/// Record that transcription now runs with `model`.
+fn ran_with(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    key: &ProviderKey,
+    model: &str,
+) -> Result<(), JobError> {
+    locked(lock, || {
+        lib.update(id, |sc, _| {
+            sc.providers.transcribe = Some(ProviderRun {
+                provider: key.provider,
+                model: model.to_owned(),
+                extra: Default::default(),
+            });
+            Ok(())
+        })
+    })
+    .map_err(JobError::Storage)
 }
 
 /// Store `text` (and `flag`) on the segment. The sidecar is re-read: only the segment the job

@@ -84,6 +84,9 @@ impl App {
             Err(e) if job == Job::Transcribe => (None, Some(e)),
             Err(e) => return Err(e),
         };
+        let transcribe_fallback = transcribe
+            .as_ref()
+            .and_then(|(k, m)| settings::transcribe_fallback(k.provider, m));
         let summarise_fallback = summarise
             .as_ref()
             .map(|(k, _)| fallback_model(k.provider).to_owned());
@@ -93,6 +96,7 @@ impl App {
             transcribe,
             summarise,
             summarise_problem,
+            transcribe_fallback,
             summarise_fallback,
             default_template: self.effective_default(&s),
             templates: self.templates.effective(),

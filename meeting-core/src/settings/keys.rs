@@ -47,6 +47,32 @@ impl Role {
     }
 }
 
+/// D2: the transcription models tried, in order, when none is chosen; the first is the code
+/// default. Gemini also takes the first listed model whose id contains "flash".
+pub fn transcribe_candidates(p: Provider) -> &'static [&'static str] {
+    match p {
+        Provider::OpenAi => &[
+            "gpt-transcribe",
+            "gpt-4o-transcribe",
+            "gpt-4o-mini-transcribe",
+            "whisper-1",
+        ],
+        Provider::Gemini => &["gemini-3.8-flash"],
+        Provider::Anthropic => &[],
+    }
+}
+
+/// D1: the one model a transcription retries with when `model` is refused: the next known
+/// transcription model after it (the first other one when `model` isn't a known one).
+pub fn transcribe_fallback(p: Provider, model: &str) -> Option<String> {
+    let c = transcribe_candidates(p);
+    let after = c.iter().position(|m| *m == model).map_or(0, |i| i + 1);
+    c[after.min(c.len())..]
+        .iter()
+        .find(|m| **m != model)
+        .map(|m| (*m).to_owned())
+}
+
 impl Settings {
     pub fn role(&self, r: Role) -> &RoleSettings {
         match r {

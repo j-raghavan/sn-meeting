@@ -49,7 +49,7 @@ async fn call(p: Provider, uri: &str) -> Result<String, CallError> {
         }
     };
     r.map(|r| r.text())
-        .map_err(|e| classify_call(p, &e, &[key(p)]))
+        .map_err(|e| classify_call(p, "m", &e, &[key(p)]))
 }
 
 /// A server answering every POST with `t`, and the failure one call gets from it.

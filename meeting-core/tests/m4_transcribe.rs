@@ -60,6 +60,7 @@ fn plan(uri: &str) -> JobPlan {
         transcribe: Some((key, "gpt-transcribe".into())),
         summarise: None,
         summarise_problem: None,
+        transcribe_fallback: None,
         summarise_fallback: None,
         default_template: "general".into(),
         templates: vec![],

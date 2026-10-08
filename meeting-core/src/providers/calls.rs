@@ -23,14 +23,14 @@ pub type Http = reqwest::Client;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CallFail {
-    /// 401/403, or Gemini's 400 `API_KEY_INVALID`.
+    /// 401, a 403 naming the key or authentication, or Gemini's 400 `API_KEY_INVALID`.
     KeyRejected,
     /// 413, or Gemini's request-size 400: never retried.
     TooLarge,
     /// 408/425/429/5xx: one automatic retry.
     Retryable,
-    /// A 400/404 naming the model or the output format: summarise retries once with the
-    /// provider's default model (F4-FR3).
+    /// A 403/404 about the model (the account can't use it), or a 400/404 naming the model or
+    /// the output format: a job retries once with another model (F4-FR3, D1).
     ModelRejected,
     /// Any other non-2xx reply.
     Http,
@@ -130,7 +130,7 @@ pub async fn transcribe(
             ));
         }
     };
-    let text = reply.map_err(|e| classify_call(key.provider, &e, &[key.expose()]))?;
+    let text = reply.map_err(|e| classify_call(key.provider, model, &e, &[key.expose()]))?;
     let text = text.trim();
     Ok(if text.is_empty() { NO_SPEECH } else { text }.to_owned())
 }
@@ -186,7 +186,7 @@ pub async fn complete_json(
             c.completion(model).call(req).await
         }
     };
-    let r = reply.map_err(|e| classify_call(key.provider, &e, &secret))?;
+    let r = reply.map_err(|e| classify_call(key.provider, model, &e, &secret))?;
     match r.stop() {
         StopReason::Stop => {}
         StopReason::Length => return Err(bad("The summary was cut off".into())),
@@ -220,8 +220,9 @@ pub fn provider_name(p: Provider) -> &'static str {
     }
 }
 
-/// Map a rig error to a job outcome. `secrets` are the key values to scrub.
-pub fn classify_call(p: Provider, e: &ProviderError, secrets: &[&str]) -> CallError {
+/// Map a rig error from a call to `model` to a job outcome. `secrets` are the key values to
+/// scrub.
+pub fn classify_call(p: Provider, model: &str, e: &ProviderError, secrets: &[&str]) -> CallError {
     let name = provider_name(p);
     let mk = |kind, status, retry_after, detail: String| CallError {
         kind,
@@ -237,7 +238,7 @@ pub fn classify_call(p: Provider, e: &ProviderError, secrets: &[&str]) -> CallEr
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.trim().parse::<u64>().ok())
             .map(Duration::from_secs);
-        let (kind, detail) = classify_status(name, code, body);
+        let (kind, detail) = classify_status(name, model, code, body);
         return mk(kind, Some(code), retry_after, detail);
     }
     match e {
@@ -260,23 +261,44 @@ pub fn classify_call(p: Provider, e: &ProviderError, secrets: &[&str]) -> CallEr
     }
 }
 
-/// A non-2xx reply's kind and user-facing detail.
-fn classify_status(name: &str, code: u16, body: &str) -> (CallFail, String) {
+/// A non-2xx reply's kind and user-facing detail. `model` is the model the call asked for.
+/// A 403 or 404 about the model (no access, not found) is the model's problem, not the key's
+/// (D1): only a 401, or a 403 that names the key or authentication, rejects the key.
+fn classify_status(name: &str, model: &str, code: u16, body: &str) -> (CallFail, String) {
     let lower = body.to_ascii_lowercase();
     let too_large = || (CallFail::TooLarge, format!("Segment too large for {name}"));
     let names_model = ["model", "json_schema", "response_format", "output_config"]
         .iter()
         .any(|w| lower.contains(w))
         || lower.contains("responsejsonschema");
+    let model_access = lower.contains("model_not_found")
+        || lower.contains("does not have access")
+        || (lower.contains("model") && (lower.contains("not found") || lower.contains("access")))
+        || (!model.is_empty() && lower.contains(&model.to_ascii_lowercase()));
+    let names_key = ["key", "auth", "credential"]
+        .iter()
+        .any(|w| lower.contains(w));
+    let key_rejected = || {
+        (
+            CallFail::KeyRejected,
+            format!("{name} rejected the key ({code})"),
+        )
+    };
     match code {
-        401 | 403 => (
-            CallFail::KeyRejected,
-            format!("{name} rejected the key ({code})"),
-        ),
-        400 if body.contains("API_KEY_INVALID") => (
-            CallFail::KeyRejected,
-            format!("{name} rejected the key ({code})"),
-        ),
+        401 => key_rejected(),
+        403 | 404 if model_access => {
+            let m = if model.is_empty() {
+                "this model"
+            } else {
+                model
+            };
+            (
+                CallFail::ModelRejected,
+                format!("Your {name} account can't use {m}"),
+            )
+        }
+        403 if names_key => key_rejected(),
+        400 if body.contains("API_KEY_INVALID") => key_rejected(),
         413 => too_large(),
         400 if lower.contains("request payload size") || lower.contains("too large") => too_large(),
         400 | 404 if names_model => (CallFail::ModelRejected, classify_http(code, body).1),
@@ -319,9 +341,10 @@ mod tests {
 
     #[test]
     fn statuses_map_to_job_outcomes() {
-        let k = |code, body| classify_status("Gemini", code, body).0;
+        let k = |code, body| classify_status("Gemini", "m", code, body).0;
         assert_eq!(k(401, ""), CallFail::KeyRejected);
-        assert_eq!(k(403, ""), CallFail::KeyRejected);
+        assert_eq!(k(403, ""), CallFail::Http);
+        assert_eq!(k(403, "API key not valid"), CallFail::KeyRejected);
         assert_eq!(k(400, "API_KEY_INVALID"), CallFail::KeyRejected);
         assert_eq!(k(413, ""), CallFail::TooLarge);
         assert_eq!(
@@ -339,29 +362,78 @@ mod tests {
         }
         assert_eq!(k(302, ""), CallFail::Http);
         assert_eq!(
-            classify_status("OpenAI", 401, "").1,
+            classify_status("OpenAI", "m", 401, "").1,
             "OpenAI rejected the key (401)"
         );
         assert_eq!(
-            classify_status("Gemini", 413, "").1,
+            classify_status("Gemini", "m", 413, "").1,
             "Segment too large for Gemini"
+        );
+    }
+
+    /// D1: a 403 for a model the account can't use is not a key problem.
+    #[test]
+    fn model_access_is_not_a_key_rejection() {
+        let access = r#"{"error":{"message":"Project `proj_abc123` does not have access to model `gpt-transcribe`","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#;
+        let (kind, detail) = classify_status("OpenAI", "gpt-transcribe", 403, access);
+        assert_eq!(kind, CallFail::ModelRejected);
+        assert_eq!(detail, "Your OpenAI account can't use gpt-transcribe");
+        let gone = r#"{"error":{"message":"The model `gpt-x` does not exist or you do not have access to it.","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#;
+        assert_eq!(
+            classify_status("OpenAI", "gpt-x", 404, gone),
+            (
+                CallFail::ModelRejected,
+                "Your OpenAI account can't use gpt-x".into()
+            )
+        );
+        let gemini = r#"{"error":{"code":404,"message":"models/gemini-x is not found for API version v1beta","status":"NOT_FOUND"}}"#;
+        assert_eq!(
+            classify_status("Gemini", "gemini-x", 404, gemini).1,
+            "Your Gemini account can't use gemini-x"
+        );
+        assert_eq!(
+            classify_status("OpenAI", "", 403, access).1,
+            "Your OpenAI account can't use this model"
+        );
+        let bad_key = r#"{"error":{"message":"Incorrect API key provided: sk-proj-****abcd. You can find your API key at https://platform.openai.com/account/api-keys.","type":"invalid_request_error","param":null,"code":"invalid_api_key"}}"#;
+        assert_eq!(
+            classify_status("OpenAI", "gpt-transcribe", 401, bad_key),
+            (
+                CallFail::KeyRejected,
+                "OpenAI rejected the key (401)".into()
+            )
+        );
+        let denied = r#"{"error":{"code":403,"message":"Method doesn't allow unregistered callers (callers without established identity). Please use API Key or other form of API consumer identity to call this API.","status":"PERMISSION_DENIED"}}"#;
+        assert_eq!(
+            classify_status("Gemini", "gemini-3.8-flash", 403, denied).0,
+            CallFail::KeyRejected
+        );
+        let region = r#"{"error":{"code":"unsupported_country_region_territory","message":"Country, region, or territory not supported"}}"#;
+        assert_eq!(
+            classify_status("OpenAI", "gpt-4o-transcribe", 403, region).0,
+            CallFail::Http
         );
     }
 
     #[test]
     fn errors_without_a_reply() {
         let e = ProviderError::Truncated;
-        let c = classify_call(Provider::OpenAi, &e, &[]);
+        let c = classify_call(Provider::OpenAi, "m", &e, &[]);
         assert_eq!(
             (c.kind, c.detail.as_str()),
             (CallFail::NoConnection, "No connection")
         );
         let e = ProviderError::Response("no candidates".into());
-        let c = classify_call(Provider::Gemini, &e, &[]);
+        let c = classify_call(Provider::Gemini, "m", &e, &[]);
         assert_eq!(c.kind, CallFail::BadResponse);
         assert_eq!(c.detail, "Unexpected reply from Gemini: no candidates");
         let j = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
-        let c = classify_call(Provider::Anthropic, &ProviderError::Json(j.into()), &[]);
+        let c = classify_call(
+            Provider::Anthropic,
+            "m",
+            &ProviderError::Json(j.into()),
+            &[],
+        );
         assert!(
             c.detail
                 .starts_with("Unexpected reply from Anthropic: JSON:"),
@@ -369,12 +441,18 @@ mod tests {
         );
         let c = classify_call(
             Provider::Anthropic,
+            "m",
             &ProviderError::Url(reqwest::Url::parse("").unwrap_err()),
             &[],
         );
         assert_eq!(c.detail, "Unexpected reply from Anthropic: Url");
         let other = http_client::Error::NoHeaders;
-        let c = classify_call(Provider::OpenAi, &ProviderError::Http(other.into()), &[]);
+        let c = classify_call(
+            Provider::OpenAi,
+            "m",
+            &ProviderError::Http(other.into()),
+            &[],
+        );
         assert_eq!(c.detail, "No connection: transport");
     }
 
