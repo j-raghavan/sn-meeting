@@ -172,4 +172,17 @@ class SegmentedRecorderTest {
         events.onApproachingLimit(); events.onLimitReached(); events.onError(1)
         assertEquals(emptyList<String>(), log)
     }
+
+    @Test fun noAudioOnTheOnlySegmentLeavesNothing() { // F2-FR7
+        stopOk = false; startUsb(); sr.stop()
+        assertEquals(listOf("stop false", "delete 01.m4a", "close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log)
+        assertEquals(null to "Too short — nothing saved", ended)
+    }
+
+    @Test fun noAudioInALaterSegmentKeepsTheMeeting() {
+        startUsb(); events.onApproachingLimit(); now += 900_000; events.onNextFileStarted()
+        stopOk = false; now += 100; sr.stop()
+        assertEquals(listOf("stop false", "delete 02.m4a", "close 1 02.m4a measure=false ~0", "finish 900100 '' discard=false"), log.takeLast(4))
+        assertEquals(id to "Saved", ended)
+    }
 }

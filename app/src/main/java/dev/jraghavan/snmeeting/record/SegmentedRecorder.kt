@@ -97,8 +97,7 @@ class SegmentedRecorder(
         override fun onLimitReached() {
             if (phase != Phase.RECORDING) return
             // Fallback (R1): stop + restart; each gap < 1 s, measured from offsets and durations.
-            rec.stop()
-            closeCurrent()
+            closeCurrent(rec.stop())
             val next = pathFor(index + 2)
             armed = null
             try {
@@ -130,24 +129,28 @@ class SegmentedRecorder(
         when (phase) {
             Phase.BEGINNING -> { phase = Phase.ENDED; listener.onEnded(null, "Recording cancelled") }
             Phase.RECORDING -> {
-                rec.stop()
-                closeCurrent()
-                finish(reason)
+                val finalised = rec.stop()
+                closeCurrent(finalised)
+                finish(reason, nothingKept = !finalised && index == 0)
             }
             else -> Unit
         }
     }
 
-    private fun closeCurrent() {
-        val estimate = clock.elapsedMs() - t0 - lastOffset
-        core.closeSegment(begun.id, index, pathFor(index + 1), measure = true, fallbackMs = estimate)
+    /** F2-FR7: a stop with no audio deletes that file; the core then reads the segment as empty. */
+    private fun closeCurrent(finalised: Boolean) {
+        val path = pathFor(index + 1)
+        if (!finalised) storage.delete(path)
+        val estimate = if (finalised) clock.elapsedMs() - t0 - lastOffset else 0
+        core.closeSegment(begun.id, index, path, measure = finalised, fallbackMs = estimate)
     }
 
-    private fun finish(reason: EndReason) {
+    /** [nothingKept]: the only segment had no audio, so the meeting is deleted (F2-FR7). */
+    private fun finish(reason: EndReason, nothingKept: Boolean = false) {
         phase = Phase.STOPPING
-        core.finish(begun.id, clock.elapsedMs() - t0, reason.note, discard = false) {
+        core.finish(begun.id, clock.elapsedMs() - t0, reason.note, discard = nothingKept) {
             phase = Phase.ENDED
-            listener.onEnded(begun.id, reason.message)
+            listener.onEnded(if (nothingKept) null else begun.id, if (nothingKept) TOO_SHORT else reason.message)
         }
     }
 
@@ -167,6 +170,7 @@ class SegmentedRecorder(
 
     companion object {
         const val CANT_START = "Couldn't start the recorder"
+        const val TOO_SHORT = "Too short — nothing saved"
 
         /** The size at which to switch files: the plan's duration at this bitrate, capped by the plan's size. */
         fun segmentBytes(b: Begun, spec: AudioSpec): Long =
