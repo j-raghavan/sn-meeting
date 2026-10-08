@@ -1,5 +1,5 @@
 //! F10-FR7: settings.json is schema-versioned, written atomically, keeps unknown fields, and a
-//! missing or corrupt file gives defaults (the bad one kept as settings.json.bad).
+//! missing or corrupt file gives defaults (the bad one kept as settings.json.<time>.bad).
 use meeting::api::Core;
 use meeting::app::App;
 use meeting::settings::{self, Origin, Settings};
@@ -93,27 +93,67 @@ fn corrupt_files_are_kept_as_bad() {
             body
         );
         assert!(!p.exists());
-        assert_eq!(
-            fs::read_to_string(d.path().join("settings.json.bad")).unwrap(),
-            body
-        );
+        assert_eq!(fs::read_to_string(bad_file(d.path())).unwrap(), body);
         // The next save writes a fresh file, which then loads normally.
         settings::save(&p, &Settings::default()).unwrap();
         assert_eq!(load(&p).1, Origin::File);
     }
 }
 
+fn no_bad_file(dir: &std::path::Path) -> bool {
+    fs::read_dir(dir)
+        .unwrap()
+        .all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".bad"))
+}
+
+/// The one `settings.json.<time>.bad` in `dir`.
+fn bad_file(dir: &std::path::Path) -> std::path::PathBuf {
+    let bad: Vec<_> = fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| {
+            let n = p.file_name().unwrap().to_string_lossy();
+            n.starts_with("settings.json.") && n.ends_with(".bad")
+        })
+        .collect();
+    assert_eq!(bad.len(), 1, "{bad:?}");
+    bad[0].clone()
+}
+
+#[test]
+fn each_corrupt_file_is_kept_under_its_own_name() {
+    // N3: a second corrupt file doesn't overwrite the first one kept.
+    let d = tempfile::tempdir().unwrap();
+    let p = settings::path_in(d.path());
+    for body in ["{one", "{two"] {
+        fs::write(&p, body).unwrap();
+        assert_eq!(load(&p).1, Origin::Recovered);
+    }
+    let mut kept: Vec<String> = fs::read_dir(d.path())
+        .unwrap()
+        .map(|e| fs::read_to_string(e.unwrap().path()).unwrap())
+        .collect();
+    kept.sort();
+    assert_eq!(kept, ["{one", "{two"]);
+}
+
 #[cfg(unix)]
 #[test]
-fn an_unreadable_file_is_recovered_too() {
+fn an_unreadable_file_is_left_where_it_is() {
+    // N3: a read error may be passing (storage not ready): the file is not moved aside.
     use std::os::unix::fs::PermissionsExt;
     let d = tempfile::tempdir().unwrap();
     let p = settings::path_in(d.path());
-    fs::write(&p, "{}").unwrap();
+    fs::write(&p, r#"{"saveFolder": "Notes"}"#).unwrap();
     fs::set_permissions(&p, fs::Permissions::from_mode(0o000)).unwrap();
-    assert_eq!(load(&p).1, Origin::Recovered);
-    let bad = d.path().join("settings.json.bad");
-    fs::set_permissions(&bad, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(load(&p), (Settings::default(), Origin::Unreadable));
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(
+        fs::read_dir(d.path()).unwrap().count(),
+        1,
+        "nothing moved or added"
+    );
+    assert_eq!(load(&p).0.save_folder, "Notes");
 }
 
 #[test]
@@ -240,7 +280,7 @@ fn newer_schema_is_not_silently_rewritten() {
         newer,
         "the file is untouched"
     );
-    assert!(!d.path().join("settings.json.bad").exists());
+    assert!(no_bad_file(d.path()));
     // schema 1 and a missing schema still load.
     fs::write(&p, r#"{"saveFolder": "Notes"}"#).unwrap();
     assert_eq!(load(&p).1, Origin::File);
@@ -278,7 +318,7 @@ fn a_wrongly_typed_field_reads_as_its_default_and_keeps_the_folders() {
     assert!(!s.notice_shown.openai);
     assert!(s.notice_shown.gemini);
     assert_eq!(s.debug.segment_ms, None);
-    assert!(!d.path().join("settings.json.bad").exists());
+    assert!(no_bad_file(d.path()));
     // And the other way round: the folders themselves wrongly typed read as their defaults.
     let v = json!({"schema": 1, "saveFolder": 7, "previousFolders": "EXPORT", "defaultTemplate": "lecture"});
     fs::write(&p, v.to_string()).unwrap();

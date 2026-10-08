@@ -179,8 +179,11 @@ pub enum Origin {
     File,
     /// No file yet (fresh install): defaults, nothing written until the first change.
     Defaults,
-    /// The file was corrupt or unreadable: kept as `settings.json.bad`, defaults in use.
+    /// The file was corrupt: kept as `settings.json.<time>.bad`, defaults in use.
     Recovered,
+    /// The file is there but can't be read now (permissions, storage not ready): left where it
+    /// is, defaults in use, and not saved over until it can be read again (N3).
+    Unreadable,
     /// Written by a newer app (a higher `schema`): kept untouched, defaults in use, and not
     /// saved over until that app's version is back (as a newer sidecar is refused).
     Newer,
@@ -201,7 +204,11 @@ pub fn load(path: &Path) -> (Settings, Origin) {
             Some(s) => (sanitised(s), Origin::File),
             None => (Settings::default(), keep_bad(path)),
         },
-        Err(_) => (Settings::default(), keep_bad(path)),
+        // Too big to be ours: as corrupt.
+        Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+            (Settings::default(), keep_bad(path))
+        }
+        Err(_) => (Settings::default(), Origin::Unreadable),
     }
 }
 
@@ -284,11 +291,24 @@ fn model_ok(m: &str) -> bool {
         && !m.chars().any(|c| c.is_whitespace() || c.is_control())
 }
 
-/// Move the bad file aside for diagnosis; the next save writes a fresh one.
+/// Move the bad file aside for diagnosis, under a name of its own
+/// (`settings.json.20261008-093000.123.bad`) so an earlier one is kept; the next save writes a
+/// fresh file.
 fn keep_bad(path: &Path) -> Origin {
-    let mut bad = path.as_os_str().to_owned();
-    bad.push(BAD_SUFFIX);
-    let _ = std::fs::rename(path, PathBuf::from(bad));
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S%.3f").to_string();
+    for n in 0..100 {
+        let mut bad = path.as_os_str().to_owned();
+        bad.push(format!(".{stamp}"));
+        if n > 0 {
+            bad.push(format!("-{n}"));
+        }
+        bad.push(BAD_SUFFIX);
+        let bad = PathBuf::from(bad);
+        if !bad.exists() {
+            let _ = std::fs::rename(path, bad);
+            break;
+        }
+    }
     Origin::Recovered
 }
 

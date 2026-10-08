@@ -387,3 +387,27 @@ fn a_cut_key_typed_as_model_is_refused() {
     let r = set(&app, json!({"transcribe": {"model": short.clone()}}));
     assert_eq!(r["settings"]["transcribe"]["model"], short);
 }
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_settings_file_is_not_saved_over() {
+    // N3: the owner's settings survive a launch that couldn't read them.
+    use std::os::unix::fs::PermissionsExt;
+    let e = Env::new();
+    let p = e.data.path().join("settings.json");
+    fs::write(&p, r#"{"saveFolder": "Notes/Meetings"}"#).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o000)).unwrap();
+    let app = e.app();
+    assert_eq!(get(&app)["origin"], "unreadable");
+    let r = set(&app, json!({"mic": "auto"}));
+    assert_eq!(
+        r["error"],
+        "settings.json can't be read just now, so it can't be changed; try again"
+    );
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o600)).unwrap();
+    let s = get(&app);
+    assert_eq!(
+        (s["origin"].as_str(), s["settings"]["saveFolder"].as_str()),
+        (Some("file"), Some("Notes/Meetings"))
+    );
+}

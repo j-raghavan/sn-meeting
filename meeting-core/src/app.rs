@@ -84,8 +84,12 @@ impl App {
         self.write.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// A file that couldn't be read at launch is tried again (N3).
     pub fn settings(&self) -> (Settings, Origin) {
-        let st = self.state();
+        let mut st = self.state();
+        if st.origin == Origin::Unreadable {
+            (st.settings, st.origin) = settings::load(&settings::path_in(&self.core.app_data_dir));
+        }
         (st.settings.clone(), st.origin)
     }
 
@@ -390,9 +394,14 @@ impl App {
             return json!({"error": "template not found", "field": "defaultTemplate"}).to_string();
         }
         {
+            self.settings(); // an unreadable file is tried again first
             let mut st = self.state();
             if st.origin == Origin::Newer {
                 let e = "settings.json is from a newer version of Meetings, so it can't be changed here";
+                return json!({"error": e, "field": null}).to_string();
+            }
+            if st.origin == Origin::Unreadable {
+                let e = "settings.json can't be read just now, so it can't be changed; try again";
                 return json!({"error": e, "field": null}).to_string();
             }
             let ks = |p| settings::key_status(&self.core.key_dir, p);
