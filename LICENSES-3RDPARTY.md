@@ -3,7 +3,8 @@
 Meetings is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`;
 see `LICENSE`). Every component below is under a permissive licence (MIT, Apache-2.0, BSD,
 ISC, MIT-0, Zlib, Unicode-3.0, CDLA-Permissive-2.0, Unlicense, SIL OFL 1.1), all compatible with
-distributing them as part of an AGPL-3.0 work.
+distributing them as part of an AGPL-3.0 work. SQLite, compiled into the library for the search
+index, is in the public domain.
 
 ## Bundled fonts
 
@@ -52,6 +53,8 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 |
 | encoding_rs | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
 | fnv | 1.0.7 | Apache-2.0 / MIT |
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 |
@@ -95,6 +98,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | jni | 0.22.4 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
 | libc | 0.2.190 | MIT OR Apache-2.0 |
+| libsqlite3-sys | 0.38.2 | MIT |
 | litemap | 0.8.3 | Unicode-3.0 |
 | log | 0.4.34 | MIT OR Apache-2.0 |
 | lru-slab | 0.1.3 | MIT OR Apache-2.0 OR Zlib |
@@ -127,6 +131,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | rig-reqwest | 0.44.0 | MIT |
 | rig-tungstenite | 0.44.0 | MIT |
 | ring | 0.17.14 | Apache-2.0 AND ISC |
+| rusqlite | 0.40.2 | MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
 | rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
@@ -183,6 +188,12 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | zerotrie | 0.2.5 | Unicode-3.0 |
 | zerovec | 0.11.8 | Unicode-3.0 |
 | zmij | 1.0.23 | MIT |
+
+## Bundled C library
+
+| Library | Via | License |
+|---------|-----|---------|
+| SQLite 3.53.2 (with FTS5) | libsqlite3-sys 0.38.2, feature `bundled` (the search index, F19) | Public domain (https://www.sqlite.org/copyright.html) |
 
 ## License notices
 

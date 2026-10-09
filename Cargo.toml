@@ -37,6 +37,9 @@ uuid = { version = "1", default-features = false, features = ["v4"] }
 unicode-normalization = "0.1.25"
 # F14-FR3: the updater compares the release tag with the installed version (as inkread-update).
 semver = "1"
+# F19-FR4 / ADR D19: the search index. `bundled` compiles SQLite with FTS5 (libsqlite3-sys
+# build.rs); no default features (no statement cache, no wasm). Exact pin, as C8.
+rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 jni = "0.22.4"
 wiremock = "0.6"
 tempfile = "3"

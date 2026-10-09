@@ -24,6 +24,7 @@ uuid = { workspace = true }
 minijinja = { workspace = true }
 unicode-normalization = { workspace = true }
 semver = { workspace = true }
+rusqlite = { workspace = true }
 jni = { workspace = true, optional = true }
 
 [features]
