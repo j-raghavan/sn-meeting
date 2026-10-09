@@ -134,7 +134,27 @@ fn push_line(out: &mut Vec<(usize, String)>, start: usize, s: &str) {
 /// written on since recognition (F19-FR7).
 pub fn meeting_units(sc: &Sidecar, notes: &[Region], changed: &[u32]) -> Vec<Unit> {
     let mut out = Vec::new();
-    for (si, seg) in sc.segments.iter().enumerate() {
+    // F15-FR6: a near-live meeting's transcript is its chunks', indexed as each lands; its
+    // segments' text is the same words again, so it is not indexed twice.
+    for p in crate::chunk::paragraphs(sc) {
+        let Some(c) = sc.chunks.iter().find(|c| c.index == p.index) else {
+            continue;
+        };
+        if is_placeholder(p.text.trim()) {
+            continue;
+        }
+        for (li, (at, line)) in crate::chunk::lines(&p, c).into_iter().enumerate() {
+            let mut u = Unit::new(Kind::Transcript, format!("t:c{}:{li}", p.index), line);
+            u.at_ms = Some(at);
+            out.push(u);
+        }
+    }
+    let segments = if sc.chunks.is_empty() {
+        &sc.segments[..]
+    } else {
+        &[]
+    };
+    for (si, seg) in segments.iter().enumerate() {
         let Some(text) = seg.text.as_deref().map(str::trim) else {
             continue;
         };

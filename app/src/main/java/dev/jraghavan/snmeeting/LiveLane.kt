@@ -111,7 +111,10 @@ object LiveJobs {
         run = { r -> exec.execute { try { r() } catch (t: Throwable) { Log.w("Meetings", "live lane: ${t.javaClass.simpleName}") } } },
         after = { ms, r -> val f = exec.schedule({ r() }, ms, TimeUnit.MILLISECONDS); Cancel { f.cancel(false) } },
         drain = NativeBridge::nativeLiveDrain,
-        drained = { id, r -> main.post { listeners.toList().forEach { it(id, r) } } },
+        drained = { id, r ->
+            if (r.done > 0) SearchJobs.refresh() // F19-FR4: the new lines are searchable as they land
+            main.post { listeners.toList().forEach { it(id, r) } }
+        },
     )
 
     /** Main thread; the returned function unsubscribes. */
