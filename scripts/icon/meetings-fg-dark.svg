@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 432" width="432" height="432">
+<g transform="translate(216 216) scale(0.75) translate(-222 -204)">
+  <!-- Meetings mark: a desk calendar block with depth, a studio mic in front, a fountain pen leaning on it.
+       Inkwell language, as inkread's mark: solid ink shapes, details cut in paper, separations in the background colour. -->
+  <!-- Calendar block: extruded right and bottom faces (depth 22,18), page edges cut in paper -->
+  <path d="M290 112 L312 130 L312 290 L290 272 Z" fill="#F2ECDE"/>
+  <path d="M112 272 L290 272 L312 290 L134 290 Z" fill="#F2ECDE"/>
+  <path d="M134 290 L312 290 L312 130" fill="none" stroke="#F2ECDE" stroke-width="10" stroke-linejoin="round"/>
+  <g stroke="#111111" stroke-width="3" stroke-linecap="round" fill="none">
+    <line x1="140" y1="279" x2="292" y2="279"/>
+    <line x1="146" y1="285" x2="298" y2="285"/>
+    <line x1="299" y1="140" x2="299" y2="270"/>
+    <line x1="305" y1="146" x2="305" y2="276"/>
+  </g>
+  <!-- Front face -->
+  <rect x="112" y="112" width="178" height="160" rx="14" fill="#F2ECDE" stroke="#111111" stroke-width="6"/>
+  <!-- Page under the header band -->
+  <rect x="122" y="158" width="158" height="104" rx="8" fill="#111111"/>
+  <!-- Date grid 3 x 2, one day ringed (chunky so it reads at launcher size) -->
+  <g fill="#F2ECDE">
+    <rect x="138" y="172" width="34" height="30" rx="6"/><rect x="184" y="172" width="34" height="30" rx="6"/>
+    <rect x="230" y="172" width="34" height="30" rx="6"/>
+    <rect x="138" y="214" width="34" height="30" rx="6"/><rect x="230" y="214" width="34" height="30" rx="6"/>
+  </g>
+  <rect x="180" y="210" width="42" height="38" rx="10" fill="none" stroke="#F2ECDE" stroke-width="7"/>
+  <rect x="190" y="220" width="22" height="18" rx="4" fill="#F2ECDE"/>
+  <!-- Binder rings -->
+  <rect x="144" y="92" width="18" height="42" rx="9" fill="#F2ECDE" stroke="#111111" stroke-width="6"/>
+  <rect x="240" y="92" width="18" height="42" rx="9" fill="#F2ECDE" stroke="#111111" stroke-width="6"/>
+  <rect x="149" y="124" width="8" height="10" rx="4" fill="#111111"/>
+  <rect x="245" y="124" width="8" height="10" rx="4" fill="#111111"/>
+
+  <!-- Studio microphone, front left -->
+  <path d="M78 212 v14 a36 36 0 0 0 72 0 v-14" fill="none" stroke="#111111" stroke-width="22" stroke-linecap="round"/>
+  <path d="M78 212 v14 a36 36 0 0 0 72 0 v-14" fill="none" stroke="#F2ECDE" stroke-width="10" stroke-linecap="round"/>
+  <rect x="106" y="260" width="16" height="44" fill="#F2ECDE" stroke="#111111" stroke-width="6"/>
+  <rect x="78" y="298" width="72" height="18" rx="9" fill="#F2ECDE" stroke="#111111" stroke-width="6"/>
+  <rect x="88" y="144" width="52" height="96" rx="26" fill="#F2ECDE" stroke="#111111" stroke-width="7"/>
+  <g stroke="#111111" stroke-width="4" stroke-linecap="round">
+    <line x1="100" y1="168" x2="128" y2="168"/><line x1="98" y1="182" x2="130" y2="182"/>
+    <line x1="98" y1="196" x2="130" y2="196"/><line x1="100" y1="210" x2="128" y2="210"/>
+  </g>
+
+  <!-- Fountain pen leaning across the right -->
+  <g transform="rotate(32 304 236)">
+    <rect x="290" y="128" width="30" height="134" rx="13" fill="#F2ECDE" stroke="#111111" stroke-width="7"/>
+    <rect x="290" y="166" width="30" height="7" fill="#111111"/>
+    <rect x="313" y="134" width="7" height="34" rx="3" fill="#111111"/>
+    <path d="M292 262 L318 262 L305 312 Z" fill="#F2ECDE" stroke="#111111" stroke-width="6" stroke-linejoin="round"/>
+    <line x1="305" y1="274" x2="305" y2="298" stroke="#111111" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="305" cy="274" r="3.5" fill="#111111"/>
+  </g>
+</g>
+</svg>
