@@ -51,6 +51,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("rebuildIndex", api::rebuild_index()),
         ("calendarLinks", api::calendar_links()),
         ("calendarRefresh", api::calendar_refresh(false)),
+        ("agenda", api::agenda("2026-10-09", "2026-10-09")),
     ]
 }
 

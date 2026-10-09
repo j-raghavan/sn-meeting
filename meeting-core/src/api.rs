@@ -330,6 +330,12 @@ pub fn calendar_refresh(force: bool) -> String {
     with_app(|app| app.calendar_refresh_json(force))
 }
 
+/// `nativeAgenda(fromDay, toDay)` (F18-FR7): the days Home shows, from the cache and the
+/// library.
+pub fn agenda(from: &str, to: &str) -> String {
+    with_app(|app| app.agenda_json(from, to))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

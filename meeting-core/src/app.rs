@@ -11,11 +11,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+mod agenda;
 mod calendar;
 mod run;
 mod search;
 mod spend;
 mod templates;
+pub use agenda::people as agenda_people;
 pub use calendar::LinkState;
 pub use run::Job;
 pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};

@@ -519,3 +519,19 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCalendarR
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// Reads the cache and the library; call it on `CoreJobs`' background thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeAgenda<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    from_day: JString<'local>,
+    to_day: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let from: String = from_day.try_to_string(env)?;
+        let to: String = to_day.try_to_string(env)?;
+        env.new_string(crate::api::agenda(&from, &to))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

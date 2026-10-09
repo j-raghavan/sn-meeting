@@ -168,6 +168,14 @@ object NativeBridge {
      *  fetched, links, deferred?}` or `{busy: true}`. */
     external fun nativeCalendarRefresh(force: Boolean): String
 
+    /** Home's days, `YYYY-MM-DD` inclusive (at most 6 weeks): `{hasLinks, today, nowMs,
+     *  updatedAtMs, failed, days: [{day, dot, allDay: [row], rows: [row]}]}`. A row is an event
+     *  (`kind: event`, eventKey, title, startMs, endMs, location, people, calendar, recurring,
+     *  current, meetingId, marks, fromLastTime when current) or a meeting (`kind: meeting`,
+     *  meetingId, title, unscheduled, marks); marks are `{recording, notes, minutes, todosOpen,
+     *  todosTotal}`. Read from the cache: no network. */
+    external fun nativeAgenda(fromDay: String, toDay: String): String
+
     // Updates (F14).
 
     /** Is `releaseJson` (GitHub releases/latest, fetched by the shell) newer than
