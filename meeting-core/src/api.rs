@@ -316,6 +316,21 @@ pub fn chunks_to_cut(id: &str) -> String {
     with_app(|app| app.chunks_to_cut_json(id))
 }
 
+/// `nativeAddMark(id, atMs)` (F15-FR11): `{markId}`.
+pub fn add_mark(id: &str, at_ms: i64) -> String {
+    with_app(|app| app.add_mark_json(id, at_ms))
+}
+
+/// `nativeSetMarkLabel(id, markId, label)` (F15-FR11); "" clears it.
+pub fn set_mark_label(id: &str, mark_id: &str, label: &str) -> String {
+    with_app(|app| app.set_mark_label_json(id, mark_id, label))
+}
+
+/// `nativeDeleteMark(id, markId)` (F15-FR11).
+pub fn delete_mark(id: &str, mark_id: &str) -> String {
+    with_app(|app| app.delete_mark_json(id, mark_id))
+}
+
 /// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
 /// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
 /// capture thread can ask at any time.

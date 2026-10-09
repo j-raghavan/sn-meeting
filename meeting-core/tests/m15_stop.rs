@@ -148,6 +148,9 @@ fn at_stop_only_the_pending_chunks_are_sent_then_the_minutes_once() {
     let fx = Fx::new();
     fx.transcribes("the last words.");
     fx.chunks(40, 2);
+    let mark = parse(&fx.app.add_mark_json(ID0, 761_000));
+    fx.app
+        .set_mark_label_json(ID0, mark["markId"].as_str().unwrap(), "Budget decision");
     fx.stop(42 * 30_000);
     assert_eq!(fx.sc().status, meeting::status::Status::Recorded);
     let app = fx.app.clone();
@@ -159,6 +162,11 @@ fn at_stop_only_the_pending_chunks_are_sent_then_the_minutes_once() {
     let summaries = fx.requests("/v1/responses");
     assert_eq!(summaries.len(), 1, "the minutes are filled once");
     assert!(summaries[0].contains("line 39.") && summaries[0].contains("the last words."));
+    // F15-FR11: the marks go with the one summarise call.
+    assert!(
+        summaries[0].contains("The user marked these moments:")
+            && summaries[0].contains("[0:12:41] Budget decision")
+    );
     let sc = fx.sc();
     assert!(sc.chunks.iter().all(|c| c.state == ChunkState::Done));
     assert_eq!(sc.providers.transcribe.as_ref().unwrap().model, "whisper-1");

@@ -216,20 +216,36 @@ object TranscriptPages {
     }
 
     /**
-     * F19-FR3: the paragraph spoken at [ms] (the last segment starting at or before it, its first
-     * paragraph), as (page, index on that page) of [pages] built from [segments]; null when none.
+     * F15-FR11: the paragraphs with each mark as its own line, `◆ [0:12:41] Mark`, before the
+     * first paragraph that starts after it.
      */
-    fun locate(segments: List<Segment>, ms: Long, budget: Int = PAGE_CHARS): Pair<Int, Int>? {
-        var flat = 0
-        var found: Int? = null
+    fun paragraphs(segments: List<Segment>, marks: List<Mark>): List<Para> = timed(segments, marks).map { it.second }
+
+    /** Each paragraph, with its segment's start on the first of each segment's paragraphs. */
+    private fun timed(segments: List<Segment>, marks: List<Mark>): List<Pair<Long?, Para>> {
+        val left = ArrayDeque(marks.sortedBy { it.atMs })
+        val out = mutableListOf<Pair<Long?, Para>>()
         for (s in segments.filter { !it.text.isNullOrBlank() }) {
-            if (s.startOffsetMs <= ms) found = flat
-            flat += paragraphs(listOf(s)).size
+            while (left.isNotEmpty() && left.first().atMs < s.startOffsetMs) out += null to Para(null, left.removeFirst().line)
+            paragraphs(listOf(s)).forEachIndexed { i, p -> out += (if (i == 0) s.startOffsetMs else null) to p }
         }
-        val target = found ?: return null
+        left.forEach { out += null to Para(null, it.line) }
+        return out
+    }
+
+    /**
+     * F19-FR3: the paragraph spoken at [ms] (the last segment starting at or before it, its first
+     * paragraph), as (page, index on that page) of the pages built from [segments] and [marks];
+     * null when none.
+     */
+    fun locate(segments: List<Segment>, ms: Long, budget: Int = PAGE_CHARS, marks: List<Mark> = emptyList()): Pair<Int, Int>? {
+        val all = timed(segments, marks)
+        var target: Int? = null
+        all.forEachIndexed { i, (start, _) -> if (start != null && start <= ms) target = i }
+        val t = target ?: return null
         var seen = 0
-        pages(paragraphs(segments), budget).forEachIndexed { pi, page ->
-            if (target < seen + page.size) return pi to (target - seen)
+        pages(all.map { it.second }, budget).forEachIndexed { pi, page ->
+            if (t < seen + page.size) return pi to (t - seen)
             seen += page.size
         }
         return null

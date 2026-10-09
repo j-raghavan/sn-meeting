@@ -2,6 +2,18 @@ package dev.jraghavan.snmeeting.model
 
 import org.json.JSONObject
 
+/** F15-FR11: a timestamped marker on the recording clock, perhaps labelled. */
+data class Mark(val id: String, val atMs: Long, val label: String?) {
+    /** `◆ [0:12:41] Mark`, or its label. */
+    val line: String get() = "◆ [${Format.duration(atMs)}] ${label ?: "Mark"}"
+
+    companion object {
+        fun from(o: JSONObject): Mark? {
+            return Mark(o.str("id") ?: return null, o.long("atMs") ?: return null, o.str("label"))
+        }
+    }
+}
+
 /** One whole line of the live transcript, at its estimated recording-clock time (F15-FR6). */
 data class LiveLine(val n: Int, val atMs: Long, val text: String)
 

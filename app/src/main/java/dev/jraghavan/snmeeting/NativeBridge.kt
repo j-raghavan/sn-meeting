@@ -141,6 +141,15 @@ object NativeBridge {
      *  durationMs}]`), then reported with [nativeChunkReady]. */
     external fun nativeChunksToCut(id: String): String
 
+    /** F15-FR11: a mark at recording-clock [atMs] (LiveClock). `{markId}`. */
+    external fun nativeAddMark(id: String, atMs: Long): String
+
+    /** F15-FR11: names a mark; "" clears the label. `{ok: true}`. */
+    external fun nativeSetMarkLabel(id: String, markId: String, label: String): String
+
+    /** F15-FR11: `{ok: true}`. */
+    external fun nativeDeleteMark(id: String, markId: String): String
+
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,

@@ -547,3 +547,70 @@ fn chunks_queue_while_offline_and_catch_up_in_order_when_the_network_returns() {
     assert_eq!(texts, ["a.", "b.", "c.", "d."]);
     assert_eq!(parse(&app.live_transcript_json(ID0, 0))["state"], "current");
 }
+
+#[test]
+fn a_mark_is_its_own_line_placed_by_time_between_the_lines() {
+    // F15-AC10 / F15-FR11.
+    let fx = Fx::new(WHISPER);
+    fx.app.start_live_json(ID0, true);
+    let mut sc = fx.sc();
+    sc.chunks.push(meeting::sidecar::Chunk {
+        index: 0,
+        seg_index: 0,
+        start_offset_ms: 758_000,
+        duration_ms: 14_000,
+        overlap_ms: 0,
+        state: ChunkState::Done,
+        text: Some("Aaaaa bbbbb. Ccccc ddddd.".into()),
+        attempts: 1,
+        last_error: None,
+        speech_ms: None,
+        extra: Default::default(),
+    });
+    meeting::sidecar::write(&fx.e.export(), &sc).unwrap();
+    let m = parse(&fx.app.add_mark_json(ID0, 761_000));
+    let id = m["markId"].as_str().unwrap().to_owned();
+    let v = parse(&fx.app.live_transcript_json(ID0, 0));
+    let texts: Vec<&str> = v["lines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l["text"].as_str().unwrap())
+        .collect();
+    assert_eq!(texts, ["Aaaaa bbbbb.", "◆ [0:12:41] Mark", "Ccccc ddddd."]);
+    assert_eq!(v["lines"][0]["atMs"], 758_000); // 0:12:38
+    assert_eq!(v["lines"][2]["atMs"], 765_280); // 0:12:45
+    assert_eq!(v["lines"][1]["mark"], id.as_str());
+    // A label afterwards; or deleted.
+    assert_eq!(
+        parse(&fx.app.set_mark_label_json(ID0, &id, "Budget")),
+        json!({"ok": true})
+    );
+    assert_eq!(
+        parse(&fx.app.live_transcript_json(ID0, 0))["lines"][1]["text"],
+        "◆ [0:12:41] Budget"
+    );
+    assert_eq!(
+        parse(&fx.app.set_mark_label_json(ID0, "m-none", "x")),
+        json!({"error": "mark not found"})
+    );
+    assert_eq!(
+        parse(&fx.app.delete_mark_json(ID0, &id)),
+        json!({"ok": true})
+    );
+    assert_eq!(
+        parse(&fx.app.live_transcript_json(ID0, 0))["lines"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(
+        parse(&fx.app.add_mark_json(ID0, -1)),
+        json!({"error": "atMs must be >= 0"})
+    );
+    assert_eq!(
+        parse(&fx.app.add_mark_json("meeting-20991231-235959", 1)),
+        json!({"error": "meeting not found"})
+    );
+}

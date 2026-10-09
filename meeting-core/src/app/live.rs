@@ -260,6 +260,43 @@ fn live_status(sc: &Sidecar) -> (&'static str, Option<String>) {
 }
 
 impl App {
+    /// One change to `id`'s marks under the write lock (F15-FR11).
+    fn mark_edit<T: serde::Serialize>(
+        &self,
+        id: &str,
+        f: impl FnOnce(&mut Sidecar) -> Result<T, String>,
+    ) -> String {
+        let _w = self.write_lock();
+        let r = self
+            .library()
+            .update(id, |sc, _| f(sc).map_err(crate::library::LibError::Invalid));
+        match r {
+            Ok(v) => json!(v).to_string(),
+            Err(e) => error_json(&e.to_string()),
+        }
+    }
+
+    /// `nativeAddMark(id, atMs)` (F15-FR11): `{markId}`.
+    pub fn add_mark_json(&self, id: &str, at_ms: i64) -> String {
+        self.mark_edit(id, |sc| {
+            crate::marks::add(sc, at_ms).map(|m| json!({"markId": m}))
+        })
+    }
+
+    /// `nativeSetMarkLabel(id, markId, label)`: "" clears the label. `{ok: true}`.
+    pub fn set_mark_label_json(&self, id: &str, mark_id: &str, label: &str) -> String {
+        self.mark_edit(id, |sc| {
+            crate::marks::set_label(sc, mark_id, label).map(|()| json!({"ok": true}))
+        })
+    }
+
+    /// `nativeDeleteMark(id, markId)`: `{ok: true}`.
+    pub fn delete_mark_json(&self, id: &str, mark_id: &str) -> String {
+        self.mark_edit(id, |sc| {
+            crate::marks::delete(sc, mark_id).map(|()| json!({"ok": true}))
+        })
+    }
+
     /// `nativeLiveTranscript(id, afterLine)` (F15-FR6, F17-FR6): the transcript's whole lines
     /// so far, numbered from 1, each with its estimated recording-clock time, after line
     /// `afterLine` (0: all). `{lines: [{n, atMs, text}], waiting, state, reason?, spentUsd,
@@ -270,15 +307,31 @@ impl App {
             Ok(v) => v.meeting,
             Err(e) => return error_json(&e.to_string()),
         };
-        let mut lines = Vec::new();
+        // (time, text, mark id): the chunks' lines, then each mark placed among them by time
+        // (F15-FR11, F15-AC10), a line before a mark at the same moment.
+        let mut rows: Vec<(u64, String, Option<String>)> = Vec::new();
         for p in crate::chunk::paragraphs(&sc) {
             let Some(c) = sc.chunks.iter().find(|c| c.index == p.index) else {
                 continue;
             };
-            for (at, text) in crate::chunk::lines(&p, c) {
-                lines.push(json!({"n": lines.len() + 1, "atMs": at, "text": text}));
-            }
+            rows.extend(
+                crate::chunk::lines(&p, c)
+                    .into_iter()
+                    .map(|(at, t)| (at, t, None)),
+            );
         }
+        for m in crate::marks::list(&sc) {
+            rows.push((m.at_ms, crate::marks::line(&m), Some(m.id)));
+        }
+        rows.sort_by_key(|(at, _, mark)| (*at, mark.is_some()));
+        let lines: Vec<Value> = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, (at, text, mark))| match mark {
+                Some(id) => json!({"n": i + 1, "atMs": at, "text": text, "mark": id}),
+                None => json!({"n": i + 1, "atMs": at, "text": text}),
+            })
+            .collect();
         let after = usize::try_from(after_line).unwrap_or(0);
         let (state, reason) = live_status(&sc);
         let total = crate::spend::meeting_total(&sc);

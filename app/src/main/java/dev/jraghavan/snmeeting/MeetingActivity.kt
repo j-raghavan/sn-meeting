@@ -14,6 +14,7 @@ import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.LiveTranscript
+import dev.jraghavan.snmeeting.model.Mark
 import dev.jraghavan.snmeeting.model.MeetingHeader
 import dev.jraghavan.snmeeting.model.MeetingView
 import dev.jraghavan.snmeeting.model.ProviderNotice
@@ -30,6 +31,7 @@ import dev.jraghavan.snmeeting.play.MediaPlayerPort
 import dev.jraghavan.snmeeting.play.Playback
 import dev.jraghavan.snmeeting.play.SegmentPlaylist
 import dev.jraghavan.snmeeting.record.deviceRecoverer
+import dev.jraghavan.snmeeting.record.LiveClock
 import dev.jraghavan.snmeeting.record.RecState
 import dev.jraghavan.snmeeting.record.RecordingService
 
@@ -186,7 +188,7 @@ class MeetingActivity : Activity() {
         val at = cueAt ?: return
         cueAt = null
         playback?.cue(at)
-        TranscriptPages.locate(v.transcript, at)?.let { mark = it; transcriptPage = it.first }
+        TranscriptPages.locate(v.transcript, at, marks = v.meeting.marks)?.let { mark = it; transcriptPage = it.first }
     }
 
     /** F19-FR3: scrolled to the minutes, to-dos or transcript a hit came from, once. */
@@ -421,11 +423,21 @@ class MeetingActivity : Activity() {
                 addView(ui.spacer(ui.dim(14)))
                 addView(cards.todos(m.todos, ::setDone))
             }
+            if (m.status == Status.RECORDING) {
+                addView(ui.spacer(ui.dim(24)))
+                addView(markRow(), ui.fullWidth())
+            }
             if (recordingLive(v)) {
                 addView(ui.spacer(ui.dim(28)))
                 addView(liveCard())
             }
-            val pages = if (recordingLive(v)) emptyList() else TranscriptPages.pages(TranscriptPages.paragraphs(v.transcript))
+            if (m.marks.isNotEmpty() && m.status != Status.RECORDING) {
+                addView(ui.spacer(ui.dim(36)))
+                addView(ui.eyebrowItalic("Marks"))
+                addView(ui.spacer(ui.dim(14)))
+                addView(marksCard(m.marks))
+            }
+            val pages = if (recordingLive(v)) emptyList() else TranscriptPages.pages(TranscriptPages.paragraphs(v.transcript, m.marks))
             if (pages.isNotEmpty()) {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("Transcript").also { anchors["transcript"] = it })
@@ -480,6 +492,57 @@ class MeetingActivity : Activity() {
         setOnClickListener {
             val start = try { java.time.OffsetDateTime.parse(m.startedAt).toInstant().toEpochMilli() } catch (e: Exception) { return@setOnClickListener }
             EventLinkPicker.show(this@MeetingActivity, this@MeetingActivity.id, start, start + m.durationMs, m.eventKey) { load() }
+        }
+    }
+
+    /**
+     * F15-FR11 / F17-FR3 on today's meeting screen (layout B's docked bar is M12): Mark stamps
+     * the recording clock and reads "Marked 0:12:41" for 2 s, redrawing only itself; Stop ends
+     * the recording as Home's ■ Stop does.
+     */
+    private fun markRow(): View = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        lateinit var pill: TextView
+        pill = ui.pill("◆  Mark", size = 17f) { markNow(pill) }
+        addView(pill, ui.wrap())
+        addView(ui.pill("■  Stop", filled = true, size = 17f) {
+            if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity)
+        }, ui.wrap().apply { marginStart = ui.dim(16) })
+    }
+
+    private fun markNow(pill: TextView) {
+        val rec = RecordingService.hub.state as? RecState.Recording ?: return
+        if (rec.id != id) return
+        val at = LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), rec.startElapsedMs)
+        ui.stylePill(pill, "Marked ${Format.duration(at)}", filled = false)
+        handler.postDelayed({ ui.stylePill(pill, "◆  Mark", filled = false) }, MARKED_MS)
+        scope.core({ NativeBridge.nativeAddMark(id, at) }) { json ->
+            (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't add the mark", it.message) }
+            fetchLive()
+        }
+    }
+
+    /** F15-FR11: each mark; tap to give it a label (empty clears it), long-press to delete it. */
+    private fun marksCard(marks: List<Mark>): View = ui.card(padV = ui.dim(10)).apply {
+        val meetingId = this@MeetingActivity.id // `id` inside a view's apply is the view's own
+        marks.forEachIndexed { i, mk ->
+            if (i > 0) addView(ui.hairline())
+            addView(ui.body(mk.line, 17f).apply {
+                setPadding(0, ui.dim(12), 0, ui.dim(12))
+                isClickable = true
+                setOnClickListener {
+                    InkDialog.text(this@MeetingActivity, ui, "Label this mark", mk.label.orEmpty()) { label ->
+                        scope.core({ NativeBridge.nativeSetMarkLabel(meetingId, mk.id, label) }) { load() }
+                    }
+                }
+                setOnLongClickListener {
+                    InkDialog.confirm(this@MeetingActivity, "Delete this mark?", mk.line, "Delete") {
+                        scope.core({ NativeBridge.nativeDeleteMark(meetingId, mk.id) }) { load() }
+                    }
+                    true
+                }
+            }, ui.fullWidth())
         }
     }
 
@@ -547,5 +610,7 @@ class MeetingActivity : Activity() {
         const val EXTRA_FOCUS = "focus"
         /** How often the live transcript is read while recording, besides the lane's own news. */
         const val LIVE_POLL_MS = 5_000L
+        /** F17-FR3: how long Mark reads "Marked 0:12:41". */
+        const val MARKED_MS = 2_000L
     }
 }

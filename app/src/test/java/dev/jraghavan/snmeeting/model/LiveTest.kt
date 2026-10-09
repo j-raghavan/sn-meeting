@@ -51,4 +51,20 @@ class LiveTest { // F15-FR6 / FR7, F17-FR6
         val r = Recovery.from(org.json.JSONObject("""{"recovered":["m"],"measure":[],"flagged":[],"resume":["m"]}"""))
         assertEquals(listOf("m"), r.resume)
     }
+
+    @Test fun marksAreTheirOwnLinesInTheTranscriptPages() { // F15-FR11
+        val segs = listOf(Segment(null, 0, null, "First.", null), Segment(null, 760_000, null, "Second.", null),
+            Segment(null, 770_000, null, "Third.", null))
+        val marks = listOf(Mark("m-2", 900_000, null), Mark("m-1", 761_000, "Budget"))
+        assertEquals("◆ [0:12:41] Budget", marks[1].line)
+        assertEquals("◆ [0:15:00] Mark", marks[0].line)
+        val p = TranscriptPages.paragraphs(segs, marks)
+        assertEquals(listOf("First.", "Second.", "◆ [0:12:41] Budget", "Third.", "◆ [0:15:00] Mark"), p.map { it.text })
+        assertEquals(listOf("0:00:00", "0:12:40", null, "0:12:50", null), p.map { it.marker })
+        // A search hit at 0:12:55 still finds "Third." with the marks in between.
+        assertEquals(0 to 3, TranscriptPages.locate(segs, 775_000, marks = marks))
+        assertEquals(TranscriptPages.paragraphs(segs), TranscriptPages.paragraphs(segs, emptyList()))
+        val m = Sidecar.from(org.json.JSONObject("""{"id":"m","status":"done","marks":[{"id":"b","atMs":9},{"id":"a","atMs":3,"label":"x"},"junk"]}"""))!!
+        assertEquals(listOf("a", "b"), m.marks.map { it.id })
+    }
 }

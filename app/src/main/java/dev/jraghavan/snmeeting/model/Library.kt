@@ -88,6 +88,8 @@ data class Sidecar(
     val nearLive: Boolean = false,
     /** F15-FR9: its chunks, and how many have their text (or are missing). */
     val chunkTotal: Int = 0, val chunksDone: Int = 0,
+    /** F15-FR11, by time. */
+    val marks: List<Mark> = emptyList(),
 ) {
     companion object {
         private fun run(o: JSONObject?): ProviderRun? =
@@ -118,6 +120,7 @@ data class Sidecar(
             nearLive = o.has("live") || (o.arr("chunks")?.length() ?: 0) > 0,
             chunkTotal = o.arr("chunks")?.length() ?: 0,
             chunksDone = o.arr("chunks").mapObj { c -> c.str("state")?.takeIf { it != "pending" } }.size,
+            marks = o.arr("marks").mapObj(Mark::from).sortedBy { it.atMs },
         ) }
 
         /** nativeTranscribe / nativeSummarise: `{meeting: <sidecar>}` once a job ran. */

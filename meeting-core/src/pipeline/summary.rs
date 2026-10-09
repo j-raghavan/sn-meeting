@@ -67,6 +67,11 @@ pub async fn summarise(
         Some(b) => summarise::user_message_with_event(&joined(&sc), b),
         None => summarise::user_message(&joined(&sc)),
     };
+    // F15-FR11 / F17-FR9: the user's marks go with the transcript, as data.
+    let user = match crate::marks::summary_block(&sc) {
+        Some(m) => format!("{user}\n\n{m}"),
+        None => user,
+    };
     let with_event = |system: String| match &event {
         Some(_) => format!("{system}\n{}", summarise::EVENT_RULE),
         None => system,
