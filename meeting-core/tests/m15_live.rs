@@ -380,3 +380,75 @@ fn a_second_caller_is_told_the_lane_is_busy() {
     );
     assert_eq!(parse(&h.join().unwrap())["done"], 1);
 }
+
+#[test]
+fn the_live_transcript_appends_whole_lines_and_says_when_it_is_waiting() {
+    // F15-FR6 / FR7, F17-FR6, F16-FR5's "≈ $x so far".
+    let fx = Fx::new(WHISPER);
+    let lt = |after: i32| parse(&fx.app.live_transcript_json(ID0, after));
+    assert_eq!(
+        lt(0),
+        json!({"lines": [], "waiting": 0, "state": "off", "spentUsd": 0.0, "spent": "—"})
+    );
+    fx.app.start_live_json(ID0, true);
+    fx.replies(vec![
+        (200, "And then we ship it on Friday."),
+        (503, ""),
+        (200, "ship it on Friday. Next, the budget."),
+    ]);
+    fx.chunk(0, 25_000);
+    // Chunk 1 is a hard cut's: it starts 1 s before chunk 0 ends (30 s chunks, 29 s apart).
+    let p = fx.chunk_path(1);
+    fs::write(&p, b"\x00\x00\x00\x18ftypM4A chunk").unwrap();
+    let c = ChunkIn {
+        index: 1,
+        path: &p.to_string_lossy(),
+        start_offset_ms: 29_000,
+        duration_ms: 30_000,
+        speech_ms: 25_000,
+    };
+    parse(&fx.app.chunk_ready_json(ID0, c));
+    assert_eq!(lt(0)["state"], "transcribing");
+    fx.drain(); // chunk 0 done, chunk 1 fails
+    let v = lt(0);
+    assert_eq!(
+        (v["state"].as_str(), v["waiting"].as_u64()),
+        (Some("offline"), Some(1))
+    );
+    assert_eq!(
+        v["lines"],
+        json!([{"n": 1, "atMs": 0, "text": "And then we ship it on Friday."}])
+    );
+    assert_eq!(v["spent"], "< $0.01");
+    fx.drain();
+    let v = lt(0);
+    assert_eq!(v["state"], "current");
+    // The repeated words appear once; the line's time is estimated after the overlap.
+    assert_eq!(
+        v["lines"][1],
+        json!({"n": 2, "atMs": 30_000, "text": "Next, the budget."})
+    );
+    assert_eq!(lt(1)["lines"].as_array().unwrap().len(), 1, "after line 1");
+    assert_eq!(v["spentUsd"], 0.006);
+    // Closing the segment fills its text from the chunks (F15-FR6), as F5 reads it.
+    fx.app.finish_json(ID0, 59_000, "");
+    fx.app.close_segment_json(ID0, 0, 59_000);
+    assert_eq!(
+        fx.sc().segments[0].text.as_deref(),
+        Some("And then we ship it on Friday.\n\nNext, the budget.")
+    );
+    let m = parse(&fx.app.get_meeting_json(ID0));
+    assert_eq!(
+        m["paragraphs"][1],
+        json!({"index": 1, "atMs": 29_000, "text": "Next, the budget."})
+    );
+    // Paused while recording shows its reason.
+    let fx = Fx::new(WHISPER);
+    fx.app.start_live_json(ID0, false);
+    let v = parse(&fx.app.live_transcript_json(ID0, 0));
+    assert_eq!(
+        (v["state"].as_str(), v["reason"].as_str()),
+        (Some("paused"), Some(meeting::app::LIVE_DECLINED))
+    );
+    assert!(parse(&fx.app.live_transcript_json("meeting-20991231-235959", 0))["error"].is_string());
+}

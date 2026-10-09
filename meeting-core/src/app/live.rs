@@ -226,6 +226,64 @@ impl App {
     }
 }
 
+/// F15-FR6 / FR7: the live transcript's status: `off` (not near-live), `paused` (with the
+/// reason), `offline` (the next chunk failed and waits for the back-off), `transcribing`
+/// (chunks waiting) or `current`.
+fn live_status(sc: &Sidecar) -> (&'static str, Option<String>) {
+    if sc.live.is_none() && sc.chunks.is_empty() {
+        return ("off", None);
+    }
+    if let Some(r) = sc.live.as_ref().and_then(|l| l.paused.clone())
+        && sc.status == Status::Recording
+    {
+        return ("paused", Some(r));
+    }
+    match sc.chunks.iter().find(|c| c.state == ChunkState::Pending) {
+        None => ("current", None),
+        Some(c) if c.attempts > 0 && c.last_error.as_deref() != Some(live::EMPTY_ONCE) => {
+            ("offline", c.last_error.clone())
+        }
+        Some(_) => ("transcribing", None),
+    }
+}
+
+impl App {
+    /// `nativeLiveTranscript(id, afterLine)` (F15-FR6, F17-FR6): the transcript's whole lines
+    /// so far, numbered from 1, each with its estimated recording-clock time, after line
+    /// `afterLine` (0: all). `{lines: [{n, atMs, text}], waiting, state, reason?, spentUsd,
+    /// spent}`: the strip appends lines and shows "Offline · 4 waiting" (F15-FR7); `spent` is
+    /// "≈ $0.08" (F16-FR5).
+    pub fn live_transcript_json(&self, id: &str, after_line: i32) -> String {
+        let sc = match self.library().get(id) {
+            Ok(v) => v.meeting,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        let mut lines = Vec::new();
+        for p in crate::chunk::paragraphs(&sc) {
+            let Some(c) = sc.chunks.iter().find(|c| c.index == p.index) else {
+                continue;
+            };
+            for (at, text) in crate::chunk::lines(&p, c) {
+                lines.push(json!({"n": lines.len() + 1, "atMs": at, "text": text}));
+            }
+        }
+        let after = usize::try_from(after_line).unwrap_or(0);
+        let (state, reason) = live_status(&sc);
+        let total = crate::spend::meeting_total(&sc);
+        let mut v = json!({
+            "lines": lines.into_iter().skip(after).collect::<Vec<_>>(),
+            "waiting": waiting(&sc),
+            "state": state,
+            "spentUsd": total.usd,
+            "spent": total.label,
+        });
+        if let Some(r) = reason {
+            v["reason"] = json!(r);
+        }
+        v.to_string()
+    }
+}
+
 /// The F4-FR5 wording of a key problem.
 fn key_detail(p: Provider, e: keyfile::KeyError) -> String {
     settings::key_status_of(p, &Err(e))

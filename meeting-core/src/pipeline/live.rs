@@ -135,6 +135,7 @@ pub async fn attempt(
                 c.attempts += 1;
                 c.last_error = error;
             }
+            crate::chunk::fill_segments(sc); // F15-FR6
             Ok(())
         })
     });

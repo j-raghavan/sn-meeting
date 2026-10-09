@@ -84,6 +84,8 @@ data class Sidecar(
     val mic: MicRef?, val segments: List<Segment>, val error: String?, val note: String?, val todos: List<Todo>,
     /** F18-FR12: the linked event's key and title; null when unscheduled. */
     val eventKey: String? = null, val eventTitle: String? = null,
+    /** F15: recorded by the near-live recorder (it has `live`, or chunks). */
+    val nearLive: Boolean = false,
 ) {
     companion object {
         private fun run(o: JSONObject?): ProviderRun? =
@@ -111,6 +113,7 @@ data class Sidecar(
             },
             eventKey = o.obj("event")?.str("eventKey"),
             eventTitle = o.obj("event")?.str("title"),
+            nearLive = o.has("live") || (o.arr("chunks")?.length() ?: 0) > 0,
         ) }
 
         /** nativeTranscribe / nativeSummarise: `{meeting: <sidecar>}` once a job ran. */
@@ -123,7 +126,12 @@ data class MeetingView(
     val meeting: Sidecar, val source: Source, val dir: String, val segmentPaths: List<String>, val transcriptPath: String?,
     /** F16-FR5: the meeting's cost so far, from the core. */
     val cost: String = "—",
+    /** F15-FR6: a near-live meeting's transcript, one paragraph per chunk, as segments to page. */
+    val paragraphs: List<Segment> = emptyList(),
 ) {
+    /** What the transcript pages show: the chunks' paragraphs when there are any, else the segments. */
+    val transcript: List<Segment> get() = paragraphs.ifEmpty { meeting.segments }
+
     companion object {
         fun from(o: JSONObject): MeetingView? { return MeetingView(
             meeting = o.obj("meeting")?.let(Sidecar::from) ?: return null,
@@ -132,6 +140,7 @@ data class MeetingView(
             segmentPaths = o.arr("segmentPaths").strings(),
             transcriptPath = o.str("transcriptPath"),
             cost = Spend.label(o.obj("spend")),
+            paragraphs = o.arr("paragraphs").mapObj { Segment(null, it.long("atMs") ?: 0, null, it.str("text"), null) },
         ) }
     }
 }

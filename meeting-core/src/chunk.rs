@@ -131,6 +131,125 @@ pub fn plan_json(id: &str, rms_json: &str) -> String {
     }
 }
 
+// ---- F15-FR6: joining chunks into the transcript ------------------------------------------
+
+/// The most words one overlap may repeat (1 s of speech is two or three).
+pub const MAX_OVERLAP_WORDS: usize = 12;
+
+/// `text` without its longest prefix (up to [`MAX_OVERLAP_WORDS`] words) that matches, word by
+/// word after F5-FR5's normalising, a suffix of `prev`: the words the 1 s overlap repeats.
+pub fn dedupe<'a>(prev: &str, text: &'a str) -> &'a str {
+    let words = |t: &str| -> Vec<String> {
+        t.split_whitespace()
+            .map(crate::summarise::normalise)
+            .collect()
+    };
+    let before = words(prev);
+    let spans: Vec<(usize, &str)> = text
+        .split_whitespace()
+        .map(|w| (w.as_ptr() as usize - text.as_ptr() as usize, w))
+        .collect();
+    let after: Vec<String> = spans
+        .iter()
+        .map(|(_, w)| crate::summarise::normalise(w))
+        .collect();
+    let most = MAX_OVERLAP_WORDS.min(before.len()).min(after.len());
+    for k in (1..=most).rev() {
+        if after[..k] == before[before.len() - k..] && after[..k].iter().all(|w| !w.is_empty()) {
+            let (off, w) = spans[k - 1];
+            return text[off + w.len()..].trim_start();
+        }
+    }
+    text
+}
+
+/// One transcript paragraph: a done (or missing) chunk's text, its start, and its index.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Para {
+    pub index: u32,
+    pub at_ms: u64,
+    pub text: String,
+}
+
+/// F15-FR6: the chunks' texts in index order, one paragraph each, an overlap's repeated words
+/// removed against the chunk before. Pending chunks are left out; a missing one reads as
+/// "(audio missing)" (EC7).
+pub fn paragraphs(sc: &crate::sidecar::Sidecar) -> Vec<Para> {
+    use crate::sidecar::ChunkState;
+    let mut out = Vec::new();
+    let mut prev: Option<&str> = None;
+    for c in &sc.chunks {
+        let text = match (c.state, c.text.as_deref()) {
+            (ChunkState::Done, Some(t)) => t.trim(),
+            (ChunkState::Missing, _) => crate::pipeline::AUDIO_MISSING,
+            _ => {
+                prev = None;
+                continue;
+            }
+        };
+        let joined = match prev {
+            Some(p) if c.overlap_ms > 0 => dedupe(p, text),
+            _ => text,
+        };
+        // Nothing was said in a missing chunk's audio that the next could repeat.
+        prev = (c.state == ChunkState::Done).then_some(text);
+        if joined.is_empty() {
+            continue;
+        }
+        out.push(Para {
+            index: c.index,
+            at_ms: c.start_offset_ms,
+            text: joined.to_owned(),
+        });
+    }
+    out
+}
+
+/// F15-FR6: each sentence line of a paragraph with its **estimated** time, interpolated by
+/// character position across the chunk's audio after the overlap it repeats [Recommendation].
+/// Used for highlighting and seeking, never shown as exact.
+pub fn lines(p: &Para, chunk: &crate::sidecar::Chunk) -> Vec<(u64, String)> {
+    let total = p.text.chars().count().max(1) as u64;
+    let start = chunk.start_offset_ms + chunk.overlap_ms.min(chunk.duration_ms);
+    let span = chunk.duration_ms.saturating_sub(chunk.overlap_ms);
+    crate::search::units::sentence_lines(&p.text)
+        .into_iter()
+        .map(|(off, line)| (start + span * off as u64 / total, line))
+        .collect()
+}
+
+/// F15-FR6: a closed segment whose chunks all have their text gets `text` from them, so F5's
+/// resume logic, the transcript file and recovery read the same field as before.
+pub fn fill_segments(sc: &mut crate::sidecar::Sidecar) {
+    use crate::sidecar::ChunkState;
+    if sc.chunks.is_empty() {
+        return;
+    }
+    let paras = paragraphs(sc);
+    for (i, seg) in sc.segments.iter_mut().enumerate() {
+        let mine: Vec<&crate::sidecar::Chunk> =
+            sc.chunks.iter().filter(|c| c.seg_index == i).collect();
+        let ready = seg.duration_ms.is_some()
+            && seg.text.is_none()
+            && !mine.is_empty()
+            && mine.iter().all(|c| c.state != ChunkState::Pending);
+        if !ready {
+            continue;
+        }
+        let text: Vec<&str> = paras
+            .iter()
+            .filter(|p| mine.iter().any(|c| c.index == p.index))
+            .map(|p| p.text.as_str())
+            .collect();
+        seg.text = Some(if text.is_empty() {
+            crate::providers::NO_SPEECH.to_owned()
+        } else {
+            text.join("\n\n")
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -231,6 +350,166 @@ mod tests {
             plan(&input(vec![1.0; MAX_BLOCKS + 1], None)),
             Err(PlanError::TooMany)
         );
+    }
+
+    #[test]
+    fn the_words_an_overlap_repeats_appear_once() {
+        // F15-AC2.
+        let prev = "… and then we ship it on Friday";
+        let next = "ship it on Friday. Next, the budget";
+        assert_eq!(dedupe(prev, next), "Next, the budget");
+        let joined = format!("{prev} {}", dedupe(prev, next));
+        assert_eq!(joined.matches("ship it on Friday").count(), 1);
+        // Case and punctuation don't matter; the longest match wins; no match keeps it all.
+        assert_eq!(
+            dedupe("We'll SHIP it.", "we'll ship it, then rest"),
+            "then rest"
+        );
+        assert_eq!(dedupe("a b a b", "a b a b c"), "c");
+        assert_eq!(
+            dedupe("nothing shared", "different words"),
+            "different words"
+        );
+        assert_eq!(dedupe("", "text"), "text");
+        assert_eq!(dedupe("same", "same"), "");
+        // At most 12 words are dropped.
+        let long = "one two three four five six seven eight nine ten eleven twelve thirteen";
+        assert_eq!(
+            dedupe(long, long),
+            "one two three four five six seven eight nine ten eleven twelve thirteen"
+        );
+        // A token that normalises to nothing never makes a match.
+        assert_eq!(dedupe("ok —", "— fine"), "— fine");
+    }
+
+    /// (index, start, duration, overlap, state, text).
+    type Row<'a> = (
+        u32,
+        u64,
+        u64,
+        u64,
+        crate::sidecar::ChunkState,
+        Option<&'a str>,
+    );
+
+    fn sc_with(chunks: Vec<Row<'_>>) -> crate::sidecar::Sidecar {
+        let mut sc = crate::sidecar::blank("meeting-20261009-100000");
+        sc.segments = vec![crate::library::open_segment_for_tests(
+            "meeting-20261009-100000-01.m4a",
+            0,
+        )];
+        sc.chunks = chunks
+            .into_iter()
+            .map(
+                |(index, start, dur, overlap, state, text)| crate::sidecar::Chunk {
+                    index,
+                    seg_index: 0,
+                    start_offset_ms: start,
+                    duration_ms: dur,
+                    overlap_ms: overlap,
+                    state,
+                    text: text.map(str::to_owned),
+                    attempts: 0,
+                    last_error: None,
+                    speech_ms: None,
+                    extra: Default::default(),
+                },
+            )
+            .collect();
+        sc
+    }
+
+    #[test]
+    fn paragraphs_join_the_chunks_in_order() {
+        use crate::sidecar::ChunkState::{Done, Missing, Pending};
+        let sc = sc_with(vec![
+            (
+                0,
+                0,
+                35_000,
+                0,
+                Done,
+                Some(" and then we ship it on Friday "),
+            ),
+            (
+                1,
+                34_000,
+                30_000,
+                1_000,
+                Done,
+                Some("ship it on Friday. Next, the budget."),
+            ),
+            (2, 64_000, 30_000, 0, Pending, None),
+            (3, 94_000, 30_000, 1_000, Done, Some("the budget again")),
+            (4, 124_000, 30_000, 0, Missing, None),
+            (5, 154_000, 30_000, 1_000, Done, Some("audio missing")),
+        ]);
+        let p = paragraphs(&sc);
+        let texts: Vec<(u32, u64, &str)> = p
+            .iter()
+            .map(|p| (p.index, p.at_ms, p.text.as_str()))
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                (0, 0, "and then we ship it on Friday"),
+                (1, 34_000, "Next, the budget."),
+                // After a pending chunk there is nothing to compare with yet.
+                (3, 94_000, "the budget again"),
+                (4, 124_000, "(audio missing)"),
+                (5, 154_000, "audio missing"),
+            ]
+        );
+    }
+
+    #[test]
+    fn line_times_are_estimated_across_the_chunk() {
+        use crate::sidecar::ChunkState::Done;
+        let sc = sc_with(vec![(
+            0,
+            761_000,
+            21_000,
+            1_000,
+            Done,
+            Some("First line. Second one here."),
+        )]);
+        let p = &paragraphs(&sc)[0];
+        let l = lines(p, &sc.chunks[0]);
+        // After the repeated second, 20 s across 28 characters: "Second" starts at 12.
+        assert_eq!(
+            l,
+            [
+                (762_000, "First line.".to_owned()),
+                (762_000 + 20_000 * 12 / 28, "Second one here.".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_closed_segment_gets_its_text_once_every_chunk_has_one() {
+        use crate::sidecar::ChunkState::{Done, Pending};
+        let mut sc = sc_with(vec![
+            (0, 0, 30_000, 0, Done, Some("one.")),
+            (1, 30_000, 30_000, 0, Pending, None),
+        ]);
+        fill_segments(&mut sc);
+        assert_eq!(sc.segments[0].text, None, "still open");
+        sc.segments[0].duration_ms = Some(60_000);
+        fill_segments(&mut sc);
+        assert_eq!(sc.segments[0].text, None, "a chunk is pending");
+        sc.chunks[1].state = Done;
+        sc.chunks[1].text = Some("two.".into());
+        fill_segments(&mut sc);
+        assert_eq!(sc.segments[0].text.as_deref(), Some("one.\n\ntwo."));
+        // Only chunks with nothing to say: the segment reads as no speech.
+        let mut sc = sc_with(vec![(0, 0, 30_000, 0, Done, Some(" "))]);
+        sc.segments[0].duration_ms = Some(30_000);
+        fill_segments(&mut sc);
+        assert_eq!(sc.segments[0].text.as_deref(), Some("(no speech detected)"));
+        // A meeting without chunks is F5's.
+        let mut plain = crate::sidecar::blank("meeting-20261009-100000");
+        fill_segments(&mut plain);
+        assert!(plain.segments.is_empty());
     }
 
     #[test]

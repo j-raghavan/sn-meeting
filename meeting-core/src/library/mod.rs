@@ -293,6 +293,7 @@ impl Library<'_> {
         if d == 0 && seg.flag.is_none() {
             seg.flag = Some(SegmentFlag::Empty);
         }
+        crate::chunk::fill_segments(&mut sc); // F15-FR6
         if sc.status != Status::Recording {
             measured(&mut sc, index);
         }
@@ -360,6 +361,11 @@ fn clean_note(n: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     one_line.trim().chars().take(MAX_NOTE).collect()
+}
+
+#[cfg(test)]
+pub(crate) fn open_segment_for_tests(file: &str, start_offset_ms: u64) -> Segment {
+    open_segment(file.to_owned(), start_offset_ms)
 }
 
 pub(crate) fn open_segment(file: String, start_offset_ms: u64) -> Segment {

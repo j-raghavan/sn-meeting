@@ -131,6 +131,11 @@ object NativeBridge {
      *  reason?}`; state is idle, retry, paused, blocked, stopped, off or busy. */
     external fun nativeLiveDrain(id: String): String
 
+    /** F15-FR6: the live transcript's whole lines after line [afterLine] (0: all), each with its
+     *  estimated recording-clock time, and its status: `{lines: [{n, atMs, text}], waiting,
+     *  state: off|paused|offline|transcribing|current, reason?, spentUsd, spent}`. */
+    external fun nativeLiveTranscript(id: String, afterLine: Int): String
+
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,

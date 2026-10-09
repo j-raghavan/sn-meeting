@@ -486,6 +486,13 @@ pub fn marker(ms: u64) -> String {
 /// F5-FR2: each segment as `(marker, text)`, in segment order. A segment with no text yet, or
 /// empty text, reads as `(no speech detected)` (EC6).
 pub fn paragraphs(sc: &Sidecar) -> Vec<(String, String)> {
+    // F15-FR6: a near-live meeting's transcript is its chunks', one paragraph each.
+    if !sc.chunks.is_empty() {
+        return crate::chunk::paragraphs(sc)
+            .into_iter()
+            .map(|p| (marker(p.at_ms), p.text))
+            .collect();
+    }
     sc.segments
         .iter()
         .map(|s| {

@@ -306,6 +306,11 @@ pub fn live_drain(id: &str) -> String {
     with_app(|app| app.live_drain_json(id))
 }
 
+/// `nativeLiveTranscript(id, afterLine)` (F15-FR6): the live transcript's lines and status.
+pub fn live_transcript(id: &str, after_line: i32) -> String {
+    with_app(|app| app.live_transcript_json(id, after_line))
+}
+
 /// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
 /// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
 /// capture thread can ask at any time.

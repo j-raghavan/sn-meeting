@@ -658,3 +658,17 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeLiveDrain
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeLiveTranscript<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    after_line: jint,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::live_transcript(&id, after_line))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

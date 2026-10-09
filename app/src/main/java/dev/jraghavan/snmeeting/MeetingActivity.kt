@@ -13,6 +13,7 @@ import dev.jraghavan.snmeeting.model.Actions
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.Format
+import dev.jraghavan.snmeeting.model.LiveTranscript
 import dev.jraghavan.snmeeting.model.MeetingHeader
 import dev.jraghavan.snmeeting.model.MeetingView
 import dev.jraghavan.snmeeting.model.ProviderNotice
@@ -29,6 +30,7 @@ import dev.jraghavan.snmeeting.play.MediaPlayerPort
 import dev.jraghavan.snmeeting.play.Playback
 import dev.jraghavan.snmeeting.play.SegmentPlaylist
 import dev.jraghavan.snmeeting.record.deviceRecoverer
+import dev.jraghavan.snmeeting.record.RecState
 import dev.jraghavan.snmeeting.record.RecordingService
 
 /**
@@ -55,6 +57,22 @@ class MeetingActivity : Activity() {
     private var focus: String? = null
     private var mark: Pair<Int, Int>? = null
     private val anchors = HashMap<String, View>()
+
+    // F15-FR6 / F17-FR6: the live transcript while a near-live meeting records. Only its own
+    // views change, and only when a reply differs (new lines, a new status, the cost).
+    private var live: LiveTranscript? = null
+    private var liveJson: String? = null
+    private var liveAll = false
+    private var liveLines: LinearLayout? = null
+    private var liveStatus: TextView? = null
+    private var unLive: (() -> Unit)? = null
+    private var unHub: (() -> Unit)? = null
+    private val livePoll = object : Runnable {
+        override fun run() {
+            fetchLive()
+            handler.postDelayed(this, LIVE_POLL_MS)
+        }
+    }
 
     /** F7-FR2: while this meeting's job runs, the sidecar is re-read once a second for progress. */
     private val poll = object : Runnable {
@@ -120,7 +138,20 @@ class MeetingActivity : Activity() {
         load()
     }
 
+    override fun onStart() {
+        super.onStart()
+        // A chunk's lines arrived (the lane's pass ended): show them now, not at the next poll.
+        unLive = LiveJobs.observe { mid, _ -> if (mid == id) fetchLive() }
+        // Stopped (here, on Home or in the notification): the meeting moves on; read it again.
+        unHub = RecordingService.hub.observe { st ->
+            if (view?.meeting?.status == Status.RECORDING && st is RecState.Idle) load()
+        }
+    }
+
     override fun onStop() {
+        unLive?.invoke(); unLive = null
+        unHub?.invoke(); unHub = null
+        handler.removeCallbacks(livePoll)
         playback?.release() // leaving the screen stops the audio
         handler.removeCallbacks(tick)
         handler.removeCallbacks(poll) // the job carries on; onResume picks its progress up again
@@ -141,6 +172,8 @@ class MeetingActivity : Activity() {
                     view = r.value; preparePlayback(r.value); cueOnce(r.value); render(); scrollToFocus()
                     handler.removeCallbacks(poll)
                     if (LongJobs.lane.isRunning(id)) handler.postDelayed(poll, 1000)
+                    handler.removeCallbacks(livePoll)
+                    if (recordingLive(r.value)) handler.post(livePoll)
                 }
                 is CoreResult.Err -> showGone(r.message)
             }
@@ -153,7 +186,7 @@ class MeetingActivity : Activity() {
         val at = cueAt ?: return
         cueAt = null
         playback?.cue(at)
-        TranscriptPages.locate(v.meeting.segments, at)?.let { mark = it; transcriptPage = it.first }
+        TranscriptPages.locate(v.transcript, at)?.let { mark = it; transcriptPage = it.first }
     }
 
     /** F19-FR3: scrolled to the minutes, to-dos or transcript a hit came from, once. */
@@ -384,7 +417,11 @@ class MeetingActivity : Activity() {
                 addView(ui.spacer(ui.dim(14)))
                 addView(cards.todos(m.todos, ::setDone))
             }
-            val pages = TranscriptPages.pages(TranscriptPages.paragraphs(m.segments))
+            if (recordingLive(v)) {
+                addView(ui.spacer(ui.dim(28)))
+                addView(liveCard())
+            }
+            val pages = if (recordingLive(v)) emptyList() else TranscriptPages.pages(TranscriptPages.paragraphs(v.transcript))
             if (pages.isNotEmpty()) {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("Transcript").also { anchors["transcript"] = it })
@@ -442,6 +479,52 @@ class MeetingActivity : Activity() {
         }
     }
 
+    private fun recordingLive(v: MeetingView) = v.meeting.status == Status.RECORDING && v.meeting.nearLive
+
+    /**
+     * F15-FR6 / F17-FR6 on today's meeting screen (layout B's strip is M12): the newest three
+     * lines, whole lines only, with "Offline · 4 waiting" or "Transcribing…" at the right.
+     * Tapping it shows every line so far; tapping again, the newest three.
+     */
+    private fun liveCard(): View = ui.card().apply {
+        addView(LinearLayout(this@MeetingActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ui.eyebrow("Live transcript"), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ui.eyebrow("", ui.inkSoft).also { liveStatus = it })
+        })
+        addView(LinearLayout(this@MeetingActivity).apply { orientation = LinearLayout.VERTICAL }.also { liveLines = it },
+            ui.fullWidth().apply { topMargin = ui.dim(10) })
+        isClickable = true
+        setOnClickListener { liveAll = !liveAll; showLive() }
+        showLive()
+    }
+
+    /** One read of the live transcript; the strip redraws only if it changed. */
+    private fun fetchLive() {
+        scope.core({ NativeBridge.nativeLiveTranscript(id, 0) }) { json ->
+            if (json == liveJson) return@core
+            liveJson = json
+            live = CoreJson.obj(json, LiveTranscript::from).getOrNull() ?: return@core
+            showLive()
+        }
+    }
+
+    private fun showLive() {
+        val box = liveLines ?: return
+        val t = live
+        liveStatus?.text = t?.status.orEmpty().uppercase()
+        box.removeAllViews()
+        val lines = t?.shown(liveAll).orEmpty()
+        if (lines.isEmpty()) {
+            box.addView(ui.note(LiveTranscript.EMPTY, 15f, ui.textMuted))
+            return
+        }
+        lines.forEach { l ->
+            box.addView(ui.body(l.text, 17f).apply { setLineSpacing(0f, 1.3f) }, ui.fullWidth().apply { topMargin = ui.dim(6) })
+        }
+    }
+
     /** F7-FR5: an empty title returns the meeting to untitled; the next summary may name it. */
     private fun rename(current: String) {
         InkDialog.text(this, ui, "Rename meeting", current) { title ->
@@ -458,5 +541,7 @@ class MeetingActivity : Activity() {
         const val EXTRA_AT_MS = "at_ms"
         /** F19-FR3: summary, todos or transcript: the part to scroll to. */
         const val EXTRA_FOCUS = "focus"
+        /** How often the live transcript is read while recording, besides the lane's own news. */
+        const val LIVE_POLL_MS = 5_000L
     }
 }

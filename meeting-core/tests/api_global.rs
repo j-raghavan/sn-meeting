@@ -22,6 +22,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("chunkReady", api::chunk_ready("x", 0, "y", 0, 1, -1)),
         ("startLive", api::start_live("x", true)),
         ("liveDrain", api::live_drain("x")),
+        ("liveTranscript", api::live_transcript("x", 0)),
         ("finishMeeting", api::finish_meeting("x", 0, "")),
         ("listRecent", api::list_recent(5)),
         ("getMeeting", api::get_meeting("x")),
