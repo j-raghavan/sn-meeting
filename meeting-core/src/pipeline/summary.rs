@@ -2,6 +2,7 @@
 //! stored transcript. The merge is made on a fresh read of the sidecar, the transcript file is
 //! written before the sidecar, and a render error writes neither (the old file stays). The
 //! layout renders outside the write lock (S16, `transcript.rs`).
+use super::notes;
 use super::transcript::{self, template_of};
 use super::{JobError, JobPlan, Spent, finish_spent, joined, locked, paragraphs};
 use crate::jobs::{self, Cancel};
@@ -28,17 +29,19 @@ pub async fn summarise(
         let e = plan.summarise_problem.clone().unwrap_or_default();
         return Err(JobError::NotStarted(LibError::Invalid(e)));
     };
-    let sc = locked(lock, || {
-        lib.update(id, |sc, _| {
+    let (sc, dir) = locked(lock, || {
+        lib.update(id, |sc, dir| {
             let p = status::next(library::phase(sc), Event::StartSummarise)?;
             library::set_phase(sc, p);
             sc.error = None;
             sc.template_id
                 .get_or_insert_with(|| plan.default_template.clone());
-            Ok(sc.clone())
+            Ok((sc.clone(), dir.to_path_buf()))
         })
     })
     .map_err(JobError::NotStarted)?;
+    // F19-FR6: the note regions to recognise in the same call, when there are any.
+    let notes_in = plan.notes.get(&dir, &sc);
     let spent = Spent::new(lib.tz, &plan.rates);
     let fail = |msg: String| finish_spent(lib, lock, id, Event::SummariseFailed, Some(msg), &spent);
     let tid = sc.template_id.clone().unwrap_or_default();
@@ -48,11 +51,21 @@ pub async fn summarise(
     let Ok(started) = DateTime::parse_from_rfc3339(&sc.started_at) else {
         return fail("The meeting's start time can't be read".into());
     };
-    let ask = JsonAsk {
-        system: summarise::system_prompt(&tpl.instructions, &started),
-        user: summarise::user_message(&joined(&sc)),
-        schema: summarise::response_schema(),
-        max_tokens: summarise::MAX_OUTPUT_TOKENS,
+    let ask = match &notes_in {
+        None => JsonAsk {
+            system: summarise::system_prompt(&tpl.instructions, &started),
+            user: summarise::user_message(&joined(&sc)),
+            schema: summarise::response_schema(),
+            max_tokens: summarise::MAX_OUTPUT_TOKENS,
+            images: Vec::new(),
+        },
+        Some(n) => JsonAsk {
+            system: summarise::system_prompt_with_notes(&tpl.instructions, &started),
+            user: summarise::user_message(&joined(&sc)),
+            schema: summarise::response_schema_with_notes(),
+            max_tokens: summarise::MAX_OUTPUT_TOKENS,
+            images: notes::images(n, 0),
+        },
     };
     let call = |m: String| {
         let (ask, spent) = (&ask, &spent);
@@ -89,6 +102,10 @@ pub async fn summarise(
     let x = match summarise::parse(&text) {
         Ok(x) => x,
         Err(e) => return fail(crate::scrub::scrub(&e, &[key.expose()])),
+    };
+    let recognised = match &notes_in {
+        Some(n) => Some(notes::recognise(plan, key, &ran, n, &text, &spent, cancel).await),
+        None => None,
     };
     let now_ms = chrono::Utc::now().timestamp_millis();
     let first_seen = tz::local_at(lib.tz, now_ms)
@@ -150,6 +167,14 @@ pub async fn summarise(
             };
             crate::atomic::write_atomic(&dir.join(&name), md.as_bytes())?;
             next.transcript_file = Some(name.clone());
+            // F19-FR6: the recognised text beside the ink (never the ink itself, INV12).
+            if let Some(r) = &recognised {
+                crate::notes_text::write(&dir, id, &r.regions)?;
+                if r.complete {
+                    next.extra
+                        .insert("notesRecognisedAt".into(), first_seen.clone().into());
+                }
+            }
             let p = status::next(library::phase(&next), Event::SummariseOk)?;
             library::set_phase(&mut next, p);
             // F16-FR2: the summary's usage goes in the write that stores it.

@@ -6,7 +6,9 @@ use super::{ConnStatus, Endpoints, Measured, classify_http, classify_transport, 
 use crate::keyfile::{Provider, ProviderKey};
 use crate::scrub::scrub;
 use rig_core::completion::{CompletionRequest, FinishReason, Usage};
-use rig_core::message::{AudioMediaType, Message, StopReason, UserContent};
+use rig_core::message::{
+    AudioMediaType, ImageDetail, ImageMediaType, Message, StopReason, UserContent,
+};
 use rig_core::providers::anthropic::AnthropicConfig;
 use rig_core::providers::gemini::GeminiConfig;
 use rig_core::providers::openai::OpenAIConfig;
@@ -250,6 +252,30 @@ pub struct JsonAsk {
     pub user: String,
     pub schema: serde_json::Value,
     pub max_tokens: u64,
+    /// Images sent after the text, each after its label (F19-FR6's note regions).
+    pub images: Vec<ImageIn>,
+}
+
+/// A PNG for the user message, introduced by a line of text ("Note region 0:").
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageIn {
+    pub label: String,
+    pub png: Vec<u8>,
+}
+
+/// The user message: the text, then each image after its label. rig base64-encodes the raw
+/// bytes; the media type is given, so nothing is sniffed.
+fn user_content(text: &str, images: &[ImageIn]) -> Message {
+    let mut content = vec![UserContent::text(text)];
+    for i in images {
+        content.push(UserContent::text(i.label.clone()));
+        content.push(UserContent::image_raw(
+            i.png.clone(),
+            Some(ImageMediaType::PNG),
+            Some(ImageDetail::High),
+        ));
+    }
+    Message::User { content }
 }
 
 /// F5-FR4: one structured completion; returns the model's JSON text, not yet validated.
@@ -267,7 +293,7 @@ pub async fn complete_json(
     let bad = |d: String| CallError::new(CallFail::BadResponse, scrub(&d, &secret));
     let schema = rig_core::schemars::Schema::try_from(ask.schema.clone())
         .map_err(|_| bad("internal: the schema is not an object".into()))?;
-    let req = CompletionRequest::new(Message::user(ask.user.clone()))
+    let req = CompletionRequest::new(user_content(&ask.user, &ask.images))
         .preamble(ask.system.clone())
         .max_tokens(ask.max_tokens)
         .output_schema(schema);

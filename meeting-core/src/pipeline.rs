@@ -13,6 +13,7 @@ use crate::tz::{self, LocalTz};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
+mod notes;
 mod summary;
 mod transcript;
 pub use summary::{context, summarise};
@@ -53,6 +54,8 @@ pub struct JobPlan {
     pub budgets: jobs::Budgets,
     /// The rates in force at job start, pricing each usage record once (F16-FR3).
     pub rates: RateTable,
+    /// Where the summarise step gets the note regions to recognise (F19-FR6).
+    pub notes: crate::notes_text::NotesSource,
 }
 
 /// F16-FR2: the usage records of calls whose result is not yet written. Each call that got a

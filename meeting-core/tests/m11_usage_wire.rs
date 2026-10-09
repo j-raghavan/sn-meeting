@@ -51,6 +51,7 @@ fn ask() -> JsonAsk {
         user: "U".into(),
         schema: response_schema(),
         max_tokens: MAX_OUTPUT_TOKENS,
+        images: vec![],
     }
 }
 

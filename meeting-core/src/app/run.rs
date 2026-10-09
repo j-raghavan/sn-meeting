@@ -122,6 +122,7 @@ impl App {
             templates: self.templates.effective(),
             budgets: self.budgets,
             rates: self.rates(),
+            notes: self.notes.clone(),
         })
     }
 

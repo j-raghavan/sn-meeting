@@ -42,6 +42,8 @@ semver = "1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 jni = "0.22.4"
 wiremock = "0.6"
+# Tests decode what rig sends on the wire (F19-AC4); already in the graph through rig.
+base64 = "0.22"
 tempfile = "3"
 
 [profile.release]

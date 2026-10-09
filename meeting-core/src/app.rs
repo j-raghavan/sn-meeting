@@ -37,6 +37,8 @@ pub struct App {
     models: Mutex<HashMap<Provider, Vec<String>>>,
     /// F19: the search index in `<app data>/search`, a cache of the files (INV17).
     pub search: crate::search::Searcher,
+    /// F19-FR6: the note regions a summarise job sends (the canvas, M12; tests replace it).
+    pub notes: crate::notes_text::NotesSource,
 }
 
 #[derive(Debug)]
@@ -72,6 +74,7 @@ impl App {
             templates,
             models: Mutex::default(),
             search,
+            notes: crate::notes_text::NotesSource::canvas(),
         }
     }
 

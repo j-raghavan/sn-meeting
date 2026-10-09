@@ -52,6 +52,26 @@ pub fn response_schema() -> Value {
     root
 }
 
+/// The schema with F19-FR6's `notes` field, for a call that sends note images.
+pub fn response_schema_with_notes() -> Value {
+    let mut s = response_schema();
+    s["properties"]["notes"] = crate::notes_text::schema_field();
+    if let Some(r) = s["required"].as_array_mut() {
+        r.push(json!("notes"));
+    }
+    s
+}
+
+/// The system prompt for a call that also sends note images: the fixed rules gain
+/// [`crate::notes_text::NOTES_RULE`] (INV9).
+pub fn system_prompt_with_notes(instructions: &str, started: &DateTime<FixedOffset>) -> String {
+    format!(
+        "{}\n{}",
+        system_prompt(instructions, started),
+        crate::notes_text::NOTES_RULE
+    )
+}
+
 /// Appended after every template's instructions (M4/M5 rulings).
 pub const FIXED_RULES: &str = "\
 Reply only with JSON that matches the provided schema.

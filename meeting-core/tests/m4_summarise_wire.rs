@@ -36,6 +36,7 @@ fn ask() -> JsonAsk {
         user: "Transcript:\n<transcript>\n[0:00:00] a\n\n[0:15:00] b\n</transcript>".into(),
         schema: response_schema(),
         max_tokens: MAX_OUTPUT_TOKENS,
+        images: vec![],
     }
 }
 
