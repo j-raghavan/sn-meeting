@@ -147,7 +147,9 @@ class SettingsActivity : Activity() {
                 addView(ui.note("Rates as of ${r.asOf}", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(4)) })
                 r.problems.forEach { addView(error(it)) }
             }
-            report.rows().forEachIndexed { i, row ->
+            val rows = report.rows()
+            if (rows.isEmpty()) addView(ui.note("Nothing spent yet", 15f).apply { setPadding(0, ui.dim(10), 0, ui.dim(10)) })
+            rows.forEachIndexed { i, row ->
                 if (i > 0) addView(ui.hairline())
                 addView(LinearLayout(this@SettingsActivity).apply {
                     orientation = LinearLayout.VERTICAL

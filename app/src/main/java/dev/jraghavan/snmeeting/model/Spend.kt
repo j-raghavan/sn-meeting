@@ -66,7 +66,14 @@ data class SpendReport(val months: List<SpendMonth>, val unpriced: Int, val note
     /** Settings → SPEND's rows, newest month first: the month and its total, then a line per provider. */
     data class Row(val month: String, val total: String, val lines: List<String>)
 
-    fun rows(): List<Row> = months.reversed().map { m ->
+    private fun spent(m: SpendMonth) = m.meetings > 0 || m.searches > 0
+
+    /**
+     * The months with spend, newest first and at most 12, and always the current (newest) one;
+     * none at all when nothing has been spent ("Nothing spent yet").
+     */
+    fun rows(): List<Row> = if (months.none(::spent)) emptyList() else months.reversed()
+        .filterIndexed { i, m -> i == 0 || spent(m) }.take(12).map { m ->
         val plus = if (m.unpriced > 0) "+" else ""
         val total = if (m.meetings == 0 && m.searches == 0) "—" else Spend.money(m.usd) + plus
         val lines = m.byProvider.map { p ->

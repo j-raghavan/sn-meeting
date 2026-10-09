@@ -56,6 +56,15 @@ class SpendTest {
         assertEquals(1, r.unpriced)
     }
 
+    @Test fun onlyMonthsWithSpendAndTheCurrentOneAreListed() {
+        fun month(m: String, meetings: Int) = """{"month":"$m","usd":${meetings * 0.5},"meetings":$meetings,"unpriced":0,"label":"","byProvider":{}}"""
+        fun report(vararg ms: String) = (CoreJson.obj("""{"months":[${ms.joinToString(",")}],"unpriced":0,"notes":[]}""", SpendReport::from) as CoreResult.Ok).value
+        val r = report(month("2026-07", 2), month("2026-08", 0), month("2026-09", 1), month("2026-10", 0))
+        assertEquals(listOf("October 2026", "September 2026", "July 2026"), r.rows().map { it.month })
+        assertEquals("—", r.rows().first().total)
+        assertEquals(emptyList<SpendReport.Row>(), report(month("2026-09", 0), month("2026-10", 0)).rows())
+    }
+
     @Test fun handwrittenQueriesShowAsSearch() {
         val json = """{"months":[{"month":"2026-10","usd":0.003,"meetings":0,"unpriced":0,
             "label":"October · < ${'$'}0.01 spent · 0 meetings","byProvider":{},"search":0.003,"searches":2}],
