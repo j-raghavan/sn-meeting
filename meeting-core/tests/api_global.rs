@@ -40,6 +40,8 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("saveTemplate", api::save_template("{}")),
         ("resetTemplate", api::reset_template("../x")),
         ("previewTemplate", api::preview_template("{}")),
+        ("getRates", api::get_rates()),
+        ("setRates", api::set_rates("[]")),
     ]
 }
 

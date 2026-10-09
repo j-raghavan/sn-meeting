@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 mod run;
+mod spend;
 mod templates;
 pub use run::Job;
 
@@ -386,38 +387,50 @@ impl App {
         {
             return json!({"error": "template not found", "field": "defaultTemplate"}).to_string();
         }
-        {
-            self.settings(); // an unreadable file is tried again first
-            let mut st = self.state();
-            if st.origin == Origin::Newer {
-                let e = "settings.json is from a newer version of Meetings, so it can't be changed here";
-                return json!({"error": e, "field": null}).to_string();
-            }
-            if st.origin == Origin::Unreadable {
-                let e = "settings.json can't be read just now, so it can't be changed; try again";
-                return json!({"error": e, "field": null}).to_string();
-            }
-            let ks = |p| settings::key_status(&self.core.key_dir, p);
-            let secrets: Vec<String> = Provider::ALL
-                .iter()
-                .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
-                .map(|k| k.expose().to_owned())
-                .collect();
-            let ctx = Ctx {
-                storage_root: &self.storage_root,
-                key_status: &ks,
-                secrets: &secrets,
-            };
-            let next = match settings::apply(&st.settings, &patch, &ctx) {
-                Ok(n) => n,
-                Err(e) => return json!({"error": e.message, "field": e.field}).to_string(),
-            };
-            if let Err(e) = settings::save(&settings::path_in(&self.core.app_data_dir), &next) {
-                return error_json(&format!("can't save settings: {}", e.kind()));
-            }
-            (st.settings, st.origin) = (next, Origin::File);
+        let ks = |p| settings::key_status(&self.core.key_dir, p);
+        let secrets: Vec<String> = Provider::ALL
+            .iter()
+            .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
+            .map(|k| k.expose().to_owned())
+            .collect();
+        let ctx = Ctx {
+            storage_root: &self.storage_root,
+            key_status: &ks,
+            secrets: &secrets,
+        };
+        let r = self.commit_settings(|cur| {
+            settings::apply(cur, &patch, &ctx)
+                .map_err(|e| json!({"error": e.message, "field": e.field}).to_string())
+        });
+        match r {
+            Ok(()) => self.get_settings_json(),
+            Err(e) => e,
         }
-        self.get_settings_json()
+    }
+
+    /// Replace the settings with `f(current)` and save them atomically. `Err` is the reply to
+    /// return: `f`'s own, or why settings.json can't be changed now (nothing is written).
+    pub(crate) fn commit_settings(
+        &self,
+        f: impl FnOnce(&Settings) -> Result<Settings, String>,
+    ) -> Result<(), String> {
+        self.settings(); // an unreadable file is tried again first
+        let mut st = self.state();
+        if st.origin == Origin::Newer {
+            let e =
+                "settings.json is from a newer version of Meetings, so it can't be changed here";
+            return Err(json!({"error": e, "field": null}).to_string());
+        }
+        if st.origin == Origin::Unreadable {
+            let e = "settings.json can't be read just now, so it can't be changed; try again";
+            return Err(json!({"error": e, "field": null}).to_string());
+        }
+        let next = f(&st.settings)?;
+        if let Err(e) = settings::save(&settings::path_in(&self.core.app_data_dir), &next) {
+            return Err(error_json(&format!("can't save settings: {}", e.kind())));
+        }
+        (st.settings, st.origin) = (next, Origin::File);
+        Ok(())
     }
 
     /// `nativeTestConnection`. Settings' model override applies only when `provider` is the

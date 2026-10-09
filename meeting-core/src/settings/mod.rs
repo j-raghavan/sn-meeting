@@ -51,6 +51,10 @@ pub struct Settings {
     pub debug: DebugSettings,
     /// F14-FR8: the in-app updater's choices (inkread keeps these in its AppSettings).
     pub updates: UpdateSettings,
+    /// F16-FR4: the user's rate entries, kept as written so a bad one is ignored on its own
+    /// (F16-FR8). Changed only through `nativeSetRates`, which validates them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rates: Vec<Value>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -68,6 +72,7 @@ impl Default for Settings {
             notice_shown: NoticeShown::default(),
             debug: DebugSettings::default(),
             updates: UpdateSettings::default(),
+            rates: Vec::new(),
             extra: Extra::new(),
         }
     }
@@ -399,7 +404,8 @@ pub struct Ctx<'a> {
 }
 
 /// Merge-patch `patch` onto `current` and validate. `schema` and `previousFolders` are
-/// core-owned: they are ignored in a patch.
+/// core-owned, and `rates` has its own validated call (`nativeSetRates`): they are ignored in a
+/// patch.
 pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Settings, SettingsError> {
     let Some(obj) = patch.as_object() else {
         return Err(SettingsError {
@@ -410,6 +416,7 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
     let mut patch = obj.clone();
     patch.remove("schema");
     patch.remove("previousFolders");
+    patch.remove("rates");
     if let Some(t) = patch.get("defaultTemplate").filter(|t| !t.is_null())
         && !t.as_str().is_some_and(is_template_id)
     {

@@ -376,3 +376,27 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeUpdateDec
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeGetRates<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::get_rates())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSetRates<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let json: String = json.try_to_string(env)?;
+        env.new_string(crate::api::set_rates(&json))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

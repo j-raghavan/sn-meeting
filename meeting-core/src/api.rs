@@ -274,6 +274,16 @@ pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))
 }
 
+/// `nativeGetRates()` (F16-FR4): `{asOf, entries, problems}`.
+pub fn get_rates() -> String {
+    with_app(App::get_rates_json)
+}
+
+/// `nativeSetRates(json)` (F16-FR4): the user's entries; replies as `nativeGetRates`.
+pub fn set_rates(json: &str) -> String {
+    with_app(|app| app.set_rates_json(json))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

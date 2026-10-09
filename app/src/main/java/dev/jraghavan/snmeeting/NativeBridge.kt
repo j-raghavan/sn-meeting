@@ -110,6 +110,16 @@ object NativeBridge {
     /** Renders the layout against the sample meeting: `{markdown}` or `{error, line, field}`. */
     external fun nativePreviewTemplate(json: String): String
 
+    // Spend (F16). Rates are plain numbers, never secrets.
+
+    /** The rates in force: `{asOf, entries: [{provider, model, unit, perMinute?, input?, …,
+     *  validFrom?, asOf, source, note?, origin}], problems: [line]}`; origin is `default` or `user`. */
+    external fun nativeGetRates(): String
+
+    /** The user's whole list of rate entries (`[]` resets to the defaults); replies as
+     *  [nativeGetRates], or `{error, field}` and nothing is saved. Stored costs don't change. */
+    external fun nativeSetRates(json: String): String
+
     // Updates (F14).
 
     /** Is `releaseJson` (GitHub releases/latest, fetched by the shell) newer than

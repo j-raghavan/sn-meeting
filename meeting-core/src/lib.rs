@@ -7,6 +7,7 @@ pub mod keyfile;
 pub mod library;
 pub mod pipeline;
 pub mod providers;
+pub mod rates;
 pub mod runtime;
 pub mod scrub;
 pub mod segment;
