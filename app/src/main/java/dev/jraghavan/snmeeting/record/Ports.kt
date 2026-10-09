@@ -35,6 +35,11 @@ enum class InputSource { MIC, VOICE_COMMUNICATION }
 interface RecorderEvents {
     fun onApproachingLimit() // MEDIA_RECORDER_INFO_MAX_FILESIZE_APPROACHING (90 %)
     fun onNextFileStarted() // MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED
+    /**
+     * F15-FR2: a time-driven recorder started the next file at [offsetMs] on the recording
+     * clock (samples ÷ rate), not the elapsed time it was heard. MediaRecorder never calls it.
+     */
+    fun onNextFileStartedAt(offsetMs: Long) = onNextFileStarted()
     fun onLimitReached() // MAX_DURATION_REACHED, or MAX_FILESIZE_REACHED with no next file
     fun onError(what: Int)
     fun onRoutedTo(deviceId: Int?) // the input actually in use
@@ -56,6 +61,13 @@ interface RecorderPort {
 
     /** stop() + release(). true = finalised; false = stop() threw with no audio captured (F2-FR7). */
     fun stop(): Boolean
+
+    /**
+     * F15-FR2 (D14): this recorder rolls over by sample count at exactly the plan's length, so
+     * it is started with that length and the plan's size cap only as a runaway guard. false
+     * for MediaRecorder, whose rollover is size-driven (F2-FR5).
+     */
+    val timeDriven: Boolean get() = false
 }
 
 interface StoragePort {
