@@ -268,12 +268,18 @@ class SegmentedRecorder(
 
     companion object {
         const val RESERVE_BYTES = 1_000_000L
+        /**
+         * The file outgrows the nominal bitrate: on the Manta a 96 kbps segment reached the 10.8 MB
+         * cap at 849.6 s, as the encoded audio runs about 2 % over and the writer counts its index
+         * against the cap. 5 % more puts the switch just under the plan (about 14:53 of 15:00).
+         */
+        const val CONTAINER_PERCENT = 105L
         const val CANT_START = "Couldn't start the recorder"
         const val TOO_SHORT = "Too short — nothing saved"
 
-        /** The size at which to switch files: the plan's duration at this bitrate, capped by the plan's size. */
+        /** The size at which to switch files: the plan's duration at this bitrate plus the container's share, capped by the plan's size. */
         fun segmentBytes(b: Begun, spec: AudioSpec): Long =
-            minOf(b.maxFileBytes, b.maxDurationMs * spec.bitrateBps / 8 / 1000)
+            minOf(b.maxFileBytes, b.maxDurationMs * spec.bitrateBps / 8 / 1000 * CONTAINER_PERCENT / 100)
 
         /** MAX_DURATION stops the recorder (no switch), so it sits 10 % past the plan. */
         fun safetyDurationMs(b: Begun): Int = (b.maxDurationMs * 11 / 10).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()

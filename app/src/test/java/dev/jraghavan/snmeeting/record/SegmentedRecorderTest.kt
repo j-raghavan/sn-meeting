@@ -69,16 +69,23 @@ class SegmentedRecorderTest {
     @Test fun usbBeginsWithItsSpecAndASizeCap() { // F2-FR4, F2-FR5
         sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
         assertEquals("""begin {"kind":"usb","name":"USB"} {"codec":"aac-lc","sampleRateHz":44100,"bitrateBps":96000,"channels":1}""", log[0])
-        // 15 min at 96 kbps = 10.8 MB (< the plan's 13.5 MB cap); MAX_DURATION 10 % past the plan.
-        assertEquals("start 01.m4a MIC dev=7 bytes=10800000 ms=990000", log[1])
+        // 15 min at 96 kbps = 10.8 MB, + 5 % for the container = 11.34 MB (< the plan's 13.5 MB cap);
+        // MAX_DURATION 10 % past the plan.
+        assertEquals("start 01.m4a MIC dev=7 bytes=11340000 ms=990000", log[1])
         assertEquals(SegmentedRecorder.Phase.RECORDING, sr.phase)
+    }
+
+    @Test fun segmentBytesAddsTheContainerShareButNeverPassesThePlanCap() { // F2-FR5
+        assertEquals(11_340_000L, SegmentedRecorder.segmentBytes(plan, AudioSpec.USB))
+        // A plan whose size cap is below duration x bitrate x 1.05 keeps its cap (Gemini's inline limit).
+        assertEquals(10_000_000L, SegmentedRecorder.segmentBytes(Begun(id, first, 900_000, 10_000_000), AudioSpec.USB))
     }
 
     @Test fun bluetoothFallsBackTo48k() { // F2-FR4
         rejected += AudioSpec.BLUETOOTH
         sr.start(MicOption(MicKind.BLUETOOTH, "Jabra", null), 9, InputSource.VOICE_COMMUNICATION, listOf(AudioSpec.BLUETOOTH, AudioSpec.BLUETOOTH_FALLBACK))
         assertEquals("""begin {"kind":"bluetooth","name":"Jabra"} {"codec":"aac-lc","sampleRateHz":16000,"bitrateBps":48000,"channels":1}""", log[0])
-        assertEquals("start 01.m4a VOICE_COMMUNICATION dev=9 bytes=5400000 ms=990000", log[1])
+        assertEquals("start 01.m4a VOICE_COMMUNICATION dev=9 bytes=5670000 ms=990000", log[1]) // 15 min at 48 kbps + 5 %
     }
 
     @Test fun noAcceptedSpecBeginsNothing() {
@@ -167,7 +174,7 @@ class SegmentedRecorderTest {
         events.onApproachingLimit()
         now += 990_000; events.onLimitReached()
         assertEquals(listOf("next 02.m4a false", "stop true", "close 0 01.m4a measure=true ~990000",
-            "start 02.m4a MIC dev=7 bytes=10800000 ms=990000", "add 02.m4a @990000"), log)
+            "start 02.m4a MIC dev=7 bytes=11340000 ms=990000", "add 02.m4a @990000"), log)
     }
 
     @Test fun aFailedRestartEndsTheMeeting() {
@@ -268,7 +275,7 @@ class SegmentedRecorderTest {
     }
 
     @Test fun noRoomToStartRecordsNothing() {
-        free = 11_000_000 // under 10.8 MB + the 1 MB margin
+        free = 11_000_000 // under 11.34 MB + the 1 MB margin
         sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB))
         assertEquals(listOf("close 0 01.m4a measure=false ~0", "finish 0 '' discard=true"), log.drop(1))
         assertEquals(null to "Storage full", ended)
