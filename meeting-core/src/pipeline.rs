@@ -225,6 +225,14 @@ async fn run_transcribe(
                 for s in &mut sc.segments {
                     s.text = None;
                 }
+                // F15-FR10: a near-live meeting is sent again chunk by chunk, over the ranges it
+                // was recorded in (re-cut from the segments), so line times and marks stay put.
+                for c in &mut sc.chunks {
+                    c.state = crate::sidecar::ChunkState::Pending;
+                    c.text = None;
+                    c.attempts = 0;
+                    c.last_error = None;
+                }
             }
             sc.error = None;
             sc.template_id

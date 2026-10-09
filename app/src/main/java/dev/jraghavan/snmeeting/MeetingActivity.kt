@@ -333,8 +333,9 @@ class MeetingActivity : Activity() {
 
     /** Transcribe again replaces the transcript, so it is asked first; to-dos and the title stay. */
     private fun confirmAgain(job: Actions.Job) {
+        val what = if (view?.meeting?.nearLive == true) "Every part of the recording" else "Every segment"
         InkDialog.confirm(this, "Transcribe again?",
-            "Every segment is sent again and the transcript replaced, then it is summarised again. To-dos, ticks and the title stay.",
+            "$what is sent again and the transcript replaced, then it is summarised again. To-dos, ticks and the title stay.",
             job.label) { confirmThenStart(job) }
     }
 
@@ -356,7 +357,8 @@ class MeetingActivity : Activity() {
             when (job) {
                 // F15-FR9: a near-live meeting's gone chunk files are re-cut from its segments first.
                 Actions.Job.TRANSCRIBE -> if (chunked) ChunkJob.device(again = false).run(id) else NativeBridge.nativeTranscribe(id)
-                Actions.Job.TRANSCRIBE_AGAIN -> NativeBridge.nativeTranscribeAgain(id)
+                // F15-FR10: every chunk is re-cut from the segments, then sent again.
+                Actions.Job.TRANSCRIBE_AGAIN -> if (chunked) ChunkJob.device(again = true).run(id) else NativeBridge.nativeTranscribeAgain(id)
                 Actions.Job.SUMMARISE -> NativeBridge.nativeSummarise(id)
             }
         }) { json ->

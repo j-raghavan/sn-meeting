@@ -310,3 +310,48 @@ fn recovery_resumes_the_catch_up_of_a_near_live_meeting() {
         (json!([ID0]), None)
     );
 }
+
+#[test]
+fn transcribe_again_sends_every_chunk_over_its_recorded_range() {
+    // F15-FR10: chunk texts are cleared and every chunk re-sent (re-cut by the shell first);
+    // the to-dos and title stay; line times stay aligned because the ranges don't change.
+    let fx = Fx::new();
+    fx.transcribes("again.");
+    fx.chunks(3, 0);
+    fx.stop(90_000);
+    parse(&fx.app.run_job_json(ID0, Job::Transcribe));
+    let before: Vec<u64> = fx.sc().chunks.iter().map(|c| c.start_offset_ms).collect();
+    // The shell re-cuts every chunk (nativeChunksToCut lists them all once transcribed).
+    let cuts = parse(&fx.app.chunks_to_cut_json(ID0));
+    for c in cuts.as_array().unwrap() {
+        let p = PathBuf::from(c["path"].as_str().unwrap());
+        fs::create_dir_all(p.parent().unwrap()).unwrap();
+        fs::write(&p, b"\x00\x00\x00\x18ftypM4A recut").unwrap();
+        let ci = ChunkIn {
+            index: c["index"].as_i64().unwrap() as i32,
+            path: &p.to_string_lossy(),
+            start_offset_ms: c["startOffsetMs"].as_i64().unwrap(),
+            duration_ms: c["durationMs"].as_i64().unwrap(),
+            speech_ms: -1,
+        };
+        assert_eq!(parse(&fx.app.chunk_ready_json(ID0, ci))["added"], false);
+    }
+    let out = parse(&fx.app.run_job_json(ID0, Job::TranscribeAgain));
+    assert_eq!(out["meeting"]["status"], "done", "{out}");
+    let sc = fx.sc();
+    assert_eq!(fx.requests("/v1/audio/transcriptions").len(), 3);
+    assert!(
+        sc.chunks
+            .iter()
+            .all(|c| c.text.as_deref() == Some("again."))
+    );
+    assert_eq!(
+        sc.chunks
+            .iter()
+            .map(|c| c.start_offset_ms)
+            .collect::<Vec<_>>(),
+        before
+    );
+    assert_eq!(sc.title.as_deref(), Some("Budget"));
+    assert_eq!(fx.requests("/v1/responses").len(), 2);
+}
