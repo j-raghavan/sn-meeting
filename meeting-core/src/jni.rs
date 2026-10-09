@@ -359,3 +359,20 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativePreviewTe
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// F14-FR5: inkread's `nativeUpdateDecide` wrapper. The shell fetched `releases/latest`; the core
+/// compares (semver) and returns the decision JSON. Junk in gives `{"updateAvailable":false}`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeUpdateDecide<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    installed_version: JString<'local>,
+    release_json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let installed: String = installed_version.try_to_string(env)?;
+        let json: String = release_json.try_to_string(env)?;
+        env.new_string(crate::api::update_decide(&installed, &json))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

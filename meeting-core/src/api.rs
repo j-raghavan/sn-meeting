@@ -262,6 +262,13 @@ pub fn preview_template(json: &str) -> String {
     with_app(|app| app.preview_template_json(json))
 }
 
+/// `nativeUpdateDecide(installedVersion, releaseJson)` (F14-FR5, inkread's JNI `decide`): is a
+/// fetched `releases/latest` payload newer than the installed version? Needs no `nativeInit`:
+/// the shell fetched the JSON, the core only compares. Junk in gives `{"updateAvailable":false}`.
+pub fn update_decide(installed_version: &str, release_json: &str) -> String {
+    guarded(|| crate::update::decide(installed_version, release_json))
+}
+
 /// `nativeFinishMeeting(id, durationMs, note)`; `note` "" = none (F3-FR2, F2-FR3).
 pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))
@@ -280,6 +287,20 @@ mod tests {
     #[test]
     fn error_json_escapes() {
         assert_eq!(error_json("a\"b\n"), r#"{"error":"a\"b\n"}"#);
+    }
+
+    #[test]
+    fn update_decide_needs_no_init_and_answers_junk_benignly() {
+        assert_eq!(
+            update_decide("0.1.0", "junk"),
+            r#"{"updateAvailable":false}"#
+        );
+        let json = r#"{"tag_name":"v0.2.0","assets":[
+            {"name":"meetings-v0.2.0.apk","browser_download_url":"https://example.test/a.apk"}]}"#;
+        let d: serde_json::Value = serde_json::from_str(&update_decide("0.1.0-dev", json)).unwrap();
+        assert_eq!(d["updateAvailable"], true);
+        assert_eq!(d["version"], "0.2.0");
+        assert_eq!(d["apkUrl"], "https://example.test/a.apk");
     }
 
     #[test]

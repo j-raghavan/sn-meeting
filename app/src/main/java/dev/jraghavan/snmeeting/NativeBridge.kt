@@ -109,4 +109,11 @@ object NativeBridge {
 
     /** Renders the layout against the sample meeting: `{markdown}` or `{error, line, field}`. */
     external fun nativePreviewTemplate(json: String): String
+
+    // Updates (F14).
+
+    /** Is `releaseJson` (GitHub releases/latest, fetched by the shell) newer than
+     *  `installedVersion`? `{updateAvailable, version, notes, apkUrl, sha256Url}`; junk gives
+     *  `{"updateAvailable":false}`. Needs no [nativeInit]. */
+    external fun nativeUpdateDecide(installedVersion: String, releaseJson: String): String
 }
