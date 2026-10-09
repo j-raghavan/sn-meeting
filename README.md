@@ -20,24 +20,26 @@
 
 ---
 
-Meetings is an Android app for the Supernote (Android 11). Plug in a USB microphone, or connect a Bluetooth headset, and tap **＋ New**. Meetings records in the background while you take notes in another app. Afterwards it transcribes the recording, summarises it with a template you choose, and keeps every open to-do from every meeting on its home screen.
+I wanted my Supernote to record a meeting and hand me back a transcript, a summary and the to-dos, without leaving the device. Meetings is the Android app I built for that (the Supernote runs Android 11). Plug in a USB microphone, or connect a Bluetooth headset, and tap **＋ New**. It records in the background while you take notes in another app. Afterwards it transcribes the recording, summarises it with a template you choose, and keeps every open to-do from every meeting on its home screen.
 
-It is built the way [inkread](https://github.com/j-raghavan/inkread) is: a small Kotlin shell for the Android parts, around a Rust core that does everything else and is tested on a laptop with no device.
+I built it the same way as [inkread](https://github.com/j-raghavan/inkread): a small Kotlin shell for the Android parts, around a Rust core that does everything else and that I can test on my laptop without the device.
 
 ## Why Meetings?
 
-- **A meeting recorder that suits e-ink.** It is black on white with no animations, and shows explicit cues ("SCROLL FOR MORE ↓") instead of motion. The screens follow inkread's look.
+- **A meeting recorder that suits e-ink.** It is black on white with no animations, and it shows explicit cues ("SCROLL FOR MORE ↓") instead of motion. I gave it the same look as inkread.
 - **Your audio stays a file you own.** Recordings, transcripts and to-dos are plain files in `EXPORT/sn-meeting`, which Supernote Partner syncs to your computer. There is no database and no lock-in.
-- **Bring your own AI provider.** Transcribe with OpenAI or Google Gemini, and summarise with OpenAI, Gemini or Anthropic. Meetings reuses the API keys you already keep on the device for SN-Copilot.
+- **Bring your own AI provider.** Transcribe with OpenAI or Google Gemini, and summarise with OpenAI, Gemini or Anthropic. Meetings reuses the API keys you already keep on the device for SN-Copilot, so there's no second place to paste them.
 - **Built to survive real meetings.** Long recordings are split into 15-minute segments, so a crash loses at most one segment. Unplugging the mic ends the recording cleanly and keeps the audio. A crashed recording is recovered the next time the app opens.
 
 ## Status
 
-Meetings is at **v0.1**. Everything below works and is checked by CI. On the device, recording, transcription and summaries, crash recovery and mic loss have been verified on a Supernote A5 X2 Manta.
+Meetings is at **v0.1**. Everything below works, and CI checks it on every pull request. On my Supernote A5 X2 Manta I've tested recording, transcription and summaries, recovery after a crash, and unplugging the mic mid-recording.
 
-Not yet verified on a device: recordings over 15 minutes (segment rollover), long screen-off recordings, and Bluetooth headsets.
+I haven't yet tested these on the device: recordings over 15 minutes (where a new segment starts), long recordings with the screen off, and Bluetooth headsets.
 
 ### Roadmap
+
+Here's what I'm building next:
 
 - **v1.1:** a follow-along transcript. Words highlight in step with playback, and you tap a line to jump there.
 - **v2:** handwritten notes synced to the audio. Each meeting gets an infinite canvas, with your ink lighting up as the recording plays. The tools (pen, highlighter, eraser, lasso, undo, redo) sit in a docked bar, as in inkread.
@@ -56,7 +58,7 @@ Not yet verified on a device: recordings over 15 minutes (segment rollover), lon
 4. **Record.** Plug in a USB microphone and tap **＋ New**. Tap **■ Stop** when the meeting ends.
 5. **Transcribe.** Open the meeting and tap **Transcribe**. Meetings transcribes it, then summarises it with the meeting's template.
 
-The Supernote has no usable built-in microphone, so Meetings records only from a USB microphone or a Bluetooth headset. The USB-C port can't be connected to a computer and a USB microphone at the same time; use adb over Wi-Fi for development (see Building).
+On my Manta the built-in microphone records only noise, so Meetings records only from a USB microphone or a Bluetooth headset. The USB-C port can't take a computer and a USB microphone at the same time, so I develop over adb on Wi-Fi (see Building).
 
 ## Using Meetings
 
@@ -106,7 +108,7 @@ Rust core (meeting-core/)    keys, settings, meeting library, providers (rig-cor
 OpenAI · Google Gemini · Anthropic
 ```
 
-The core builds and tests on a laptop. Provider calls are tested against local mock servers. The Android-only parts are kept thin and checked on the device.
+The core builds and tests on a laptop, and its provider calls are tested against local mock servers. I keep the Android-only parts thin and check them on the device.
 
 ## Building
 
@@ -124,11 +126,11 @@ A local build is signed with the debug key unless `MEETINGS_KEYSTORE_FILE`, `MEE
 
 ## Contributing
 
-Every pull request runs the full gates in CI, along with a commit check: subjects reference a requirement (for example `F5-FR2: …`) and carry no AI attribution. See the pull request template.
+Pull requests are welcome. Every pull request runs the full gates in CI, along with a commit check: subjects reference a requirement (for example `F5-FR2: …`) and carry no AI attribution. See the pull request template.
 
 ## About & disclaimer
 
-Meetings is an independent project. It is not affiliated with or endorsed by Ratta (Supernote), OpenAI, Google or Anthropic. You use your own API keys and are bound by each provider's terms; providers may retain the audio and text you send them under their own policies.
+Meetings is my own independent project. It is not affiliated with or endorsed by Ratta (Supernote), OpenAI, Google or Anthropic. You use your own API keys and are bound by each provider's terms; providers may retain the audio and text you send them under their own policies.
 
 ## License
 
