@@ -30,6 +30,8 @@ data class AgendaRow(
     val marks: Marks, val fromLastTime: List<TodoRef>,
     /** The (linked) meeting's length and cost, "—" for none (F16-FR5). */
     val durationMs: Long? = null, val cost: String = "—",
+    /** An event marked free (transparent): it holds no meeting, so nothing links to it. */
+    val transparent: Boolean = false,
 ) {
     companion object {
         fun from(o: JSONObject): AgendaRow? {
@@ -45,6 +47,7 @@ data class AgendaRow(
                 marks = Marks.from(o.obj("marks")),
                 fromLastTime = o.arr("fromLastTime").mapObj(TodoRef::from),
                 durationMs = o.long("durationMs"), cost = Spend.label(o.obj("spend")),
+                transparent = o.bool("transparent") ?: false,
             )
         }
     }
@@ -187,16 +190,31 @@ object CalendarFormat {
         return "%d:%02d".format(Locale.ROOT, min / 60, min % 60)
     }
 
-    /**
-     * A recording's secondary line: "0:38 · $0.01" (the cost left out when nothing is known),
-     * then "Unscheduled · tap to link" when it is outside any event and there are events to
-     * link to (F18-FR10).
-     */
-    fun meetingLine(r: AgendaRow, hasLinks: Boolean): String = listOfNotNull(
+    /** A recording's secondary line: "0:38 · $0.01", the cost left out when nothing is known. */
+    fun meetingLine(r: AgendaRow): String = listOfNotNull(
         r.durationMs?.let(::length),
         r.cost.removePrefix("≈ ").takeIf { it != "—" && it.isNotBlank() },
-        if (!r.isEvent && r.unscheduled && hasLinks) "Unscheduled · tap to link" else null,
     ).joinToString(" · ")
+
+    /** What a tap on a row opens: an event's sheet, or the recording's meeting (F18-FR10). */
+    enum class RowTap { EVENT, MEETING, NONE }
+
+    fun rowTap(r: AgendaRow): RowTap = when {
+        r.isEvent -> RowTap.EVENT
+        r.meetingId != null -> RowTap.MEETING
+        else -> RowTap.NONE
+    }
+
+    /** The row's own "Link to event ›" control (F18-FR10). */
+    const val LINK = "Link to event ›"
+
+    /**
+     * Whether an unscheduled recording shows [LINK]: only when its day has an event it could
+     * be (timed, not marked free). Linking happens there or on the meeting screen, never from
+     * a tap on the row itself.
+     */
+    fun canLink(r: AgendaRow, dayRows: List<AgendaRow>): Boolean =
+        !r.isEvent && r.unscheduled && r.meetingId != null && dayRows.any { it.isEvent && !it.allDay && !it.transparent }
 
     /** The italic line under a row: room and attendees, as one line. */
     fun detail(r: AgendaRow): String = listOfNotNull(r.location?.ifBlank { null }, r.people.ifBlank { null }).joinToString(" · ")

@@ -46,10 +46,32 @@ class CalendarTest {
         val rec = d.rows[1]
         assertFalse(rec.isEvent)
         assertNull(CalendarFormat.rowTitle(rec))
-        assertEquals("Unscheduled · tap to link", CalendarFormat.meetingLine(rec, hasLinks = true))
-        assertEquals("no links: nothing to link to", "", CalendarFormat.meetingLine(rec, hasLinks = false))
+        assertEquals("no length or cost known: an empty line", "", CalendarFormat.meetingLine(rec))
         assertEquals(Marks.NONE, d.allDay[0].marks)
         assertNull(a.day(LocalDate.of(2026, 10, 11)))
+    }
+
+    @Test
+    fun a_recording_row_opens_its_meeting_and_links_only_from_its_control() { // F18-FR10
+        val d = Agenda.from(JSONObject(agendaJson)).days[0]
+        val (sync, rec) = d.rows
+        assertEquals(CalendarFormat.RowTap.EVENT, CalendarFormat.rowTap(sync))
+        assertEquals(CalendarFormat.RowTap.MEETING, CalendarFormat.rowTap(rec))
+        assertEquals(CalendarFormat.RowTap.NONE, CalendarFormat.rowTap(rec.copy(meetingId = null)))
+        // The day has a timed event: the unscheduled recording offers "Link to event ›".
+        assertTrue(CalendarFormat.canLink(rec, d.rows))
+        assertEquals("Link to event ›", CalendarFormat.LINK)
+        // No events that day, or only all-day or free ones: no control.
+        assertFalse(CalendarFormat.canLink(rec, listOf(rec)))
+        assertFalse(CalendarFormat.canLink(rec, listOf(rec, sync.copy(allDay = true))))
+        assertFalse(CalendarFormat.canLink(rec, listOf(rec, sync.copy(transparent = true))))
+        // A linked recording, an event, or a row without a meeting never shows it.
+        assertFalse(CalendarFormat.canLink(rec.copy(unscheduled = false), d.rows))
+        assertFalse(CalendarFormat.canLink(sync, d.rows))
+        assertFalse(CalendarFormat.canLink(rec.copy(meetingId = null), d.rows))
+        val free = AgendaRow.from(JSONObject("""{"kind":"event","startMs":1,"transparent":true}"""))!!
+        assertTrue(free.transparent)
+        assertEquals("0:38", CalendarFormat.meetingLine(rec.copy(durationMs = 38 * min)))
     }
 
     @Test
@@ -67,7 +89,7 @@ class CalendarTest {
         assertNull(CalendarFormat.rowTitle(untitled))
         val titled = untitled.copy(title = "Budget", durationMs = 38 * 60_000L, cost = "≈ \$0.01")
         assertEquals("Budget", CalendarFormat.rowTitle(titled))
-        assertEquals("0:38 · \$0.01", CalendarFormat.meetingLine(titled, hasLinks = true))
+        assertEquals("0:38 · \$0.01", CalendarFormat.meetingLine(titled))
         assertEquals("1:05", CalendarFormat.length(65 * 60_000L))
         assertEquals("0:01", CalendarFormat.length(5_000L))
         assertEquals("0:00", CalendarFormat.length(0L))

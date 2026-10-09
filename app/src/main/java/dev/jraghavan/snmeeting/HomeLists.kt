@@ -59,6 +59,8 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
     private var shown: LocalDate = LocalDate.now()
     /** Whether any calendar link is set: only then can a recording be linked (F18-FR10). */
     private var hasLinks = false
+    /** The rows of the day shown: whether a recording can be linked depends on them. */
+    private var dayRows: List<AgendaRow> = emptyList()
 
     /** The two columns: the day (wider) and the to-dos, equal heights, each scrolling inside. */
     val columns: View = LinearLayout(a).apply {
@@ -129,6 +131,7 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
         if (error != null) return empty(timeline, "Couldn't read the day: $error")
         val all = day?.allDay.orEmpty()
         val rows = day?.rows.orEmpty()
+        dayRows = rows
         if (all.isEmpty() && rows.isEmpty()) {
             return empty(timeline, if (hasLinks) "Nothing on the calendar. Tap ＋ New to record a meeting."
                 else "No recordings this day. Tap ＋ New to record one.")
@@ -159,10 +162,10 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
         setPadding(0, ui.dim(14), 0, ui.dim(14))
         isClickable = true
         setOnClickListener {
-            when {
-                r.isEvent -> actions.onEvent(r)
-                r.unscheduled && hasLinks -> actions.onUnscheduled(r)
-                else -> r.meetingId?.let(actions::onMeeting)
+            when (CalendarFormat.rowTap(r)) {
+                CalendarFormat.RowTap.EVENT -> actions.onEvent(r)
+                CalendarFormat.RowTap.MEETING -> r.meetingId?.let(actions::onMeeting)
+                CalendarFormat.RowTap.NONE -> Unit
             }
         }
         addView(LinearLayout(a).apply {
@@ -176,10 +179,22 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
             val detail = CalendarFormat.detail(r)
             if (detail.isNotEmpty()) addView(ui.note(detail, 13f).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
                 ui.fullWidth().apply { topMargin = ui.dim(2) })
-            // Length and cost, and for a recording outside any event the way to link it.
-            val line = CalendarFormat.meetingLine(r, hasLinks)
-            if (line.isNotEmpty()) addView(ui.eyebrow(line, ui.inkSoft).apply { isAllCaps = false; text = line },
-                ui.fullWidth().apply { topMargin = ui.dim(4) })
+            // Length and cost; for a recording outside any event, its own link control.
+            val line = CalendarFormat.meetingLine(r)
+            val link = CalendarFormat.canLink(r, dayRows)
+            if (line.isNotEmpty() || link) addView(LinearLayout(a).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(ui.eyebrow(line, ui.inkSoft).apply { isAllCaps = false; text = line },
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                if (link) addView(ui.eyebrow(CalendarFormat.LINK).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    minHeight = ui.dp(48) // a touch area of its own; the rest of the row opens the meeting
+                    setPadding(ui.dim(12), 0, ui.dim(4), 0)
+                    isClickable = true
+                    setOnClickListener { actions.onUnscheduled(r) }
+                })
+            }, ui.fullWidth().apply { topMargin = ui.dim(4) })
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addView(marks(r.marks))
     }
