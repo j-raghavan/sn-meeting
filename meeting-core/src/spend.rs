@@ -100,6 +100,62 @@ pub struct UsageRecord {
     pub extra: Map<String, Value>,
 }
 
+/// One entry of a sidecar's `usage` as read: a record, or anything else (a hand edit, a shape a
+/// newer build writes), kept as written and counted as unpriced, so it never makes the meeting
+/// unreadable (F16-FR8).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum UsageEntry {
+    Record(Box<UsageRecord>),
+    Unreadable(Value),
+}
+
+impl From<UsageRecord> for UsageEntry {
+    fn from(r: UsageRecord) -> UsageEntry {
+        UsageEntry::Record(Box::new(r))
+    }
+}
+
+impl From<Value> for UsageEntry {
+    fn from(v: Value) -> UsageEntry {
+        match serde_json::from_value::<UsageRecord>(v.clone()) {
+            Ok(r) => r.into(),
+            Err(_) => UsageEntry::Unreadable(v),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UsageEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Ok(Value::deserialize(d)?.into())
+    }
+}
+
+impl UsageEntry {
+    pub fn record(&self) -> Option<&UsageRecord> {
+        match self {
+            UsageEntry::Record(r) => Some(r),
+            UsageEntry::Unreadable(_) => None,
+        }
+    }
+
+    pub fn record_mut(&mut self) -> Option<&mut UsageRecord> {
+        match self {
+            UsageEntry::Record(r) => Some(r),
+            UsageEntry::Unreadable(_) => None,
+        }
+    }
+}
+
+/// `usage` as read: a list of entries; any other value is kept as one unreadable entry.
+pub fn lenient_usage<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<UsageEntry>, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::Array(a) => a.into_iter().map(UsageEntry::from).collect(),
+        Value::Null => Vec::new(),
+        other => vec![UsageEntry::Unreadable(other)],
+    })
+}
+
 /// A fresh record id: `u-` and 8 hex digits of a random (v4) UUID.
 pub fn new_usage_id() -> String {
     format!("u-{}", &uuid::Uuid::new_v4().simple().to_string()[..8])
@@ -250,11 +306,12 @@ pub struct Total {
 }
 
 impl Total {
-    pub fn of<'a>(records: impl IntoIterator<Item = &'a UsageRecord>) -> Total {
+    /// The total of `entries`; an unreadable entry counts as unpriced.
+    pub fn of<'a>(entries: impl IntoIterator<Item = &'a UsageEntry>) -> Total {
         let mut t = Total::default();
-        for r in records {
+        for e in entries {
             t.records += 1;
-            match r.usd {
+            match e.record().and_then(|r| r.usd) {
                 Some(u) if u.is_finite() => t.usd += u,
                 _ => t.unpriced += 1,
             }
@@ -397,6 +454,7 @@ pub fn report(
             for r in sc
                 .usage
                 .iter()
+                .filter_map(UsageEntry::record)
                 .filter(|r| month_of(r, tz).as_deref() == Some(&key))
             {
                 any = true;
@@ -627,7 +685,7 @@ mod tests {
 
     fn sc(id: &str, usage: Vec<UsageRecord>) -> crate::sidecar::Sidecar {
         crate::sidecar::Sidecar {
-            usage,
+            usage: usage.into_iter().map(UsageEntry::from).collect(),
             ..crate::sidecar::blank(id)
         }
     }
@@ -639,7 +697,7 @@ mod tests {
         let t = |v: Vec<Option<f64>>| {
             let recs: Vec<_> = v
                 .into_iter()
-                .map(|u| rec(at, Provider::OpenAi, Kind::Transcribe, u))
+                .map(|u| rec(at, Provider::OpenAi, Kind::Transcribe, u).into())
                 .collect();
             Total::of(&recs).label
         };
@@ -650,7 +708,7 @@ mod tests {
         assert_eq!(t(vec![Some(0.004), None]), "< $0.01+");
         assert_eq!(t(vec![None]), "≈ $0.00+");
         assert_eq!(t(vec![Some(0.076)]), "≈ $0.08");
-        let total = Total::of(&[rec(at, Provider::OpenAi, Kind::Transcribe, Some(0.1))]);
+        let total = Total::of(&[rec(at, Provider::OpenAi, Kind::Transcribe, Some(0.1)).into()]);
         assert_eq!((total.usd, total.records, total.unpriced), (0.1, 1, 0));
         assert_eq!(
             meeting_total(&sc("meeting-20261009-100000", vec![])).label,

@@ -1,7 +1,7 @@
 //! F16: the spend calls. Rates (F16-FR4) are read from and written to `settings.json`.
 use super::App;
 use crate::rates::{self, Rate, RateTable};
-use crate::spend::Total;
+use crate::spend::{Total, UsageEntry};
 use chrono::NaiveDate;
 use serde_json::{Value, json};
 
@@ -121,7 +121,7 @@ impl App {
                 continue;
             }
             let mut next = sc.usage.clone();
-            for r in &mut next {
+            for r in next.iter_mut().filter_map(UsageEntry::record_mut) {
                 r.price(&rates);
             }
             add(&mut old, &Total::of(&sc.usage));
@@ -135,7 +135,7 @@ impl App {
             for id in &changed {
                 let _w = self.write_lock();
                 let r = lib.update(id, |sc, _| {
-                    for r in &mut sc.usage {
+                    for r in sc.usage.iter_mut().filter_map(UsageEntry::record_mut) {
                         r.price(&rates);
                     }
                     Ok(())

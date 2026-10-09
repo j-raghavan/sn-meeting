@@ -8,7 +8,7 @@ use crate::jobs::{self, Cancel};
 use crate::library::{self, LibError, Library};
 use crate::providers::{self, CallFail, JsonAsk};
 use crate::sidecar::{self, MicKind, ProviderRun, Sidecar};
-use crate::spend::Kind;
+use crate::spend::{Kind, UsageEntry};
 use crate::status::{self, Event, Phase};
 use crate::summarise;
 use crate::templates::{self, Context, CtxPara, CtxProviders, CtxSection, CtxTodo, Template};
@@ -154,7 +154,8 @@ pub async fn summarise(
             library::set_phase(&mut next, p);
             // F16-FR2: the summary's usage goes in the write that stores it.
             let recs = spent.take();
-            next.usage.extend(recs.iter().cloned());
+            next.usage
+                .extend(recs.iter().cloned().map(UsageEntry::from));
             if let Err(e) = sidecar::write(&dir, &next) {
                 spent.put_back(recs);
                 return Err(e.into());

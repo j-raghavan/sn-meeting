@@ -7,7 +7,7 @@ use meeting::app::App;
 use meeting::keyfile::Provider;
 use meeting::providers::Measured;
 use meeting::rates::RateTable;
-use meeting::spend::{Kind, UsageRecord};
+use meeting::spend::{Kind, UsageEntry, UsageRecord};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -21,7 +21,7 @@ fn meeting_with(app: &App, at_ms: i64, records: Vec<UsageRecord>) -> (String, Pa
         .to_path_buf();
     app.finish_json(&id, 1_000, "");
     let mut sc = read_sidecar(&dir, &id);
-    sc.usage = records;
+    sc.usage = records.into_iter().map(UsageEntry::from).collect();
     meeting::sidecar::write(&dir, &sc).unwrap();
     (id, dir)
 }
@@ -120,7 +120,7 @@ fn a_rate_edit_changes_nothing_until_re_price() {
     );
     meeting_with(&app, T0 + 120_000, vec![]);
     let before = read_sidecar(&dir, &a);
-    assert_eq!(before.usage[0].usd, Some(0.3));
+    assert_eq!(before.usage[0].record().unwrap().usd, Some(0.3));
     set_rates(
         &app,
         json!([{"provider": "openai", "model": "gpt-4o-mini", "unit": "tokens", "input": 0.5,
@@ -142,12 +142,24 @@ fn a_rate_edit_changes_nothing_until_re_price() {
     let done = parse(&app.reprice_json(false));
     assert_eq!(done["written"], 2);
     let after = read_sidecar(&dir, &a);
-    assert_eq!(after.usage[0].usd, Some(1.0));
-    assert_eq!(after.usage[1].usd, Some(0.11));
-    assert_eq!(after.usage[0].input_tokens, before.usage[0].input_tokens);
-    assert_eq!(after.usage[0].id, before.usage[0].id);
+    assert_eq!(after.usage[0].record().unwrap().usd, Some(1.0));
+    assert_eq!(after.usage[1].record().unwrap().usd, Some(0.11));
     assert_eq!(
-        after.usage[0].rate.as_ref().unwrap().as_of,
+        after.usage[0].record().unwrap().input_tokens,
+        before.usage[0].record().unwrap().input_tokens
+    );
+    assert_eq!(
+        after.usage[0].record().unwrap().id,
+        before.usage[0].record().unwrap().id
+    );
+    assert_eq!(
+        after.usage[0]
+            .record()
+            .unwrap()
+            .rate
+            .as_ref()
+            .unwrap()
+            .as_of,
         app.today().format("%Y-%m-%d").to_string()
     );
     let list = parse(&app.list_recent_json(5));
@@ -194,5 +206,50 @@ fn spend_is_what_this_device_lists() {
             "Counted from the meetings in this device's save folders",
             "Failed requests aren't counted"
         ])
+    );
+}
+
+/// F16-FR8: a usage entry this build can't read (a hand edit, a newer shape) never makes the
+/// meeting unreadable: it is kept as written and shown as "+".
+#[test]
+fn an_unreadable_usage_entry_degrades_to_plus() {
+    let e = Env::new();
+    let app = e.app();
+    let at = "2026-10-07T22:00:00-07:00";
+    let (a, dir) = meeting_with(&app, T0, vec![tokens("gpt-4o-mini", at, 1_000_000)]);
+    let path = dir.join(format!("{a}.json"));
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let bad = json!({"id": "u-1", "usd": "lots"});
+    v["usage"].as_array_mut().unwrap().push(bad.clone());
+    std::fs::write(&path, v.to_string()).unwrap();
+    let list = parse(&app.list_recent_json(5));
+    assert_eq!(row(&list, &a)["source"], "sidecar", "still readable");
+    assert_eq!(row(&list, &a)["spend"]["label"], "≈ $0.15+");
+    assert_eq!(
+        parse(&app.spend_json("2026-10", "2026-10"))["months"][0]["usd"],
+        0.15
+    );
+    // An edit and a re-price keep the entry as written.
+    app.rename_json(&a, "Kept");
+    parse(&app.reprice_json(false));
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(v["usage"][1], bad);
+    assert_eq!(v["title"], "Kept");
+    // Not even a list: kept, and the meeting still lists.
+    let mut v = v;
+    v["usage"] = json!(5);
+    std::fs::write(&path, v.to_string()).unwrap();
+    let list = parse(&app.list_recent_json(5));
+    assert_eq!(row(&list, &a)["spend"]["label"], "≈ $0.00+");
+    let v = parse(&app.get_meeting_json(&a));
+    assert_eq!(v["meeting"]["usage"], json!([5]));
+    v["meeting"]["usage"][0].as_u64().unwrap();
+    // `null` is none.
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    v["usage"] = Value::Null;
+    std::fs::write(&path, v.to_string()).unwrap();
+    assert_eq!(
+        row(&parse(&app.list_recent_json(5)), &a)["spend"]["label"],
+        "—"
     );
 }

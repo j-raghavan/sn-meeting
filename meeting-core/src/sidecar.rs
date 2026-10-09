@@ -57,8 +57,13 @@ pub struct Sidecar {
     pub todos: Vec<Todo>,
     /// F16-FR2: one record per successful provider call, oldest first. Optional (schema 1):
     /// absent means none, and an empty list is not written.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub usage: Vec<crate::spend::UsageRecord>,
+    /// An entry that isn't a record is kept as written (F16-FR8).
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::spend::lenient_usage"
+    )]
+    pub usage: Vec<crate::spend::UsageEntry>,
     #[serde(flatten)]
     pub extra: Extra,
 }

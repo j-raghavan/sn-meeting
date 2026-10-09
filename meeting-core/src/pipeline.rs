@@ -7,7 +7,7 @@ use crate::library::{self, LibError, Library};
 use crate::providers::{self, AudioIn, CallError, CallFail, Endpoints, Http, Replied};
 use crate::rates::RateTable;
 use crate::sidecar::{ProviderRun, SegmentFlag, Sidecar};
-use crate::spend::{Kind, UsageRecord};
+use crate::spend::{Kind, UsageEntry, UsageRecord};
 use crate::status::{self, Event, Phase};
 use crate::tz::{self, LocalTz};
 use std::path::{Path, PathBuf};
@@ -322,7 +322,7 @@ fn store(
     let recs = spent.take();
     let r = locked(lock, || {
         lib.update(id, |sc, _| {
-            sc.usage.extend(recs.iter().cloned());
+            sc.usage.extend(recs.iter().cloned().map(UsageEntry::from));
             if let Some(s) = sc
                 .segments
                 .get_mut(seg.index)
@@ -444,7 +444,7 @@ fn apply_with(
         let p = status::next(library::phase(sc), event)?;
         library::set_phase(sc, p);
         sc.error = error;
-        sc.usage.extend(recs);
+        sc.usage.extend(recs.into_iter().map(UsageEntry::from));
         Ok(p)
     })
 }
