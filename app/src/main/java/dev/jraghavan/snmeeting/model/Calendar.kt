@@ -218,7 +218,22 @@ object CalendarFormat {
      * a tap on the row itself.
      */
     fun canLink(r: AgendaRow, dayRows: List<AgendaRow>): Boolean =
-        !r.isEvent && r.unscheduled && r.meetingId != null && dayRows.any { it.isEvent && !it.allDay && !it.transparent }
+        !r.isEvent && r.unscheduled && r.meetingId != null && linkable(dayRows).isNotEmpty()
+
+    /** The events a recording can be linked to: timed ones not marked free (F18-FR10). */
+    fun linkable(rows: List<AgendaRow>): List<AgendaRow> = rows.filter { it.isEvent && !it.allDay && !it.transparent }
+
+    /**
+     * The meeting screen's link line (F18-FR10): a linked meeting names its event and offers
+     * a change; an unlinked one offers "Link to event…" only when its day has an event it
+     * could be. With no calendar link set there is none. Null: no line.
+     */
+    fun meetingLink(eventKey: String?, eventTitle: String?, hasLinks: Boolean, dayRows: List<AgendaRow>): String? = when {
+        eventKey != null -> "Linked to ${eventTitle?.ifBlank { null } ?: "an event"}  ·  Change link…"
+        !hasLinks -> null
+        linkable(dayRows).isNotEmpty() -> "Link to event…"
+        else -> null
+    }
 
     /** The italic line under a row: room and attendees, as one line. */
     fun detail(r: AgendaRow): String = listOfNotNull(r.location?.ifBlank { null }, r.people.ifBlank { null }).joinToString(" · ")

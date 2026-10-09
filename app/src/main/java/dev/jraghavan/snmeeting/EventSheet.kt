@@ -144,7 +144,7 @@ object EventLinkPicker {
         CoreJobs.run({ NativeBridge.nativeAgenda(day, day) }) { json ->
             if (a.isFinishing || a.isDestroyed) return@run
             val d = CoreJson.obj(json, dev.jraghavan.snmeeting.model.Agenda::from).getOrNull()?.days?.firstOrNull()
-            val events = CalendarFormat.pickerOrder(d?.rows.orEmpty() + d?.allDay.orEmpty(), startMs, endMs)
+            val events = CalendarFormat.pickerOrder(CalendarFormat.linkable(d?.rows.orEmpty()), startMs, endMs)
             val zone = ZoneId.systemDefault()
             val labels = events.map { e ->
                 val time = if (e.allDay) "All day" else CalendarFormat.range(e.startMs, e.endMs, zone)

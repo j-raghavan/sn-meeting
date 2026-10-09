@@ -75,6 +75,20 @@ class CalendarTest {
     }
 
     @Test
+    fun the_meeting_screen_offers_a_link_only_when_there_is_an_event_to_link() { // F18-FR10
+        val d = Agenda.from(JSONObject(agendaJson)).days[0]
+        val (sync, rec) = d.rows
+        assertEquals("Link to event…", CalendarFormat.meetingLink(null, null, hasLinks = true, d.rows))
+        assertNull("no event that day", CalendarFormat.meetingLink(null, null, true, listOf(rec)))
+        assertNull("only all-day or free events", CalendarFormat.meetingLink(null, null, true,
+            listOf(sync.copy(allDay = true), sync.copy(transparent = true))))
+        assertNull("no calendar link set", CalendarFormat.meetingLink(null, null, hasLinks = false, d.rows))
+        assertEquals("Linked to Weekly sync  ·  Change link…", CalendarFormat.meetingLink("k", "Weekly sync", false, emptyList()))
+        assertEquals("Linked to an event  ·  Change link…", CalendarFormat.meetingLink("k", " ", true, emptyList()))
+        assertEquals(listOf(sync), CalendarFormat.linkable(d.rows + d.allDay))
+    }
+
+    @Test
     fun a_recordings_length_is_m_ss_then_h_mm_ss() { // F18-FR7 (device finding 2026-10-09)
         assertEquals("0:00", CalendarFormat.length(0L))
         assertEquals("0:15", CalendarFormat.length(15_000L))

@@ -46,6 +46,8 @@ class MeetingActivity : Activity() {
     private lateinit var scope: ScreenScope
     private lateinit var id: String
     private var view: MeetingView? = null
+    /** F18-FR10: the meeting's day in the calendar, for whether "Link to event…" shows. */
+    private var linkDay: dev.jraghavan.snmeeting.model.Agenda? = null
     private var page: ScrollView? = null
     private var settings: SettingsView? = null
     private var templates: List<TemplateRow> = emptyList()
@@ -174,6 +176,7 @@ class MeetingActivity : Activity() {
             when (val r = CoreJson.obj(json, MeetingView::from)) {
                 is CoreResult.Ok -> {
                     view = r.value; preparePlayback(r.value); cueOnce(r.value); render(); scrollToFocus()
+                    loadLinkDay(r.value.meeting)
                     handler.removeCallbacks(poll)
                     if (LongJobs.lane.isRunning(id)) handler.postDelayed(poll, 1000)
                     handler.removeCallbacks(livePoll)
@@ -403,7 +406,7 @@ class MeetingActivity : Activity() {
             h.mic?.let { addView(ui.note(it).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(6), 0, 0) }, ui.fullWidth()) }
             // F18-FR10: "Linked to … · change" or "Link to event…". M12 hook: in layout B this
             // moves to the Minutes tab's header.
-            addView(linkLine(v.meeting), ui.fullWidth())
+            linkLine(v.meeting)?.let { addView(it, ui.fullWidth()) }
             h.note?.let { addView(ui.note(it, 13f, ui.textMuted).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(2), 0, 0) }, ui.fullWidth()) }
 
             addView(ui.spacer(ui.dim(32)))
@@ -486,15 +489,29 @@ class MeetingActivity : Activity() {
         }
     }
 
-    private fun linkLine(m: Sidecar): View = ui.eyebrow(
-        if (m.eventKey != null) "Linked to ${m.eventTitle?.ifBlank { null } ?: "an event"}  ·  change" else "Link to event…",
-        ui.inkSoft,
-    ).apply {
-        gravity = Gravity.CENTER; setPadding(0, ui.dim(8), 0, ui.dim(4))
-        isClickable = true
-        setOnClickListener {
-            val start = try { java.time.OffsetDateTime.parse(m.startedAt).toInstant().toEpochMilli() } catch (e: Exception) { return@setOnClickListener }
-            EventLinkPicker.show(this@MeetingActivity, this@MeetingActivity.id, start, start + m.durationMs, m.eventKey) { load() }
+    /** Reads the meeting's day once (no network: the calendar cache); the line redraws if it changes. */
+    private fun loadLinkDay(m: Sidecar) {
+        val day = try { java.time.OffsetDateTime.parse(m.startedAt).toLocalDate().toString() } catch (e: Exception) { return }
+        scope.core({ NativeBridge.nativeAgenda(day, day) }) { json ->
+            val a = CoreJson.obj(json, dev.jraghavan.snmeeting.model.Agenda::from).getOrNull() ?: return@core
+            val before = view?.meeting?.let { linkLabel(it) }
+            linkDay = a
+            if (view?.meeting?.let { linkLabel(it) } != before) render()
+        }
+    }
+
+    private fun linkLabel(m: Sidecar): String? = dev.jraghavan.snmeeting.model.CalendarFormat.meetingLink(
+        m.eventKey, m.eventTitle, linkDay?.hasLinks ?: false, linkDay?.days?.firstOrNull()?.rows.orEmpty())
+
+    private fun linkLine(m: Sidecar): View? {
+        val label = linkLabel(m) ?: return null
+        return ui.eyebrow(label, ui.inkSoft).apply {
+            gravity = Gravity.CENTER; setPadding(0, ui.dim(8), 0, ui.dim(4))
+            isClickable = true
+            setOnClickListener {
+                val start = try { java.time.OffsetDateTime.parse(m.startedAt).toInstant().toEpochMilli() } catch (e: Exception) { return@setOnClickListener }
+                EventLinkPicker.show(this@MeetingActivity, this@MeetingActivity.id, start, start + m.durationMs, m.eventKey) { load() }
+            }
         }
     }
 
