@@ -4,7 +4,8 @@ Meetings is licensed under the GNU Affero General Public License v3.0 only (`AGP
 see `LICENSE`). Every component below is under a permissive licence (MIT, Apache-2.0, BSD,
 ISC, MIT-0, Zlib, Unicode-3.0, CDLA-Permissive-2.0, Unlicense, SIL OFL 1.1), all compatible with
 distributing them as part of an AGPL-3.0 work. SQLite, compiled into the library for the search
-index, is in the public domain.
+index, is in the public domain. Code adapted from the owner's other projects is listed under
+"Adapted source code": inkread is AGPL-3.0-only like Meetings, and sn-canvas is MIT.
 
 ## Bundled fonts
 
@@ -22,6 +23,15 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 |------|--------|---------|
 | `res/drawable/ic_settings.xml` (gear) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_search.xml` (magnifier, Search) | Material Design Icons (Google) | Apache License 2.0 |
+
+## Adapted source code
+
+Copied and adapted (not linked as a dependency) from projects by the same author, J-Raghavan.
+Each adapted file names its origin in its header.
+
+| Meetings file | Adapted from | License |
+|---------------|--------------|---------|
+| `meeting-core/src/ink/{mod,model,codec,select}.rs` | inkread `inkread-ink/src/{lib,model,codec,select}.rs` (world coordinates, recording-clock stroke times, `.inkbin` v2) | AGPL-3.0-only |
 
 ## Rust crates linked into `libmeeting.so`
 
