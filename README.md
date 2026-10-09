@@ -33,9 +33,9 @@ I built it the same way as [inkread](https://github.com/j-raghavan/inkread): a s
 
 ## Status
 
-Meetings is at **v0.1**. Everything below works, and CI checks it on every pull request. On my Supernote A5 X2 Manta I've tested recording, transcription and summaries, recovery after a crash, and unplugging the mic mid-recording.
+Meetings is at **v0.1**. Everything below works, and CI checks it on every pull request. On my Supernote A5 X2 Manta I've tested recording, transcription and summaries, recovery after a crash, and unplugging the mic mid-recording. I've also recorded a 20-minute meeting with the screen asleep for most of it: it carried on recording, rolled over into a second segment with no gap, and both segments came out as clean audio.
 
-I haven't yet tested these on the device: recordings over 15 minutes (where a new segment starts), long recordings with the screen off, and Bluetooth headsets.
+I haven't yet tested a Bluetooth headset on the device.
 
 ### Roadmap
 
@@ -91,7 +91,7 @@ For each meeting, in `EXPORT/sn-meeting` (or the folder you choose):
 
 | File | What it is |
 |---|---|
-| `meeting-YYYYMMDD-HHMMSS-01.m4a` | the audio, one file per 15-minute segment |
+| `meeting-YYYYMMDD-HHMMSS-01.m4a` | the audio, one file per segment of up to 15 minutes |
 | `meeting-YYYYMMDD-HHMMSS.json` | the meeting's details, transcript text and to-dos |
 | `meeting-YYYYMMDD-HHMMSS.transcript.md` | the readable transcript and summary |
 
