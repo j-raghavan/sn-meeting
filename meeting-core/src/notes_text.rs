@@ -91,6 +91,8 @@ pub struct StrokeBox {
     pub id: u32,
     pub bbox: Rect,
     pub at_ms: Option<u64>,
+    /// Written since the last recognition (`notesRecognisedAt`): "unrecognised" (F19-FR7).
+    pub new: bool,
 }
 
 /// What the Stop call sends of the notes: the regions, and the strokes to map lines back to.
@@ -268,6 +270,45 @@ pub fn map_region(
     }
 }
 
+/// Whether two rectangles share some area (touching edges don't).
+pub fn overlaps(a: Rect, b: Rect) -> bool {
+    a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+}
+
+/// The centre of a box.
+fn centre(r: Rect) -> (f64, f64) {
+    ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
+}
+
+/// Whether point `p` lies in `r` (edges included).
+fn contains(r: Rect, p: (f64, f64)) -> bool {
+    p.0 >= r[0] && p.0 <= r[2] && p.1 >= r[1] && p.1 <= r[3]
+}
+
+/// F19-FR7: the rectangles among `rects` that hold a stroke written since recognition.
+pub fn with_new_strokes(rects: &[Rect], strokes: &[StrokeBox]) -> Vec<usize> {
+    rects
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| {
+            strokes
+                .iter()
+                .any(|s| s.new && contains(**r, centre(s.bbox)))
+        })
+        .map(|(i, _)| i)
+        .collect()
+}
+
+/// F19-FR7: the stored regions written on since they were recognised; their hits say "(notes
+/// changed since recognised)".
+pub fn changed_regions(stored: &[Region], strokes: &[StrokeBox]) -> Vec<u32> {
+    let rects: Vec<Rect> = stored.iter().map(|r| r.rect).collect();
+    with_new_strokes(&rects, strokes)
+        .into_iter()
+        .map(|i| stored[i].region)
+        .collect()
+}
+
 /// Write `id`'s recognised text atomically, creating its notes folder if needed. Only this
 /// file is written: the ink beside it is never touched (INV12).
 pub fn write(dir: &Path, id: &str, regions: &[Region]) -> std::io::Result<()> {
@@ -366,11 +407,13 @@ mod tests {
                 id: 1,
                 bbox: [4.0, 0.0, 14.0, 10.0],
                 at_ms: Some(9),
+                new: false,
             }, // 60 % in
             StrokeBox {
                 id: 2,
                 bbox: [6.0, 0.0, 16.0, 10.0],
                 at_ms: Some(1),
+                new: false,
             }, // 40 % in
         ];
         let r = map_region(
@@ -401,5 +444,32 @@ mod tests {
         assert_eq!(format!("{empty:?}"), "NotesSource");
         let f = schema_field();
         assert_eq!(f["items"]["required"], json!(["region", "lines"]));
+    }
+
+    #[test]
+    fn new_strokes_mark_their_regions() {
+        let r = |n: u32, x: f64| Region {
+            region: n,
+            rect: [x, 0.0, x + 10.0, 10.0],
+            lines: vec![],
+            extra: Map::new(),
+        };
+        let stored = [r(0, 0.0), r(3, 20.0)];
+        let s = |x: f64, new: bool| StrokeBox {
+            id: 1,
+            bbox: [x, 4.0, x + 2.0, 6.0],
+            at_ms: None,
+            new,
+        };
+        assert_eq!(
+            changed_regions(&stored, &[s(21.0, true), s(1.0, false)]),
+            vec![3]
+        );
+        assert!(changed_regions(&stored, &[s(50.0, true)]).is_empty());
+        assert!(overlaps([0.0, 0.0, 2.0, 2.0], [1.0, 1.0, 3.0, 3.0]));
+        assert!(
+            !overlaps([0.0, 0.0, 1.0, 1.0], [1.0, 0.0, 2.0, 1.0]),
+            "touching"
+        );
     }
 }

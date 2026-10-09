@@ -323,8 +323,8 @@ impl Searcher {
                     return 0;
                 };
                 let notes = notes_text::read(&notes_text::path(&dir, &id)).unwrap_or_default();
-                // M12 hook (F19-FR7): the regions written on since recognition, from the
-                // canvas strokes newer than `notesRecognisedAt`. No canvas yet: none.
+                // M12 hook (F19-FR7): `notes_text::changed_regions(&notes, &strokes)` with the
+                // canvas strokes flagged `new` since `notesRecognisedAt`. No canvas yet: none.
                 let changed: Vec<u32> = Vec::new();
                 let start_ms = ms_of(&sc.started_at).unwrap_or_default();
                 let g = Group {

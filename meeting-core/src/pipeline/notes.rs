@@ -10,6 +10,74 @@ use crate::providers::{self, ImageIn, JsonAsk};
 use crate::spend::Kind;
 use serde_json::json;
 
+/// What one Summarise sends of the notes, and what of the stored text it keeps (F19-FR7).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Prepared {
+    /// The regions to recognise now (numbered 0.. within the calls).
+    pub send: NotesInput,
+    /// The number each sent region is stored under.
+    pub numbers: Vec<u32>,
+    /// Stored regions left as they are.
+    pub keep: Vec<Region>,
+}
+
+/// F19-FR7: on the first recognition every region goes. Once the canvas has been recognised
+/// (`recognised_before`, with its text stored), only the regions holding strokes written since
+/// go; the stored regions they overlap are replaced, the others kept untouched. `None` when
+/// nothing needs recognising.
+pub(crate) fn prepare(
+    input: NotesInput,
+    stored: Vec<Region>,
+    recognised_before: bool,
+) -> Option<Prepared> {
+    if !recognised_before || stored.is_empty() {
+        let numbers = (0..input.regions.len())
+            .map(|i| u32::try_from(i).unwrap_or(u32::MAX))
+            .collect();
+        return Some(Prepared {
+            send: input,
+            numbers,
+            keep: Vec::new(),
+        });
+    }
+    let rects: Vec<notes_text::Rect> = input.regions.iter().map(|r| r.rect).collect();
+    let changed = notes_text::with_new_strokes(&rects, &input.strokes);
+    if changed.is_empty() {
+        return None;
+    }
+    let send_rects: Vec<notes_text::Rect> = changed.iter().map(|&i| rects[i]).collect();
+    let keep: Vec<Region> = stored
+        .into_iter()
+        .filter(|r| !send_rects.iter().any(|s| notes_text::overlaps(r.rect, *s)))
+        .collect();
+    let next = keep.iter().map(|r| r.region + 1).max().unwrap_or(0);
+    let numbers = (0..changed.len())
+        .map(|i| next + u32::try_from(i).unwrap_or(u32::MAX - next))
+        .collect();
+    let regions = changed.iter().map(|&i| input.regions[i].clone()).collect();
+    Some(Prepared {
+        send: NotesInput {
+            regions,
+            strokes: input.strokes,
+        },
+        numbers,
+        keep,
+    })
+}
+
+/// What to store after recognition: the kept regions and the new ones, by region number.
+pub(crate) fn stored_after(p: &Prepared, mut new: Vec<Region>) -> Vec<Region> {
+    for r in &mut new {
+        if let Some(n) = p.numbers.get(r.region as usize) {
+            r.region = *n;
+        }
+    }
+    let mut all = p.keep.clone();
+    all.extend(new);
+    all.sort_by_key(|r| r.region);
+    all
+}
+
 /// The images for regions `from..` of one call, each labelled with its region number.
 pub(crate) fn images(input: &NotesInput, from: usize) -> Vec<ImageIn> {
     input

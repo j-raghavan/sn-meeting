@@ -49,21 +49,25 @@ pub fn input(n: usize) -> NotesInput {
                 id: 4,
                 bbox: [112.0, 20.0, 130.0, 24.0],
                 at_ms: Some(761_000),
+                new: false,
             },
             StrokeBox {
                 id: 5,
                 bbox: [135.0, 21.0, 158.0, 25.0],
                 at_ms: Some(763_000),
+                new: false,
             },
             StrokeBox {
                 id: 6,
                 bbox: [150.0, 22.0, 155.0, 24.0],
                 at_ms: None,
+                new: false,
             },
             StrokeBox {
                 id: 9,
                 bbox: [10.0, 80.0, 20.0, 90.0],
                 at_ms: Some(1),
+                new: false,
             },
         ],
     }
@@ -71,6 +75,11 @@ pub fn input(n: usize) -> NotesInput {
 
 /// An Anthropic key and a transcribed meeting whose notes are `notes`.
 pub fn fixture(notes: Option<NotesInput>) -> Fx {
+    fixture_src(NotesSource(Arc::new(move |_, _| notes.clone())))
+}
+
+/// As `fixture`, with the notes from `src`.
+pub fn fixture_src(src: NotesSource) -> Fx {
     let rt = Runtime::new().unwrap();
     let s = rt.block_on(MockServer::start());
     let e = Env::new();
@@ -94,7 +103,7 @@ pub fn fixture(notes: Option<NotesInput>) -> Fx {
         https_only: false,
     };
     let mut app = App::with_tz(core, e.root.path().into(), Arc::new(tz(PDT)));
-    app.notes = NotesSource(Arc::new(move |_, _| notes.clone()));
+    app.notes = src;
     parse(&app.set_settings_json(r#"{"summarise":{"provider":"anthropic"}}"#));
     let b = begin(&app, T0);
     let id = b["id"].as_str().unwrap().to_owned();
@@ -298,4 +307,69 @@ fn a_failed_extra_call_keeps_the_minutes() {
     assert_eq!(fx.notes_text().as_array().unwrap().len(), 6);
     let sc = read_sidecar(&fx.dir, &fx.id);
     assert!(!sc.extra.contains_key("notesRecognisedAt"));
+}
+
+/// F19-AC5: strokes added to region 1 after Stop; Summarise again sends only region 1 and
+/// leaves region 0's lines as they were. With nothing new, no notes are sent at all.
+#[test]
+fn summarise_again_sends_only_the_regions_written_on_since() {
+    let cur = Arc::new(std::sync::Mutex::new(input(2)));
+    let c = cur.clone();
+    let fx = fixture_src(NotesSource(Arc::new(move |_, _| {
+        Some(c.lock().unwrap().clone())
+    })));
+    fx.mount(
+        "",
+        anthropic(&minutes(json!([
+            {"region": 0, "lines": [{"text": "keep me", "box": [0, 0, 1, 1]}]},
+            {"region": 1, "lines": [{"text": "old line", "box": [0, 0, 1, 1]}]}]))),
+    );
+    assert_eq!(fx.run()["meeting"]["status"], "done");
+    let first = fx.notes_text();
+    let at = read_sidecar(&fx.dir, &fx.id).extra["notesRecognisedAt"].clone();
+
+    // Nothing written since: the minutes call carries no notes, the text is untouched.
+    fx.rt.block_on(fx.s.reset());
+    fx.mount("", anthropic(&minutes(json!([]))));
+    assert_eq!(fx.run()["meeting"]["status"], "done");
+    assert_eq!(images_in(&fx.requests()[0]), 0);
+    assert!(!fx.requests()[0].to_string().contains("\"notes\""));
+    assert_eq!(fx.notes_text(), first);
+
+    // A stroke added in region 1.
+    cur.lock().unwrap().strokes.push(StrokeBox {
+        id: 20,
+        bbox: [140.0, 60.0, 150.0, 70.0],
+        at_ms: None,
+        new: true,
+    });
+    fx.rt.block_on(fx.s.reset());
+    fx.mount(
+        "",
+        anthropic(&minutes(json!([
+            {"region": 0, "lines": [{"text": "new line", "box": [0.3, 0.5, 0.6, 0.8]}]}]))),
+    );
+    assert_eq!(fx.run()["meeting"]["status"], "done");
+    let reqs = fx.requests();
+    assert_eq!(images_in(&reqs[0]), 1, "only region 1");
+    let sent = &reqs[0]["messages"][0]["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["type"] == "image")
+        .unwrap()["source"]["data"];
+    use base64::Engine;
+    assert_eq!(
+        *sent,
+        base64::engine::general_purpose::STANDARD.encode(png(1))
+    );
+    let t = fx.notes_text();
+    assert_eq!(t[0], first[0], "region 0 unchanged");
+    assert_eq!(t.as_array().unwrap().len(), 2);
+    assert_eq!(t[1]["region"], 1);
+    assert_eq!(t[1]["rect"], json!([100.0, 0.0, 200.0, 100.0]));
+    assert_eq!(t[1]["lines"][0]["text"], "new line");
+    assert_eq!(t[1]["lines"][0]["strokeIds"], json!([20]));
+    let after = read_sidecar(&fx.dir, &fx.id).extra["notesRecognisedAt"].clone();
+    assert!(after.is_string() && at.is_string());
 }

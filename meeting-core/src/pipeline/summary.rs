@@ -40,8 +40,14 @@ pub async fn summarise(
         })
     })
     .map_err(JobError::NotStarted)?;
-    // F19-FR6: the note regions to recognise in the same call, when there are any.
-    let notes_in = plan.notes.get(&dir, &sc);
+    // F19-FR6/FR7: the note regions to recognise in the same call, when there are any: all
+    // of them the first time, then only those written on since.
+    let prepared = plan.notes.get(&dir, &sc).and_then(|n| {
+        let stored = crate::notes_text::read(&crate::notes_text::path(&dir, id));
+        let before = sc.extra.contains_key("notesRecognisedAt");
+        notes::prepare(n, stored.unwrap_or_default(), before)
+    });
+    let notes_in = prepared.as_ref().map(|p| &p.send);
     let spent = Spent::new(lib.tz, &plan.rates);
     let fail = |msg: String| finish_spent(lib, lock, id, Event::SummariseFailed, Some(msg), &spent);
     let tid = sc.template_id.clone().unwrap_or_default();
@@ -103,7 +109,7 @@ pub async fn summarise(
         Ok(x) => x,
         Err(e) => return fail(crate::scrub::scrub(&e, &[key.expose()])),
     };
-    let recognised = match &notes_in {
+    let recognised = match notes_in {
         Some(n) => Some(notes::recognise(plan, key, &ran, n, &text, &spent, cancel).await),
         None => None,
     };
@@ -168,8 +174,9 @@ pub async fn summarise(
             crate::atomic::write_atomic(&dir.join(&name), md.as_bytes())?;
             next.transcript_file = Some(name.clone());
             // F19-FR6: the recognised text beside the ink (never the ink itself, INV12).
-            if let Some(r) = &recognised {
-                crate::notes_text::write(&dir, id, &r.regions)?;
+            if let (Some(r), Some(p)) = (&recognised, &prepared) {
+                let all = notes::stored_after(p, r.regions.clone());
+                crate::notes_text::write(&dir, id, &all)?;
                 if r.complete {
                     next.extra
                         .insert("notesRecognisedAt".into(), first_seen.clone().into());
