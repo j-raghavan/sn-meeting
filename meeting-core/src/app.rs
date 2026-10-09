@@ -160,7 +160,21 @@ impl App {
     }
 
     /// `nativeBeginMeeting`. One recording at a time: the meeting stays live until finished.
+    /// A recording started during an event links to it by time (F18-FR9).
     pub fn begin_json(&self, started_at_ms: i64, mic_json: &str, audio_json: &str) -> String {
+        self.begin_linked(started_at_ms, mic_json, audio_json, None)
+    }
+
+    /// `begin_json`, linked to the event `event_key` when it is in the cache (F18-FR8's
+    /// "● Record"); else, or with no key, by time when Settings allow (F18-FR9). Recording never
+    /// depends on the calendar (R17): a link that can't be made leaves the meeting unscheduled.
+    pub fn begin_linked(
+        &self,
+        started_at_ms: i64,
+        mic_json: &str,
+        audio_json: &str,
+        event_key: Option<&str>,
+    ) -> String {
         let mic: Mic = match serde_json::from_str(mic_json) {
             Ok(m) => m,
             Err(e) => return error_json(&format!("micJson: {e}")),
@@ -181,6 +195,17 @@ impl App {
         {
             Ok(b) => {
                 st.live.recording = Some(b.id.clone());
+                let by_time = st.settings.calendar.link_by_time;
+                let link = event_key
+                    .and_then(|k| self.user_link(k))
+                    .or_else(|| by_time.then(|| self.auto_link(started_at_ms)).flatten());
+                if let Some(l) = link {
+                    // Best effort: the recording has begun whatever happens here.
+                    let _ = self.library_of(&st.settings).update(&b.id, |sc, _| {
+                        crate::calendar::link::set_event(sc, Some(l));
+                        Ok(())
+                    });
+                }
                 json!(b).to_string()
             }
             Err(e) => error_json(&e.to_string()),

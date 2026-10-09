@@ -73,6 +73,8 @@ pub struct Sidecar {
 pub enum TitleSource {
     Auto,
     User,
+    /// F18-FR12: the linked event's title; extraction may replace it, as `auto`.
+    Event,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

@@ -4,6 +4,7 @@ use super::App;
 use crate::calendar::cache::{self, CacheFile, LinkStatus};
 use crate::calendar::fetch::{self, Fetched, Validators};
 use crate::calendar::ics::{self, Event};
+use crate::calendar::link::{self, EventLink, LinkSource};
 use crate::calendar::links::{self, Link, Links};
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -252,6 +253,47 @@ impl App {
             Fetched::Failed(reason) => fail(&mut c, LinkStatus::Failed, &reason),
         }
         c
+    }
+
+    /// The cached event `key`, with its calendar's name.
+    pub fn find_event(&self, key: &str) -> Option<(String, Event)> {
+        let link_id = key.split(':').next()?;
+        if !cache::is_link_id(link_id) {
+            return None;
+        }
+        self.link_states()
+            .into_iter()
+            .find(|s| s.link.id == link_id)
+            .and_then(|s| {
+                let name = s.name();
+                s.cache
+                    .events
+                    .into_iter()
+                    .find(|e| e.event_key == key)
+                    .map(|e| (name, e))
+            })
+    }
+
+    /// F18-FR9: the event a recording started at `t_ms` belongs to, linked `auto`, with the
+    /// other candidates as alternatives (EC27).
+    pub fn auto_link(&self, t_ms: i64) -> Option<EventLink> {
+        let events = self.cached_events();
+        let refs: Vec<&Event> = events.iter().map(|(_, e)| e).collect();
+        let (w, alt) = link::pick(&refs, t_ms)?;
+        let alternatives = alt.iter().map(|&i| refs[i].event_key.clone()).collect();
+        Some(EventLink::of(
+            refs[w],
+            Some(&events[w].0),
+            LinkSource::Auto,
+            alternatives,
+        ))
+    }
+
+    /// The link "● Record" (F18-FR8) or "Link to event…" (F18-FR10) makes: `user`, whatever the
+    /// times.
+    pub fn user_link(&self, key: &str) -> Option<EventLink> {
+        let (cal, e) = self.find_event(key)?;
+        Some(EventLink::of(&e, Some(&cal), LinkSource::User, Vec::new()))
     }
 
     /// Every cached event of the links in the file, with its link's name.

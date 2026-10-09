@@ -4,6 +4,7 @@
 pub mod cache;
 pub mod fetch;
 pub mod ics;
+pub mod link;
 pub mod links;
 
 /// The process's calendar state, owned by `App`.

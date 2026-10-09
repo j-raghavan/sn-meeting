@@ -91,6 +91,8 @@ pub const DEFAULT_REFRESH_MIN: u32 = 30;
 pub struct CalendarSettings {
     /// Minutes between automatic refreshes while Meetings is open; 0 = manual only (F18-FR4).
     pub refresh_min: u32,
+    /// F18-FR9: a recording started during an event links to it (on by default).
+    pub link_by_time: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -99,6 +101,7 @@ impl Default for CalendarSettings {
     fn default() -> Self {
         CalendarSettings {
             refresh_min: DEFAULT_REFRESH_MIN,
+            link_by_time: true,
             extra: Extra::new(),
         }
     }
