@@ -1,8 +1,14 @@
 package dev.jraghavan.snmeeting.update
 
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageInfo
+import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import dev.jraghavan.snmeeting.BuildConfig
 import dev.jraghavan.snmeeting.NativeBridge
@@ -87,6 +93,38 @@ class UpdateController(private val context: Context) {
         }
     }
 
+    /** Whether the OS will let this app launch an install (the "install unknown apps" grant). */
+    fun canRequestInstall(): Boolean = context.packageManager.canRequestPackageInstalls()
+
+    /** The per-app "install unknown apps" screen, so the user can grant it once (F14-FR7). */
+    fun unknownSourcesSettingsIntent(): Intent =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
+
+    /**
+     * Hand [apk] to the system installer through a [PackageInstaller] session (streams the bytes;
+     * no FileProvider). The OS shows its own final confirmation; the outcome arrives at
+     * [UpdateInstallReceiver]. Throws only when the session can't be opened; the caller reports it.
+     */
+    fun install(apk: File) {
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(context.packageName)
+        val sessionId = installer.createSession(params)
+        installer.openSession(sessionId).use { session ->
+            session.openWrite("meetings", 0, apk.length()).use { out ->
+                apk.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val intent = Intent(context, UpdateInstallReceiver::class.java).setAction(ACTION_INSTALLED)
+            // The installer fills in the status extras, so the PendingIntent must be mutable; it
+            // names our receiver explicitly.
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+            val pending = PendingIntent.getBroadcast(context, sessionId, intent, flags)
+            session.commit(pending.intentSender)
+        }
+    }
+
     // ---- signer extraction (minSdk 30: GET_SIGNING_CERTIFICATES only) ----
 
     private fun installedSignerCerts(): List<ByteArray> = runCatching {
@@ -111,6 +149,7 @@ class UpdateController(private val context: Context) {
         val LATEST_RELEASE_URL = "https://api.github.com/repos/${BuildConfig.UPDATE_REPO}/releases/latest"
         private const val ACCEPT_GITHUB = "application/vnd.github+json"
         private const val USER_AGENT = "meetings-updater"
+        private const val ACTION_INSTALLED = "dev.jraghavan.snmeeting.UPDATE_INSTALLED"
 
         /** Private cache subdir holding the single staged APK; shared with the install receiver. */
         const val UPDATE_DIR = "updates"

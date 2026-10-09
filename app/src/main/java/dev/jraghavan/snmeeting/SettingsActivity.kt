@@ -254,7 +254,7 @@ class SettingsActivity : Activity() {
     private fun testConnection(role: String, provider: String) {
         val key = "$role/$provider"
         val dir = filesDir.absolutePath
-        val started = LongJobs.lane.run("test:$role", {
+        val started = LongJobs.lane.run("${JobLane.TEST_PREFIX}$role", {
             // The process can restart straight into Settings; nativeInit is idempotent and cheap.
             val init = NativeBridge.nativeInit(dir)
             if (CoreJson.ok(init) is CoreResult.Err) init else NativeBridge.nativeTestConnection(role, provider)

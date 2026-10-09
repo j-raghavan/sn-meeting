@@ -88,6 +88,10 @@ class JobLane(private val jobs: Jobs) {
 
     fun isRunning(key: String) = synchronized(tickets) { key in tickets }
 
+    /** A transcribe or summarise job is queued or running: any key but Test connection's
+     *  `test:<role>`. The updater waits for these (F14-FR8). Any thread. */
+    fun hasMeetingJob() = synchronized(tickets) { tickets.keys.any { !it.startsWith(TEST_PREFIX) } }
+
     /** Refuses a second job for the same key (one job per meeting): false then. Main thread. */
     fun run(key: String, work: () -> String, done: (String) -> Unit): Boolean {
         val t = Ticket()
@@ -129,8 +133,11 @@ class JobLane(private val jobs: Jobs) {
         return { listeners -= l }
     }
 
-    private companion object {
-        const val CANCELLED = """{"error":"Cancelled"}"""
+    companion object {
+        private const val CANCELLED = """{"error":"Cancelled"}"""
+
+        /** Test connection's keys (`test:transcribe`); every other key is a meeting's job. */
+        const val TEST_PREFIX = "test:"
     }
 }
 

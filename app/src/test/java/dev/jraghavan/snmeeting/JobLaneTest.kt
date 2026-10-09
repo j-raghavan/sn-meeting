@@ -45,4 +45,20 @@ class JobLaneTest {
         assertFalse(lane.cancelQueued("m2"))
         assertTrue("its key is free again", lane.run("m2", { "{}" }) {})
     }
+
+    @Test fun aMeetingJobIsBusyButATestConnectionIsNot() { // F14-FR8
+        val queued = mutableListOf<Runnable>()
+        val lane = JobLane(Jobs({ queued += it }, { it.run() }))
+        assertFalse(lane.hasMeetingJob())
+        lane.run("test:summarise", { "{}" }) {}
+        assertFalse("Test connection doesn't hold back an update", lane.hasMeetingJob())
+        lane.run("20261008-0930", { "{}" }) {}
+        assertTrue(lane.hasMeetingJob())
+        queued.removeAt(0).run()
+        queued.removeAt(0).run()
+        assertFalse(lane.hasMeetingJob())
+        lane.run("m2", { "{}" }) {}
+        lane.cancelQueued("m2")
+        assertFalse("a cancelled queued job is gone", lane.hasMeetingJob())
+    }
 }

@@ -29,6 +29,10 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- F14-FR7 (as inkread): the in-app updater hands a verified, release-signed APK to
+         PackageInstaller. Android still shows its own final install confirmation. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:allowBackup="false"
         android:label="Meetings"
@@ -65,5 +69,11 @@
             android:name=".record.RecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- F14-FR7: receives the PackageInstaller session result and launches the OS install
+             confirmation (unless a recording or job started meanwhile). Internal only. -->
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
     </application>
 </manifest>
