@@ -494,3 +494,28 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRecognise
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// F18-FR13: never a full link URL.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCalendarLinks<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::calendar_links())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Blocking (F18-FR4): one HTTPS GET per due link; call it on the calendar thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCalendarRefresh<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    force: jboolean,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::calendar_refresh(force))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

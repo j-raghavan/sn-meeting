@@ -199,3 +199,27 @@ object SearchJobs {
     /** On launch, resume and after a job: bring the index up to date in the background. */
     fun refresh() = index.exec { initialised { NativeBridge.nativeIndexUpdate() }() }
 }
+
+/**
+ * F18-FR4: calendar refreshes on their own thread. A refresh is one HTTPS GET of up to 30 s per
+ * link, so on [CoreJobs] it would hold up a tick or the recorder's next segment.
+ */
+object CalendarJobs {
+    private val jobs by lazy {
+        val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-calendar").apply { isDaemon = true } }
+        val main = Handler(Looper.getMainLooper())
+        Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) }
+    }
+
+    /** The app data dir, as [SearchJobs]: this thread may run before CoreJobs' nativeInit. */
+    @Volatile private var dir: String? = null
+
+    fun init(appDataDir: String) { dir = appDataDir }
+
+    /** nativeCalendarRefresh([force]); the reply on the main thread. */
+    fun refresh(force: Boolean, done: (String) -> Unit) = jobs.run({
+        val d = dir
+        val init = if (d == null) null else NativeBridge.nativeInit(d)
+        if (init != null && init.contains("\"error\"")) init else NativeBridge.nativeCalendarRefresh(force)
+    }, done)
+}

@@ -156,6 +156,18 @@ object NativeBridge {
      *  same replies as [nativeIndexUpdate]. */
     external fun nativeRebuildIndex(): String
 
+    // Calendar (F18). A link's URL never crosses: links are named by id, calendar name and an
+    // elided form ("https://calendar.google.com/….ics").
+
+    /** `[{linkId, name, elided, label, lastOk, lastAttempt, status, reason, eventsThisWeek,
+     *  skipped}]`; status is never, ok, gone ("This calendar link no longer works") or failed. */
+    external fun nativeCalendarLinks(): String
+
+    /** Fetches the links that are due (all of them when [force]); blocking, one HTTPS GET of at
+     *  most 30 s per link, so call it on [CalendarJobs]. `{updatedAtMs, failed: [linkId],
+     *  fetched, links, deferred?}` or `{busy: true}`. */
+    external fun nativeCalendarRefresh(force: Boolean): String
+
     // Updates (F14).
 
     /** Is `releaseJson` (GitHub releases/latest, fetched by the shell) newer than

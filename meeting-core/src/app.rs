@@ -11,10 +11,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+mod calendar;
 mod run;
 mod search;
 mod spend;
 mod templates;
+pub use calendar::LinkState;
 pub use run::Job;
 pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};
 
@@ -40,6 +42,8 @@ pub struct App {
     pub search: crate::search::Searcher,
     /// F19-FR6: the note regions a summarise job sends (the canvas, M12; tests replace it).
     pub notes: crate::notes_text::NotesSource,
+    /// F18: the calendar links file, the refresh lock and how fetches are bounded.
+    pub calendar: crate::calendar::Calendar,
 }
 
 #[derive(Debug)]
@@ -76,6 +80,7 @@ impl App {
             models: Mutex::default(),
             search,
             notes: crate::notes_text::NotesSource::canvas(),
+            calendar: Default::default(),
         }
     }
 

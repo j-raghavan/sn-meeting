@@ -55,6 +55,8 @@ pub struct Settings {
     /// (F16-FR8). Changed only through `nativeSetRates`, which validates them.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rates: Vec<Value>,
+    /// F18: the calendar's refresh interval and rules.
+    pub calendar: CalendarSettings,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -73,6 +75,30 @@ impl Default for Settings {
             debug: DebugSettings::default(),
             updates: UpdateSettings::default(),
             rates: Vec::new(),
+            calendar: CalendarSettings::default(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// F18-FR4's refresh intervals, in minutes: 15 min / 30 min / 1 h / 4 h / manual only (0).
+pub const REFRESH_CHOICES: [u32; 5] = [15, 30, 60, 240, 0];
+pub const DEFAULT_REFRESH_MIN: u32 = 30;
+
+/// F18's settings (`settings.json` → `calendar`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CalendarSettings {
+    /// Minutes between automatic refreshes while Meetings is open; 0 = manual only (F18-FR4).
+    pub refresh_min: u32,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for CalendarSettings {
+    fn default() -> Self {
+        CalendarSettings {
+            refresh_min: DEFAULT_REFRESH_MIN,
             extra: Extra::new(),
         }
     }
@@ -318,6 +344,9 @@ fn sanitised(mut s: Settings) -> Settings {
     if !skip_version_ok(&s.updates.skip_version) {
         s.updates.skip_version.clear();
     }
+    if !REFRESH_CHOICES.contains(&s.calendar.refresh_min) {
+        s.calendar.refresh_min = DEFAULT_REFRESH_MIN;
+    }
     for role in Role::ALL {
         let rs = s.role_mut(role);
         if rs.provider.is_some_and(|p| !role.providers().contains(&p)) {
@@ -435,6 +464,19 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
         && !v.as_str().is_some_and(skip_version_ok)
     {
         return Err(err("updates.skipVersion", "invalid version"));
+    }
+    if let Some(m) = patch
+        .get("calendar")
+        .and_then(|c| c.get("refreshMin"))
+        .filter(|v| !v.is_null())
+        && !m
+            .as_u64()
+            .is_some_and(|m| REFRESH_CHOICES.iter().any(|c| u64::from(*c) == m))
+    {
+        return Err(err(
+            "calendar.refreshMin",
+            "refresh every 15, 30, 60 or 240 minutes, or 0 for manual only",
+        ));
     }
     let mut v = serde_json::to_value(current).map_err(|e| SettingsError {
         field: None,

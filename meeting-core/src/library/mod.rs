@@ -12,6 +12,7 @@ mod edit;
 mod list;
 mod recover;
 pub use edit::TodoRef;
+pub(crate) use list::stamp_of;
 pub use list::{MeetingSummary, MeetingView, Source};
 pub use recover::{Flagged, Measure, Recovery};
 

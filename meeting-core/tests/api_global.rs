@@ -49,6 +49,8 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("indexStatus", api::index_status()),
         ("indexUpdate", api::index_update()),
         ("rebuildIndex", api::rebuild_index()),
+        ("calendarLinks", api::calendar_links()),
+        ("calendarRefresh", api::calendar_refresh(false)),
     ]
 }
 

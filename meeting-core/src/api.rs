@@ -320,6 +320,16 @@ pub fn rebuild_index() -> String {
     with_app(App::rebuild_index_json)
 }
 
+/// `nativeCalendarLinks()` (F18-FR13): each link's id, name and elided URL, never the URL.
+pub fn calendar_links() -> String {
+    with_app(App::calendar_links_json)
+}
+
+/// `nativeCalendarRefresh(force)` (F18-FR4): fetch the due links. Blocking.
+pub fn calendar_refresh(force: bool) -> String {
+    with_app(|app| app.calendar_refresh_json(force))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
