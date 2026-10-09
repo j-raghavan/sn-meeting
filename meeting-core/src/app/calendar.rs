@@ -6,6 +6,8 @@ use crate::calendar::fetch::{self, Fetched, Validators};
 use crate::calendar::ics::{self, Event};
 use crate::calendar::link::{self, EventLink, LinkSource};
 use crate::calendar::links::{self, Link, Links};
+use crate::library::{MeetingSummary, TodoRef};
+use crate::sidecar::Sidecar;
 use serde_json::{Value, json};
 use std::path::PathBuf;
 
@@ -294,6 +296,43 @@ impl App {
     pub fn user_link(&self, key: &str) -> Option<EventLink> {
         let (cal, e) = self.find_event(key)?;
         Some(EventLink::of(&e, Some(&cal), LinkSource::User, Vec::new()))
+    }
+
+    /// F18-FR11: the meetings linked to `e`'s series (its `seriesUid`, or a meeting the user
+    /// linked into it) that started before this instance's link window, newest first. The
+    /// meeting of this very instance is not "earlier".
+    pub fn series_meetings(&self, e: &Event) -> Vec<(MeetingSummary, Sidecar)> {
+        let before = e.start_ms - link::EARLY_MS;
+        self.library()
+            .all()
+            .into_iter()
+            .filter(|(m, sc)| {
+                m.started_at_ms < before
+                    && link::event_of(sc)
+                        .is_some_and(|l| l.series_uid == e.series_uid && l.event_key != e.event_key)
+            })
+            .collect()
+    }
+
+    /// F18-FR11's "From last time": the open to-dos of the most recent earlier meeting in
+    /// `e`'s series (ticking one ticks it in that meeting, F6-FR2).
+    pub fn from_last_time(&self, e: &Event) -> Vec<TodoRef> {
+        let Some((m, sc)) = self.series_meetings(e).into_iter().next() else {
+            return Vec::new();
+        };
+        sc.todos
+            .into_iter()
+            .filter(|t| !t.done)
+            .map(|t| TodoRef {
+                meeting_id: m.id.clone(),
+                meeting_started_at: m.started_at.clone(),
+                meeting_title: sc.title.clone(),
+                todo_id: t.id,
+                text: t.text,
+                owner: t.owner,
+                due: t.due,
+            })
+            .collect()
     }
 
     /// Every cached event of the links in the file, with its link's name.

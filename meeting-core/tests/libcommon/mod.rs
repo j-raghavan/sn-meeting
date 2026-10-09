@@ -2,6 +2,8 @@
 //! the mic/audio JSON the shell sends.
 #![allow(dead_code)] // each test binary uses a different subset
 
+pub mod cal;
+
 use chrono::FixedOffset;
 use meeting::api::Core;
 use meeting::app::App;
