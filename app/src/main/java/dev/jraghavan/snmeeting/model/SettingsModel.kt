@@ -153,6 +153,7 @@ object ProviderRows {
             "override" -> "your choice"
             "keyFile" -> "from the key file"
             "auto" -> "auto" // the first transcription model the account lists (D2)
+            "autoUnchecked" -> "auto (checked on first use)" // D2 before the account is listed
             else -> "the default"
         }
         return "$m  ·  $from"

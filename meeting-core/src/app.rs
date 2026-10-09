@@ -338,14 +338,18 @@ impl App {
                 _ => None,
             };
             let mut m = settings::effective_model(role, p, s.role(role).model.as_deref(), from_key);
-            // D2: once the account's models are known, the one a job would pick.
-            if let Some((_, settings::ModelSource::Default)) = m
+            // D2: once the account's models are known, the one a job would pick (the code
+            // default when it lists none); before, the first candidate, checked on first use.
+            if let Some((first, settings::ModelSource::Default)) = &m
                 && role == Role::Transcribe
-                && let Some(auto) = self
-                    .cached_models(p)
-                    .and_then(|ids| settings::pick_transcribe(p, &ids))
             {
-                m = Some((auto, settings::ModelSource::Auto));
+                m = Some(match self.cached_models(p) {
+                    None => (first.clone(), settings::ModelSource::AutoUnchecked),
+                    Some(ids) => match settings::pick_transcribe(p, &ids) {
+                        Some(auto) => (auto, settings::ModelSource::Auto),
+                        None => (first.clone(), settings::ModelSource::Default),
+                    },
+                });
             }
             let (model, source) = m.map_or((None, None), |(m, src)| (Some(m), Some(src)));
             json!({"provider": p, "model": model, "modelSource": source})

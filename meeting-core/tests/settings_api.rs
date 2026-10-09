@@ -63,7 +63,7 @@ fn only_the_openai_key_selects_openai_for_both_roles() {
     assert_eq!(s["origin"], "defaults");
     assert_eq!(
         s["effective"]["transcribe"],
-        json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "default"})
+        json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "autoUnchecked"})
     );
     assert_eq!(
         s["effective"]["summarise"],
@@ -409,5 +409,86 @@ fn an_unreadable_settings_file_is_not_saved_over() {
     assert_eq!(
         (s["origin"].as_str(), s["settings"]["saveFolder"].as_str()),
         (Some("file"), Some("Notes/Meetings"))
+    );
+}
+
+/// One key file for `provider` (no transcribe_model) and an app whose providers are a mock
+/// server listing `ids`.
+fn listing(
+    provider: &str,
+    ids: &[&str],
+) -> (tokio::runtime::Runtime, wiremock::MockServer, App, Env) {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, ResponseTemplate};
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let s = rt.block_on(wiremock::MockServer::start());
+    let (p, body) = match provider {
+        "openai" => (
+            "/v1/models",
+            json!({"data": ids.iter().map(|i| json!({"id": i})).collect::<Vec<_>>()}),
+        ),
+        _ => (
+            "/v1beta/models",
+            json!({"models": ids.iter().map(|i| json!({"name": format!("models/{i}")})).collect::<Vec<_>>()}),
+        ),
+    };
+    rt.block_on(
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&s),
+    );
+    let e = Env::new();
+    let k = if provider == "openai" { OA } else { GE };
+    e.key(
+        &format!("copilot-key-{provider}.txt"),
+        &format!("provider={provider}\nkey={k}\nmodel=m\n"),
+    );
+    let core = core_for(&s.uri(), e.keys.path(), 5_000);
+    let app = App::new(core, e.root.path().into());
+    (rt, s, app, e)
+}
+
+#[test]
+fn the_model_shown_is_the_auto_pick_once_the_account_is_listed() {
+    // D2, as found on the device: the account lists only whisper-1; Test connection said
+    // "whisper-1 · auto" while the Model line still read "gpt-transcribe · the default".
+    for (provider, ids, first, picked) in [
+        (
+            "openai",
+            &["whisper-1", "gpt-4o-mini"][..],
+            "gpt-transcribe",
+            "whisper-1",
+        ),
+        (
+            "gemini",
+            &["gemini-2.5-pro", "gemini-9-flash"][..],
+            "gemini-3.8-flash",
+            "gemini-9-flash",
+        ),
+    ] {
+        let (_rt, _s, app, _e) = listing(provider, ids);
+        // Before any listing: the first candidate, to be checked on first use.
+        assert_eq!(
+            get(&app)["effective"]["transcribe"],
+            json!({"provider": provider, "model": first, "modelSource": "autoUnchecked"})
+        );
+        let r: Value = serde_json::from_str(&app.test_connection("transcribe", provider)).unwrap();
+        assert_eq!(r["model"], picked, "{r}");
+        // After: what a job would run.
+        assert_eq!(
+            get(&app)["effective"]["transcribe"],
+            json!({"provider": provider, "model": picked, "modelSource": "auto"})
+        );
+    }
+}
+
+#[test]
+fn a_listing_with_no_transcription_model_shows_the_code_default() {
+    let (_rt, _s, app, _e) = listing("openai", &["gpt-4o-mini"]);
+    app.test_connection("transcribe", "openai");
+    assert_eq!(
+        get(&app)["effective"]["transcribe"],
+        json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "default"})
     );
 }

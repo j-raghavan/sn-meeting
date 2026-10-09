@@ -216,6 +216,9 @@ pub enum ModelSource {
     Default,
     /// D2: the first transcription model the account lists.
     Auto,
+    /// D2 before the account's models are known: the first candidate, which the first job
+    /// (or Test connection) checks against the listing.
+    AutoUnchecked,
 }
 
 /// F4-FR3: override > key file (`transcribe_model` for transcribe, `model` for summarise) >

@@ -54,6 +54,7 @@ class SettingsActivity : Activity() {
      */
     private val results = mutableMapOf<String, String>()
     private val resultViews = mutableMapOf<String, TextView>()
+    private val modelViews = mutableMapOf<String, TextView>()
 
     /** settings.debug.segmentMs; the rows show once set, or after a long-press on the version. */
     private var segmentMs: Long? = null
@@ -207,7 +208,7 @@ class SettingsActivity : Activity() {
 
     /** Rebuilds the page after each choice; e-ink redraws once per tap, never animates. */
     private fun render() {
-        resultViews.clear()
+        resultViews.clear(); modelViews.clear()
         val column = ui.column().apply {
             addView(ui.header("Back"))
             addView(ui.spacer(ui.dim(28)))
@@ -257,9 +258,28 @@ class SettingsActivity : Activity() {
             // The process can restart straight into Settings; nativeInit is idempotent and cheap.
             val init = NativeBridge.nativeInit(dir)
             if (CoreJson.ok(init) is CoreResult.Err) init else NativeBridge.nativeTestConnection(role, provider)
-        }) { json -> if (!isDestroyed) showResult(key, TestResult.line(json)) }
+        }) { json ->
+            if (!isDestroyed) {
+                showResult(key, TestResult.line(json))
+                refreshModels()
+            }
+        }
         if (started) showResult(key, "Checking…")
     }
+
+    /**
+     * D2: a test lists the account's models, so the Model lines can name the pick. Only those
+     * lines change: a full redraw would drop a half-typed override or folder.
+     */
+    private fun refreshModels() {
+        scope.core({ NativeBridge.nativeGetSettings() }) { json ->
+            val s = CoreJson.obj(json, SettingsView::from).getOrNull() ?: return@core
+            settings = s
+            for ((role, view) in modelViews) view.text = modelLine(role, s)
+        }
+    }
+
+    private fun modelLine(role: String, s: SettingsView) = ProviderRows.model(role, s) ?: "None until a key file is added"
 
     private fun showResult(key: String, text: String) {
         results[key] = text
@@ -302,7 +322,7 @@ class SettingsActivity : Activity() {
                 addView(LinearLayout(this@SettingsActivity).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(ui.eyebrow("Model"))
-                    addView(ui.body(ProviderRows.model(role, s) ?: "None until a key file is added", 16f), ui.wrap().apply { topMargin = ui.dim(4) })
+                    addView(ui.body(modelLine(role, s), 16f).also { modelViews[role] = it }, ui.wrap().apply { topMargin = ui.dim(4) })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 // F10-FR5: the core lists models with the key (no audio, no cost).
                 addView(ui.pill("Test connection", size = 15f) { testConnection(role, current) })

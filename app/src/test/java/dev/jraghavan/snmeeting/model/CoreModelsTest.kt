@@ -149,6 +149,11 @@ class CoreModelsTest {
         assertEquals("gpt-4o-mini  ·  from the key file", ProviderRows.model("summarise", s))
         val auto = CoreJson.obj(j.replace(""""gpt-transcribe","modelSource":"default"""", """"gpt-4o-transcribe","modelSource":"auto""""), SettingsView::from).getOrNull()!!
         assertEquals("gpt-4o-transcribe  ·  auto", ProviderRows.model("transcribe", auto)) // D2
+        // D2 before the account is listed: the first candidate, honestly not yet checked.
+        val unchecked = CoreJson.obj(j.replace(""""modelSource":"default"""", """"modelSource":"autoUnchecked""""), SettingsView::from).getOrNull()!!
+        assertEquals("gpt-transcribe  ·  auto (checked on first use)", ProviderRows.model("transcribe", unchecked))
+        val whisper = CoreJson.obj(j.replace(""""gpt-transcribe","modelSource":"default"""", """"whisper-1","modelSource":"auto""""), SettingsView::from).getOrNull()!!
+        assertEquals("whisper-1  ·  auto", ProviderRows.model("transcribe", whisper))
         assertEquals("""{"transcribe":{"provider":"gemini"}}""", SettingsPatch.provider("transcribe", "gemini"))
         assertEquals("""{"transcribe":{"model":"whisper-1"}}""", SettingsPatch.model("transcribe", " whisper-1 "))
     }

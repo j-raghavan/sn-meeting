@@ -210,11 +210,11 @@ fn with_no_model_chosen_the_first_listed_transcription_model_runs() {
         "gpt-4o-mini",
     ]);
     fx.openai_answers("gpt-4o-transcribe", 200, OK);
-    // Before anything has listed the models, Settings shows the code default.
+    // Before anything has listed the models, Settings shows the first candidate, unchecked.
     let eff = |fx: &Fx| parse(&fx.app.get_settings_json())["effective"]["transcribe"].clone();
     assert_eq!(
         eff(&fx),
-        json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "default"})
+        json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "autoUnchecked"})
     );
     let m = fx.transcribe();
     transcribed(&m);
@@ -323,6 +323,7 @@ fn an_unlistable_account_uses_the_code_default() {
     let m = fx.transcribe();
     transcribed(&m);
     assert_eq!(m["providers"]["transcribe"]["model"], "gpt-transcribe");
+    // Nothing was listed, so the next job lists again: still to be checked.
     let eff = &parse(&fx.app.get_settings_json())["effective"]["transcribe"];
-    assert_eq!(eff["modelSource"], "default");
+    assert_eq!(eff["modelSource"], "autoUnchecked");
 }
