@@ -13,12 +13,14 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 mod agenda;
 mod calendar;
+mod live;
 mod run;
 mod search;
 mod spend;
 mod templates;
 pub use agenda::people as agenda_people;
 pub use calendar::LinkState;
+pub use live::DECLINED as LIVE_DECLINED;
 pub use run::Job;
 pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};
 
@@ -46,6 +48,8 @@ pub struct App {
     pub notes: crate::notes_text::NotesSource,
     /// F18: the calendar links file, the refresh lock and how fetches are bounded.
     pub calendar: crate::calendar::Calendar,
+    /// F15-FR5: per meeting, the lock held while its chunks are being sent (lane or job).
+    lanes: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 #[derive(Debug)]
@@ -83,6 +87,7 @@ impl App {
             search,
             notes: crate::notes_text::NotesSource::canvas(),
             calendar: Default::default(),
+            lanes: Mutex::default(),
         }
     }
 

@@ -13,6 +13,7 @@ use crate::tz::{self, LocalTz};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
+pub mod live;
 mod notes;
 mod summary;
 mod transcript;
@@ -81,6 +82,21 @@ impl<'a> Spent<'a> {
     /// Record what `r`'s reply reported, if a reply arrived (OQ16: a failed request reports
     /// nothing and costs nothing here). `segment` is the segment transcribed.
     pub(crate) fn note(&self, kind: Kind, segment: Option<usize>, r: &Result<Replied, CallError>) {
+        self.note_at(kind, segment, None, r);
+    }
+
+    /// `note` for near-live chunk `chunk` (F15-FR5).
+    pub(crate) fn note_chunk(&self, kind: Kind, chunk: u32, r: &Result<Replied, CallError>) {
+        self.note_at(kind, None, Some(chunk), r);
+    }
+
+    fn note_at(
+        &self,
+        kind: Kind,
+        segment: Option<usize>,
+        chunk: Option<u32>,
+        r: &Result<Replied, CallError>,
+    ) {
         let m = match r {
             Ok(x) => &x.measured,
             Err(e) => match &e.spent {
@@ -94,6 +110,7 @@ impl<'a> Spent<'a> {
             .unwrap_or_default();
         let mut rec = UsageRecord::new(kind, m, at, self.rates);
         rec.segment = segment;
+        rec.chunk = chunk;
         self.lock().push(rec);
     }
 
@@ -245,6 +262,7 @@ async fn run_transcribe(
                         file_name: file.clone(),
                         prompt: vocabulary.clone(),
                         duration_ms: seg.duration_ms,
+                        empty_ok: false,
                     };
                     let fut = providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio);
                     async move {
@@ -352,9 +370,14 @@ fn store(
 /// F5-FR1: the meeting's template vocabulary as the transcription hint ("Priya, Supernote");
 /// General's when the template is gone, empty when there is none.
 fn vocabulary(plan: &JobPlan, template_id: &str) -> String {
-    let t = plan.templates.iter().find(|t| t.id == template_id);
+    vocabulary_of(&plan.templates, template_id)
+}
+
+/// The vocabulary hint of `template_id` among `templates` (General's when it is gone).
+pub fn vocabulary_of(templates: &[crate::templates::Template], template_id: &str) -> String {
+    let t = templates.iter().find(|t| t.id == template_id);
     let t = t.or_else(|| {
-        plan.templates
+        templates
             .iter()
             .find(|t| t.id == crate::templates::DEFAULT_ID)
     });

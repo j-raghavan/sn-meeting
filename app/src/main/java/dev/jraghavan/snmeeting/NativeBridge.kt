@@ -122,6 +122,15 @@ object NativeBridge {
      *  `pending`; afterwards only a known chunk's re-cut file. `{index, state, added}`. */
     external fun nativeChunkReady(id: String, index: Int, path: String, startOffsetMs: Long, durationMs: Long, speechMs: Long): String
 
+    /** F15-FR5 / FR12: the near-live recorder began [id]; the transcribe provider is fixed now.
+     *  [send] false (the notice declined) keeps the chunks waiting for Transcribe. */
+    external fun nativeStartLive(id: String, send: Boolean): String
+
+    /** F15-FR5: sends [id]'s pending chunks in order while it records. Blocking (a request is
+     *  up to ~70 s): call it on [LiveJobs]' thread only. `{state, done, waiting, retryInMs?,
+     *  reason?}`; state is idle, retry, paused, blocked, stopped, off or busy. */
+    external fun nativeLiveDrain(id: String): String
+
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,

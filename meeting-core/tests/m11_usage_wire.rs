@@ -42,6 +42,7 @@ fn audio(ms: u64) -> AudioIn {
         file_name: "meeting-20261009-100000-01.m4a".into(),
         prompt: String::new(),
         duration_ms: Some(ms),
+        empty_ok: false,
     }
 }
 

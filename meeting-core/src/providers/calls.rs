@@ -119,6 +119,9 @@ pub struct AudioIn {
     /// The segment's measured length, when known: past [`LONG_SEGMENT_MS`] an empty, blocked
     /// or cut-off reply is a failure to retry, not silence (F5-FR13).
     pub duration_ms: Option<u64>,
+    /// F15-FR5: an empty or cut-off reply is returned as [`NO_SPEECH`] whatever the length; the
+    /// near-live lane applies its own rule (retry once when the chunk had speech).
+    pub empty_ok: bool,
 }
 
 /// A segment longer than this that comes back with no text is a failure, not silence.
@@ -157,7 +160,9 @@ pub async fn transcribe(
     let name = provider_name(key.provider);
     let secret = [key.expose()];
     let audio_ms = audio.duration_ms;
-    let long = audio.duration_ms.filter(|ms| *ms > LONG_SEGMENT_MS);
+    let long = audio
+        .duration_ms
+        .filter(|ms| !audio.empty_ok && *ms > LONG_SEGMENT_MS);
     let nothing = |ms: u64, what: &str| {
         let d = format!("{name} returned {what} for {} of audio", length_label(ms));
         CallError::new(CallFail::Retryable, d)

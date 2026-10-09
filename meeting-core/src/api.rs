@@ -296,6 +296,16 @@ pub fn chunk_ready(
     })
 }
 
+/// `nativeStartLive(id, send)` (F15-FR5 / FR12): the near-live recorder began `id`.
+pub fn start_live(id: &str, send: bool) -> String {
+    with_app(|app| app.start_live_json(id, send))
+}
+
+/// `nativeLiveDrain(id)` (F15-FR5): send the pending chunks. Blocking.
+pub fn live_drain(id: &str) -> String {
+    with_app(|app| app.live_drain_json(id))
+}
+
 /// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
 /// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
 /// capture thread can ask at any time.

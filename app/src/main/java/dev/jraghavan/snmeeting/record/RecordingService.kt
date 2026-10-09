@@ -109,7 +109,7 @@ class RecordingService : Service() {
         override fun openBluetooth(onChange: () -> Unit): BtPort =
             BluetoothState(this@RecordingService, h) { safely.run("bluetooth", onChange) }.also { it.open() }
         override fun newRecorder(listener: SegmentedRecorder.Listener) =
-            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration, safely, eventKey),
+            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration, safely, eventKey, live = if (nearLive) true else null),
                 if (nearLive) PcmRecorderAdapter(this@RecordingService, h) else MediaRecorderAdapter(this@RecordingService, h),
                 FileStorage, AndroidClock, listener,
                 log = { what, t -> Log.w(TAG, "$what: ${t.javaClass.name}", t) })

@@ -42,6 +42,7 @@ fn audio(prompt: &str) -> AudioIn {
         file_name: FILE.into(),
         prompt: prompt.into(),
         duration_ms: Some(20_000),
+        empty_ok: false,
     }
 }
 
