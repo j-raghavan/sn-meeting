@@ -295,6 +295,21 @@ pub fn set_rates(json: &str) -> String {
     with_app(|app| app.set_rates_json(json))
 }
 
+/// `nativeIndexStatus()` (F19-FR5): `{state, done, total}`.
+pub fn index_status() -> String {
+    with_app(App::index_status_json)
+}
+
+/// `nativeIndexUpdate()` (F19-FR5): re-index what changed. Blocking.
+pub fn index_update() -> String {
+    with_app(App::index_update_json)
+}
+
+/// `nativeRebuildIndex()` (F19-FR5): rebuild the index from the files. Blocking.
+pub fn rebuild_index() -> String {
+    with_app(App::rebuild_index_json)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

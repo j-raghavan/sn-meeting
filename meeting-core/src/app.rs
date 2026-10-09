@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 mod run;
+mod search;
 mod spend;
 mod templates;
 pub use run::Job;
@@ -34,6 +35,8 @@ pub struct App {
     pub templates: crate::templates::Store,
     /// D2: each provider's model listing, once read, for the life of the process.
     models: Mutex<HashMap<Provider, Vec<String>>>,
+    /// F19: the search index in `<app data>/search`, a cache of the files (INV17).
+    pub search: crate::search::Searcher,
 }
 
 #[derive(Debug)]
@@ -53,6 +56,7 @@ impl App {
     pub fn with_tz(core: Core, storage_root: PathBuf, tz: Arc<dyn LocalTz>) -> App {
         let (settings, origin) = settings::load(&settings::path_in(&core.app_data_dir));
         let templates = crate::templates::Store::under(&storage_root);
+        let search = crate::search::Searcher::at(core.app_data_dir.join("search"));
         App {
             core,
             storage_root,
@@ -67,6 +71,7 @@ impl App {
             budgets: Default::default(),
             templates,
             models: Mutex::default(),
+            search,
         }
     }
 

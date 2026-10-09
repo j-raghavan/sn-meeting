@@ -428,3 +428,38 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRepriceAl
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeIndexStatus<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::index_status())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Blocking (F19-FR5): call it on the index thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeIndexUpdate<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::index_update())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Blocking (F19-FR5): call it on the index thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRebuildIndex<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::rebuild_index())
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

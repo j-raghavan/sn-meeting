@@ -2,6 +2,8 @@
 pub mod index;
 pub mod query;
 pub mod units;
+pub mod update;
 
 pub use index::{Group, GroupKind, Index};
 pub use units::{EventDoc, Kind, Unit};
+pub use update::{Searcher, Sources};

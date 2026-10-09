@@ -81,6 +81,8 @@ pub fn key_of(kind: GroupKind, id: &str) -> String {
 /// The open index.
 pub struct Index {
     pub(crate) conn: Connection,
+    /// The tables were created by this open: nothing is indexed yet.
+    pub created: bool,
 }
 
 impl std::fmt::Debug for Index {
@@ -106,14 +108,15 @@ impl Index {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         let v: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         let tables: i64 = conn.query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))?;
-        if v == 0 && tables == 0 {
+        let created = v == 0 && tables == 0;
+        if created {
             conn.execute_batch(&format!(
                 "BEGIN; {SCHEMA} PRAGMA user_version = {VERSION}; COMMIT;"
             ))?;
         } else if v != VERSION {
             return Err(rusqlite::Error::InvalidQuery);
         }
-        Ok(Index { conn })
+        Ok(Index { conn, created })
     }
 
     /// Replace everything indexed for `g` with `units`, remembering `stamp` (what its files
@@ -270,9 +273,13 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let p = d.path().join("index.sqlite");
         let mut ix = Index::open(&p).unwrap();
+        assert!(ix.created);
         ix.put(&g("a"), "s", &[unit("x")]).unwrap();
         drop(ix);
-        assert_eq!(Index::open(&p).unwrap().count(None).unwrap(), 1);
+        let again = Index::open(&p).unwrap();
+        assert!(!again.created);
+        assert_eq!(again.count(None).unwrap(), 1);
+        drop(again);
         let c = Connection::open(&p).unwrap();
         c.execute_batch("PRAGMA user_version = 99").unwrap();
         drop(c);

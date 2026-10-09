@@ -130,6 +130,19 @@ object NativeBridge {
      *  [nativeGetRates], or `{error, field}` and nothing is saved. Stored costs don't change. */
     external fun nativeSetRates(json: String): String
 
+    // Search (F19). The index is a cache in app-private storage, rebuilt from the files.
+
+    /** `{state: ready|indexing|missing, done, total}`; "Indexing 120/340" while it runs. */
+    external fun nativeIndexStatus(): String
+
+    /** Re-indexes the meetings and calendar links whose files changed; blocking, so call it on
+     *  a background thread, never the UI thread. `{indexed, removed, rebuilt}`, or `{busy: true}`. */
+    external fun nativeIndexUpdate(): String
+
+    /** Settings → "Rebuild search index": starts the index again from the files. Blocking,
+     *  same replies as [nativeIndexUpdate]. */
+    external fun nativeRebuildIndex(): String
+
     // Updates (F14).
 
     /** Is `releaseJson` (GitHub releases/latest, fetched by the shell) newer than
