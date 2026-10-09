@@ -40,6 +40,8 @@ semver = "1"
 # F19-FR4 / ADR D19: the search index. `bundled` compiles SQLite with FTS5 (libsqlite3-sys
 # build.rs); no default features (no statement cache, no wasm). Exact pin, as C8.
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+# F18-FR2: a calendar link's id is the first 8 hex of its SHA-256; already in the graph via rig.
+sha2 = "0.10.9"
 jni = "0.22.4"
 wiremock = "0.6"
 # Tests decode what rig sends on the wire (F19-AC4); already in the graph through rig.
