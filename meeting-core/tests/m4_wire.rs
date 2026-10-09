@@ -75,9 +75,9 @@ async fn openai_sends_only_model_and_file_and_ignores_unknown_reply_fields() {
         .await;
     let (k, e) = (key(Provider::OpenAi), ep(&s.uri()));
     let t = transcribe(&http(), &e, &k, "gpt-transcribe", audio("")).await;
-    assert_eq!(t.unwrap(), "hello there");
+    assert_eq!(t.unwrap().text, "hello there");
     let t = transcribe(&http(), &e, &k, "gpt-transcribe", audio("Priya, Supernote")).await;
-    assert_eq!(t.unwrap(), "hello there");
+    assert_eq!(t.unwrap().text, "hello there");
     let reqs = s.received_requests().await.unwrap();
     assert_eq!(reqs[0].headers["authorization"], format!("Bearer {OA}"));
     let b = bodies(&s).await;
@@ -157,7 +157,7 @@ async fn openai_empty_text_is_no_speech() {
         audio(""),
     )
     .await;
-    assert_eq!(t.unwrap(), NO_SPEECH);
+    assert_eq!(t.unwrap().text, NO_SPEECH);
 }
 
 fn gemini_reply(parts: Value) -> ResponseTemplate {
@@ -185,9 +185,9 @@ async fn gemini_sends_inline_audio_with_our_instruction_and_vocabulary() {
         audio("Priya"),
     )
     .await;
-    assert_eq!(t.unwrap(), "hola amigos");
+    assert_eq!(t.unwrap().text, "hola amigos");
     let t = transcribe(&http(), &ep(&s.uri()), &k, "gemini-3.8-flash", audio("")).await;
-    assert_eq!(t.unwrap(), "hola amigos");
+    assert_eq!(t.unwrap().text, "hola amigos");
     let reqs = s.received_requests().await.unwrap();
     let b: Value = serde_json::from_slice(&reqs[0].body).unwrap();
     let part = &b["contents"][0]["parts"][0]["inlineData"];
@@ -224,7 +224,7 @@ async fn gemini_silence_is_no_speech() {
             .await;
         let k = key(Provider::Gemini);
         let t = transcribe(&http(), &ep(&s.uri()), &k, "g", audio("")).await;
-        assert_eq!(t.unwrap(), NO_SPEECH, "{parts}");
+        assert_eq!(t.unwrap().text, NO_SPEECH, "{parts}");
     }
 }
 

@@ -7,10 +7,12 @@ use serde_json::Value;
 use std::time::{Duration, Instant};
 
 mod calls;
+mod measured;
 pub use calls::{
     AudioIn, CallError, CallFail, GEMINI_TRANSCRIBE_SYSTEM, Http, JsonAsk, MAX_REPLY_CHARS,
-    NO_SPEECH, classify_call, complete_json, provider_name, transcribe,
+    NO_SPEECH, Replied, classify_call, complete_json, provider_name, transcribe,
 };
+pub use measured::Measured;
 
 /// Test connection's whole-call budget (F10-FR5).
 pub const TEST_TIMEOUT: Duration = Duration::from_secs(15);

@@ -85,7 +85,7 @@ async fn openai_uses_responses_with_a_strict_schema_and_no_store() {
         .await;
     let k = key(Provider::OpenAi);
     let out = complete_json(&http(), &ep(&s.uri()), &k, "gpt-4o-mini", &ask()).await;
-    assert_eq!(out.unwrap(), SUMMARY);
+    assert_eq!(out.unwrap().text, SUMMARY);
     let b = body(&s, 0).await;
     assert_eq!(b["model"], "gpt-4o-mini");
     assert_eq!(b["text"]["format"]["type"], "json_schema");
@@ -114,7 +114,7 @@ async fn gemini_uses_a_response_json_schema() {
         .await;
     let k = key(Provider::Gemini);
     let out = complete_json(&http(), &ep(&s.uri()), &k, "gemini-3.8-flash", &ask()).await;
-    assert_eq!(out.unwrap(), SUMMARY);
+    assert_eq!(out.unwrap().text, SUMMARY);
     let b = body(&s, 0).await;
     let g = &b["generationConfig"];
     assert_eq!(g["responseMimeType"], "application/json");
@@ -139,7 +139,7 @@ async fn anthropic_gets_adaptive_thinking_and_no_sampling_params() {
         .await;
     let k = key(Provider::Anthropic);
     let out = complete_json(&http(), &ep(&s.uri()), &k, "claude-opus-5-5", &ask()).await;
-    assert_eq!(out.unwrap(), SUMMARY, "thinking blocks are not text");
+    assert_eq!(out.unwrap().text, SUMMARY, "thinking blocks are not text");
     let b = body(&s, 0).await;
     assert_eq!(b["output_config"]["format"]["type"], "json_schema");
     assert_eq!(b["max_tokens"], MAX_OUTPUT_TOKENS);

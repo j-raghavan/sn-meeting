@@ -70,7 +70,7 @@ pub async fn summarise(
         r = call(fb.clone()).await;
     }
     let text = match r {
-        Ok(t) => t,
+        Ok(t) => t.text,
         Err(e) if e.kind == CallFail::TooLarge => {
             let name = providers::provider_name(key.provider);
             return fail(format!("Transcript too large for {name}"));

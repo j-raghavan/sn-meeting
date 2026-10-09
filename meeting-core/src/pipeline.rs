@@ -193,7 +193,7 @@ async fn run_transcribe(
             r = call(model.clone()).await;
         }
         let text = match r {
-            Ok(t) => t,
+            Ok(t) => t.text,
             Err(e) => return fail(e.detail),
         };
         store(lib, lock, id, &seg, text, None)?;
