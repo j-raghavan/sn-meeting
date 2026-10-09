@@ -33,6 +33,9 @@ data class LiveTranscript(
         else -> ""
     }
 
+    /** F16-FR5: the recording toolbar's "≈ $0.08 so far" (the sum of this meeting's records). */
+    val soFar: String get() = if (spent == "—") "Nothing spent yet" else "$spent so far"
+
     /** The strip: the newest [STRIP_LINES] lines, or every line when opened. */
     fun shown(all: Boolean): List<LiveLine> = if (all) lines else lines.takeLast(STRIP_LINES)
 

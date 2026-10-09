@@ -67,6 +67,8 @@ class MeetingActivity : Activity() {
     private var liveAll = false
     private var liveLines: LinearLayout? = null
     private var liveStatus: TextView? = null
+    /** F16-FR5: "≈ $0.08 so far" above Mark, redrawn only when a chunk's cost changes it. */
+    private var liveCost: TextView? = null
     private var unLive: (() -> Unit)? = null
     private var unHub: (() -> Unit)? = null
     private val livePoll = object : Runnable {
@@ -501,14 +503,20 @@ class MeetingActivity : Activity() {
      * the recording as Home's ■ Stop does.
      */
     private fun markRow(): View = LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER
-        lateinit var pill: TextView
-        pill = ui.pill("◆  Mark", size = 17f) { markNow(pill) }
-        addView(pill, ui.wrap())
-        addView(ui.pill("■  Stop", filled = true, size = 17f) {
-            if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity)
-        }, ui.wrap().apply { marginStart = ui.dim(16) })
+        orientation = LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_HORIZONTAL
+        liveCost = if (view?.meeting?.nearLive == true) ui.eyebrow("", ui.inkSoft).also { addView(it, ui.wrap()) } else null
+        addView(LinearLayout(this@MeetingActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            lateinit var pill: TextView
+            pill = ui.pill("◆  Mark", size = 17f) { markNow(pill) }
+            addView(pill, ui.wrap())
+            addView(ui.pill("■  Stop", filled = true, size = 17f) {
+                if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity)
+            }, ui.wrap().apply { marginStart = ui.dim(16) })
+        }, ui.wrap().apply { topMargin = ui.dim(10) })
+        showLive()
     }
 
     private fun markNow(pill: TextView) {
@@ -578,8 +586,9 @@ class MeetingActivity : Activity() {
     }
 
     private fun showLive() {
-        val box = liveLines ?: return
         val t = live
+        t?.soFar?.uppercase()?.let { cost -> if (liveCost?.text?.toString() != cost) liveCost?.text = cost }
+        val box = liveLines ?: return
         liveStatus?.text = t?.status.orEmpty().uppercase()
         box.removeAllViews()
         val lines = t?.shown(liveAll).orEmpty()
