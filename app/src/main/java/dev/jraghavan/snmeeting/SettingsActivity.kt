@@ -16,6 +16,10 @@ import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.RatesView
+import dev.jraghavan.snmeeting.model.Reprice
+import dev.jraghavan.snmeeting.model.Spend
+import dev.jraghavan.snmeeting.model.SpendReport
 import dev.jraghavan.snmeeting.model.TemplateChoice
 import dev.jraghavan.snmeeting.model.TemplateRow
 import dev.jraghavan.snmeeting.model.TestResult
@@ -49,6 +53,9 @@ class SettingsActivity : Activity() {
     /** The Custom… folder field is open. */
     private var editingFolder = false
     private var templates: List<TemplateRow> = emptyList()
+    /** F16-FR5: the last 12 months of spend and the rates in force; null until the core answers. */
+    private var spend: SpendReport? = null
+    private var rates: RatesView? = null
 
     /**
      * The last Test connection result per "role/provider" (F10-FR5: shown until the next test),
@@ -97,6 +104,76 @@ class SettingsActivity : Activity() {
             CoreJson.list(json, TemplateRow::from).getOrNull()?.let { templates = it }
         }
         scope.core({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
+        loadSpend()
+    }
+
+    /** F16-FR5: spend by month and the rates' date; one redraw when both are in. */
+    private fun loadSpend() {
+        scope.core({ NativeBridge.nativeGetRates() }) { json -> rates = CoreJson.obj(json, RatesView::from).getOrNull() }
+        scope.core({
+            val (from, to) = Spend.lastMonths(java.time.YearMonth.now())
+            NativeBridge.nativeSpend(from, to)
+        }) { json -> spend = CoreJson.obj(json, SpendReport::from).getOrNull(); render() }
+    }
+
+    /**
+     * F16-FR5 / FR6: "rates as of", the last 12 months by provider (transcription and minutes),
+     * what the totals leave out, Edit rates, and Re-price with current rates.
+     */
+    private fun spendSection(column: LinearLayout) {
+        val report = spend ?: return
+        ui.section(column, "Spend").apply {
+            rates?.let { r ->
+                addView(ui.note("Rates as of ${r.asOf}", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(4)) })
+                r.problems.forEach { addView(error(it)) }
+            }
+            report.rows().forEachIndexed { i, row ->
+                if (i > 0) addView(ui.hairline())
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, ui.dim(10), 0, ui.dim(10))
+                    addView(LinearLayout(this@SettingsActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(ui.body(row.month, 16f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(ui.body(row.total, 16f, bold = row.total != "—"))
+                    })
+                    row.lines.forEach { addView(ui.note(it, 13f), ui.wrap().apply { topMargin = ui.dim(3) }) }
+                })
+            }
+            addView(ui.hairline())
+            val notes = report.notes + if (report.unpriced > 0) listOf("“+” means a call has no rate yet; add one, then re-price.") else emptyList()
+            notes.forEach { addView(ui.note(it, 13f, ui.textMuted), ui.wrap().apply { topMargin = ui.dim(6) }) }
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, ui.dim(14), 0, ui.dim(12))
+                addView(ui.pill("Edit rates  →", size = 15f) {
+                    startActivity(Intent(this@SettingsActivity, RatesActivity::class.java)); overridePendingTransition(0, 0)
+                })
+                addView(ui.pill("Re-price with current rates", size = 15f) { reprice() }, ui.wrap().apply { marginStart = ui.dim(12) })
+            })
+        }
+    }
+
+    /** F16-FR6: a dry run says what would change; only a confirmation rewrites stored costs. */
+    private fun reprice() {
+        scope.core({ NativeBridge.nativeRepriceAll(true) }) { json ->
+            when (val r = CoreJson.obj(json, Reprice::from)) {
+                is CoreResult.Err -> InkDialog.error(this, "Couldn't re-price", r.message)
+                is CoreResult.Ok -> {
+                    val q = r.value.question()
+                        ?: return@core InkDialog.error(this, "Nothing to re-price", "Every meeting's cost already matches the current rates.")
+                    InkDialog.confirm(this, "Re-price with current rates?", q, "Re-price") {
+                        scope.core({ NativeBridge.nativeRepriceAll(false) }) { done ->
+                            val e = CoreJson.ok(done)
+                            if (e is CoreResult.Err) InkDialog.error(this, "Couldn't re-price", e.message)
+                            loadSpend()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** nativeGetSettings / nativeSetSettings reply: the new settings, or a refusal by field. */
@@ -312,6 +389,8 @@ class SettingsActivity : Activity() {
         providerSection(column, "Summary & to-dos", SettingsView.SUMMARISE, null)
 
         templateSection(column)
+
+        spendSection(column)
 
         ui.section(column, "About").apply {
             addView(LinearLayout(this@SettingsActivity).apply {

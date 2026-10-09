@@ -321,7 +321,7 @@ class MeetingActivity : Activity() {
     private fun render() {
         val v = view ?: return
         actions = actionsFor(v.meeting)
-        val h = MeetingHeader.of(v.meeting)
+        val h = MeetingHeader.of(v.meeting, v.cost)
         val column = ui.column().apply {
             addView(ui.header("All meetings"))
             addView(ui.spacer(ui.dim(36)))
@@ -333,7 +333,8 @@ class MeetingActivity : Activity() {
                 setOnClickListener { rename(if (h.untitled) "" else h.title) }
             }, ui.fullWidth())
             if (h.stamp.isNotEmpty()) addView(ui.eyebrow(h.stamp).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(10), 0, 0) }, ui.fullWidth())
-            addView(ui.eyebrow(h.length).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(4), 0, 0) }, ui.fullWidth())
+            // F16-FR5: what the meeting has cost so far, beside its length.
+            addView(ui.eyebrow("${h.length}  ·  ${h.cost}").apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(4), 0, 0) }, ui.fullWidth())
             h.mic?.let { addView(ui.note(it).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(6), 0, 0) }, ui.fullWidth()) }
             h.note?.let { addView(ui.note(it, 13f, ui.textMuted).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(2), 0, 0) }, ui.fullWidth()) }
 

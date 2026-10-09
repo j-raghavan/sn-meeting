@@ -59,7 +59,8 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val on
                         if (m.untitled) { setTextColor(ui.textMuted); typeface = ui.serifItalic }
                     })
                     addView(ui.eyebrow(m.stamp), ui.wrap().apply { topMargin = ui.dim(4) })
-                    addView(ui.note(m.detail), ui.wrap().apply { topMargin = ui.dim(3) })
+                    // F16-FR5: the meeting's cost closes the detail line ("—" with nothing spent).
+                    addView(ui.note("${m.detail}  ·  ${m.cost}"), ui.wrap().apply { topMargin = ui.dim(3) })
                     // Half-width column: the status chip sits under the details, not beside them.
                     addView(ui.chip(m.chip, filled = m.attention), ui.wrap().apply { topMargin = ui.dim(8) })
                 }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))

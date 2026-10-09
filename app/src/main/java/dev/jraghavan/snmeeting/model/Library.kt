@@ -29,6 +29,8 @@ data class MeetingSummary(
     val id: String, val startedAt: String, val startedAtMs: Long, val durationMs: Long?,
     val status: Status, val failedAt: FailedAt?, val title: String?, val segmentCount: Int,
     val openTodoCount: Int, val source: Source, val folder: String,
+    /** F16-FR5: "≈ $0.41", "≈ $0.41+" or "—", from the core. */
+    val cost: String = "—",
 ) {
     companion object {
         fun from(o: JSONObject): MeetingSummary? { return MeetingSummary(
@@ -43,6 +45,7 @@ data class MeetingSummary(
             openTodoCount = o.int("openTodoCount") ?: 0,
             source = Source.of(o.str("source")),
             folder = o.strOr("folder", ""),
+            cost = Spend.label(o.obj("spend")),
         ) }
     }
 }
@@ -112,7 +115,11 @@ data class Sidecar(
 }
 
 /** nativeGetMeeting. */
-data class MeetingView(val meeting: Sidecar, val source: Source, val dir: String, val segmentPaths: List<String>, val transcriptPath: String?) {
+data class MeetingView(
+    val meeting: Sidecar, val source: Source, val dir: String, val segmentPaths: List<String>, val transcriptPath: String?,
+    /** F16-FR5: the meeting's cost so far, from the core. */
+    val cost: String = "—",
+) {
     companion object {
         fun from(o: JSONObject): MeetingView? { return MeetingView(
             meeting = o.obj("meeting")?.let(Sidecar::from) ?: return null,
@@ -120,6 +127,7 @@ data class MeetingView(val meeting: Sidecar, val source: Source, val dir: String
             dir = o.strOr("dir", ""),
             segmentPaths = o.arr("segmentPaths").strings(),
             transcriptPath = o.str("transcriptPath"),
+            cost = Spend.label(o.obj("spend")),
         ) }
     }
 }

@@ -30,6 +30,8 @@ import dev.jraghavan.snmeeting.model.MicChoice
 import dev.jraghavan.snmeeting.model.Permissions
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.Spend
+import dev.jraghavan.snmeeting.model.SpendReport
 import dev.jraghavan.snmeeting.record.BluetoothState
 import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicPick
@@ -55,6 +57,8 @@ class MainActivity : Activity() {
     private lateinit var micName: TextView
     private lateinit var micHint: TextView
     private lateinit var lists: HomeLists
+    /** F16-FR5: "October · $3.20 spent · 6 meetings", under the wordmark. */
+    private lateinit var spendLine: TextView
     private val handler = Handler(Looper.getMainLooper())
     private var rec: RecState = RecState.Idle(null, null)
     private var unobserve: (() -> Unit)? = null
@@ -96,13 +100,15 @@ class MainActivity : Activity() {
         button = ui.pill("＋  New", size = 20f) { toggle() }
         status = ui.note("", 15f).apply { gravity = Gravity.CENTER }
         lists = HomeLists(this, ui, ::openMeeting)
+        spendLine = ui.eyebrowItalic("").apply { visibility = View.GONE }
 
         // Not a scrolling page: the header block is fixed and the two lists share the remaining
         // height equally, each scrolling inside its own card (F6-FR1, owner decision 2026-10-07).
         val column = ui.column().apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             addView(ui.brandBlock("·  Meeting Recorder · v${ui.versionName()}  ·"))
-            addView(ui.spacer(ui.dim(32)))
+            addView(spendLine, ui.fullWidth().apply { topMargin = ui.dim(10) })
+            addView(ui.spacer(ui.dim(28)))
             addView(ui.card().apply {
                 addView(ui.eyebrow("Microphone"))
                 addView(micName, ui.wrap().apply { topMargin = ui.dim(6) })
@@ -209,6 +215,14 @@ class MainActivity : Activity() {
                 is CoreResult.Ok -> lists.showMeetings(r.value.map(HomeRows::meeting))
                 is CoreResult.Err -> lists.showMeetings(emptyList(), r.message)
             }
+        }
+        // F16-FR5: this month's spend, redrawn only when its text changes.
+        CoreJobs.run({ val m = Spend.key(java.time.YearMonth.now()); NativeBridge.nativeSpend(m, m) }) { json ->
+            if (isDestroyed) return@run
+            val line = CoreJson.obj(json, SpendReport::from).getOrNull()?.months?.firstOrNull()?.label
+            if (line.isNullOrEmpty()) { spendLine.visibility = View.GONE; return@run }
+            if (spendLine.text.toString() != line) spendLine.text = line
+            spendLine.visibility = View.VISIBLE
         }
         CoreJobs.run({ NativeBridge.nativeOpenTodos() }) { json ->
             if (isDestroyed) return@run

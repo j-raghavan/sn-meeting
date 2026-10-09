@@ -38,6 +38,8 @@ object HomeRows {
     data class Meeting(
         val id: String, val title: String, val untitled: Boolean, val stamp: String,
         val detail: String, val chip: String, val attention: Boolean,
+        /** F16-FR5: the meeting's cost, "—" with none. */
+        val cost: String = "—",
     )
 
     data class Todo(val meetingId: String, val todoId: String, val text: String, val meta: String)
@@ -70,6 +72,7 @@ object HomeRows {
             stamp = "${Format.day(m.startedAt)}  ·  ${Format.time(m.startedAt)}",
             detail = Format.duration(m.durationMs) + todos,
             chip = label, attention = attention,
+            cost = m.cost,
         )
     }
 
@@ -85,9 +88,13 @@ object HomeRows {
 }
 
 /** F7-FR5: the meeting screen's heading and the mono eyebrows under it. */
-data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: String, val length: String, val mic: String?, val note: String?) {
+data class MeetingHeader(
+    val title: String, val untitled: Boolean, val stamp: String, val length: String, val mic: String?, val note: String?,
+    /** F16-FR5: what the meeting has cost so far ("≈ $0.41"), "—" with nothing recorded. */
+    val cost: String = "—",
+) {
     companion object {
-        fun of(m: Sidecar): MeetingHeader {
+        fun of(m: Sidecar, cost: String = "—"): MeetingHeader {
             val n = m.segments.size
             val mic = m.mic?.let { (if (it.kind == "bluetooth") "Bluetooth" else "USB") + " — " + it.name }
             return MeetingHeader(
@@ -97,6 +104,7 @@ data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: St
                 length = "${Format.duration(m.durationMs)}  ·  ${Format.plural(n, "segment")}",
                 mic = mic,
                 note = m.note?.takeIf { it.isNotBlank() }?.let { "Recording ended: $it" },
+                cost = cost,
             )
         }
     }

@@ -60,6 +60,8 @@
         <!-- Settings (spec F10) and templates (F11). Not exported. -->
         <activity android:name=".SettingsActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity android:name=".TemplatesActivity" android:exported="false" android:screenOrientation="portrait" />
+        <!-- Rates editor (spec F16-FR4). Not exported. -->
+        <activity android:name=".RatesActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity
             android:name=".TemplateEditorActivity"
             android:exported="false"
