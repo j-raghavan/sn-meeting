@@ -38,6 +38,9 @@ jobs:
       - name: Install toolchain (from rust-toolchain.toml)
         run: rustup show
       - uses: Swatinem/rust-cache@v2
+      # tests/inv5.rs runs `cargo tree --offline`; have the whole locked graph on disk.
+      - name: cargo fetch
+        run: cargo fetch --locked
       - name: cargo fmt --check
         run: cargo fmt --check
       - name: cargo clippy
@@ -52,14 +55,16 @@ jobs:
       - name: INV5 - jni absent from the host graph
         run: |
           set -euo pipefail
-          host="$(cargo tree -p meeting-core -e normal -i jni --target all 2>/dev/null)"
+          # The host target, as tests/inv5.rs checks; on Android, reqwest's
+          # rustls-platform-verifier links jni whatever the features.
+          host="$(cargo tree -p meeting-core -e normal -i jni 2>/dev/null)"
           if [[ -n "$host" ]]; then
             echo "::error::jni is in meeting-core's default dependency graph (INV5):"
             echo "$host"
             exit 1
           fi
           # The check can see jni: with the bridge on it must appear.
-          bridge="$(cargo tree -p meeting-core -e normal -i jni --target all --features jni-bridge)"
+          bridge="$(cargo tree -p meeting-core -e normal -i jni --features jni-bridge)"
           [[ "$bridge" == jni* ]] || { echo "::error::cargo tree did not find jni with jni-bridge on"; exit 1; }
           echo "INV5 holds: jni only with --features jni-bridge"
 
@@ -74,6 +79,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
+      # tests/inv5.rs runs `cargo tree --offline --features jni-bridge`, which needs every
+      # locked crate, jni included, already fetched.
+      - name: cargo fetch
+        run: cargo fetch --locked
       - name: cargo llvm-cov (fail under 97% lines)
         run: cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex "$COVERAGE_IGNORE"
       - name: lcov report
