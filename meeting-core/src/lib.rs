@@ -13,6 +13,7 @@ pub mod scrub;
 pub mod segment;
 pub mod settings;
 pub mod sidecar;
+pub mod spend;
 pub mod status;
 pub mod summarise;
 pub mod templates;
