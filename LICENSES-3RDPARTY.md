@@ -21,6 +21,7 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 | Icon | Source | License |
 |------|--------|---------|
 | `res/drawable/ic_settings.xml` (gear) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_search.xml` (magnifier, Search) | Material Design Icons (Google) | Apache License 2.0 |
 
 ## Rust crates linked into `libmeeting.so`
 

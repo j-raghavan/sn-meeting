@@ -89,6 +89,7 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
         CoreJobs.init(filesDir.absolutePath) // F1-FR5: queued first, so it runs before any other core job
+        SearchJobs.init(filesDir.absolutePath)
         setContentView(buildView())
         render()
     }
@@ -126,10 +127,18 @@ class MainActivity : Activity() {
             addView(ui.spacer(ui.dim(28)))
             addView(ui.closingMark())
         }
-        // A subtle top-corner gear → Settings, as on inkread's home screen (F10-FR1).
+        // A subtle top-corner gear → Settings, as on inkread's home screen (F10-FR1), with ⌕ →
+        // Search beside it (F19).
         return FrameLayout(this).apply {
             setBackgroundColor(android.graphics.Color.WHITE)
             addView(column, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_search)
+                val p = ui.dp(8); setPadding(p, p, p, p)
+                contentDescription = "Search"
+                isClickable = true
+                setOnClickListener { startActivity(Intent(this@MainActivity, SearchActivity::class.java)); overridePendingTransition(0, 0) }
+            }, FrameLayout.LayoutParams(ui.dp(40), ui.dp(40), Gravity.TOP or Gravity.END).apply { topMargin = ui.dp(10); marginEnd = ui.dp(58) })
             addView(ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_settings)
                 val p = ui.dp(8); setPadding(p, p, p, p)
@@ -163,7 +172,7 @@ class MainActivity : Activity() {
                 if (next is RecState.Recording) handler.post(tick)
             }
         }
-        unlisten = LongJobs.lane.onFinished { gate.request() }
+        unlisten = LongJobs.lane.onFinished { gate.request(); SearchJobs.refresh() } // F19-FR5
         if (rec is RecState.Recording) { handler.removeCallbacks(tick); handler.post(tick) }
     }
 
@@ -186,6 +195,7 @@ class MainActivity : Activity() {
         } else {
             recover()
             gate.request() // queued after recovery, so recovered meetings show their new status
+            SearchJobs.refresh() // F19-FR5: re-index what changed, off the core queue
         }
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
             CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; render() } }

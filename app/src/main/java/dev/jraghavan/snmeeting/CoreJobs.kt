@@ -163,3 +163,39 @@ object PreviewJobs {
 
     fun run(work: () -> String, done: (String) -> Unit) = jobs.run(work, done)
 }
+
+/**
+ * F19: Search's own threads, so neither lane waits for it nor it for them. Index updates and
+ * rebuilds (seconds, up to a minute) run on one; queries on the other, so a search during a
+ * rebuild answers at once from what is indexed ("Still indexing…").
+ */
+object SearchJobs {
+    private fun jobs(name: String) = lazy {
+        val worker = Executors.newSingleThreadExecutor { r -> Thread(r, name).apply { isDaemon = true } }
+        val main = Handler(Looper.getMainLooper())
+        Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) }
+    }
+    private val index by jobs("meeting-index")
+    private val query by jobs("meeting-search")
+
+    /** The app data dir: these threads may run before CoreJobs' nativeInit, so each call makes
+     *  sure of it first (idempotent and cheap). */
+    @Volatile private var dir: String? = null
+
+    fun init(appDataDir: String) { dir = appDataDir }
+
+    private fun initialised(work: () -> String): () -> String = {
+        val d = dir
+        val init = if (d == null) null else NativeBridge.nativeInit(d)
+        if (init != null && init.contains("\"error\"")) init else work()
+    }
+
+    /** nativeIndexUpdate or nativeRebuildIndex; queued in order, one at a time. */
+    fun index(work: () -> String, done: (String) -> Unit) = index.run(initialised(work), done)
+
+    /** nativeSearch, nativeIndexStatus, nativeRecogniseQuery. */
+    fun query(work: () -> String, done: (String) -> Unit) = query.run(initialised(work), done)
+
+    /** On launch, resume and after a job: bring the index up to date in the background. */
+    fun refresh() = index.exec { initialised { NativeBridge.nativeIndexUpdate() }() }
+}
