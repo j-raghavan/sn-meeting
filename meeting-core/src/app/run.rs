@@ -61,7 +61,7 @@ fn phase_word(p: Phase) -> &'static str {
 
 impl App {
     /// The role's provider, key and model, read now (F4-FR3, F10-FR4).
-    fn pick(
+    pub(crate) fn pick(
         &self,
         s: &Settings,
         role: Role,

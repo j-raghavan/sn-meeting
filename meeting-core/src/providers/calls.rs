@@ -288,15 +288,39 @@ pub async fn complete_json(
     model: &str,
     ask: &JsonAsk,
 ) -> Result<Replied, CallError> {
+    complete(http, ep, key, model, ask, true).await
+}
+
+/// F19-FR9: one plain-text completion (the handwritten query); `ask.schema` is not sent.
+pub async fn complete_text(
+    http: &Http,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: &str,
+    ask: &JsonAsk,
+) -> Result<Replied, CallError> {
+    complete(http, ep, key, model, ask, false).await
+}
+
+async fn complete(
+    http: &Http,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: &str,
+    ask: &JsonAsk,
+    structured: bool,
+) -> Result<Replied, CallError> {
     let secret = [key.expose()];
     let name = provider_name(key.provider);
     let bad = |d: String| CallError::new(CallFail::BadResponse, scrub(&d, &secret));
-    let schema = rig_core::schemars::Schema::try_from(ask.schema.clone())
-        .map_err(|_| bad("internal: the schema is not an object".into()))?;
-    let req = CompletionRequest::new(user_content(&ask.user, &ask.images))
+    let mut req = CompletionRequest::new(user_content(&ask.user, &ask.images))
         .preamble(ask.system.clone())
-        .max_tokens(ask.max_tokens)
-        .output_schema(schema);
+        .max_tokens(ask.max_tokens);
+    if structured {
+        let schema = rig_core::schemars::Schema::try_from(ask.schema.clone())
+            .map_err(|_| bad("internal: the schema is not an object".into()))?;
+        req = req.output_schema(schema);
+    }
     let t = rig_http(http.clone());
     let reply = match key.provider {
         Provider::OpenAi => {

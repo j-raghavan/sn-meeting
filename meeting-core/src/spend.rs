@@ -19,6 +19,8 @@ pub const NO_DATE: &str = "no date";
 pub enum Kind {
     Transcribe,
     Summarise,
+    /// A handwritten search query read by the summarise provider (F19-FR9); no meeting.
+    Query,
 }
 
 /// Where a priced quantity came from: the provider's own report, or the audio's measured
@@ -369,6 +371,9 @@ pub struct Month {
     /// Home's line: "October · $3.20 spent · 6 meetings", or "October · nothing spent yet".
     pub label: String,
     pub by_provider: std::collections::BTreeMap<String, ByKind>,
+    /// F19-FR9: handwritten search queries this month ("Search" in Settings → SPEND), in `usd`.
+    pub search: f64,
+    pub searches: usize,
 }
 
 /// F16-FR7: spend is per device. It is read from the sidecars in this device's current and
@@ -407,7 +412,7 @@ fn month_of(r: &UsageRecord, tz: &dyn crate::tz::LocalTz) -> Option<String> {
 
 fn home_label(first: NaiveDate, usd: f64, unpriced: usize, meetings: usize) -> String {
     let name = first.format("%B");
-    if meetings == 0 {
+    if meetings == 0 && usd == 0.0 && unpriced == 0 {
         return format!("{name} · nothing spent yet");
     }
     let plus = if unpriced > 0 { "+" } else { "" };
@@ -420,6 +425,17 @@ fn home_label(first: NaiveDate, usd: f64, unpriced: usize, meetings: usize) -> S
 /// device's local month.
 pub fn report(
     meetings: &[crate::sidecar::Sidecar],
+    tz: &dyn crate::tz::LocalTz,
+    from: &str,
+    to: &str,
+) -> Result<Report, String> {
+    report_with(meetings, &[], tz, from, to)
+}
+
+/// `report`, also counting `searches`: the records of calls with no meeting (F19-FR9).
+pub fn report_with(
+    meetings: &[crate::sidecar::Sidecar],
+    searches: &[UsageEntry],
     tz: &dyn crate::tz::LocalTz,
     from: &str,
     to: &str,
@@ -466,11 +482,24 @@ pub fn report(
                 let slot = by.entry(r.provider.id().to_owned()).or_default();
                 match r.kind {
                     Kind::Transcribe => slot.transcribe += u,
-                    Kind::Summarise => slot.summarise += u,
+                    Kind::Summarise | Kind::Query => slot.summarise += u,
                 }
             }
             n += usize::from(any);
         }
+        let (mut search, mut count) = (0.0, 0);
+        for r in searches
+            .iter()
+            .filter_map(UsageEntry::record)
+            .filter(|r| month_of(r, tz).as_deref() == Some(&key))
+        {
+            count += 1;
+            match r.usd.filter(|u| u.is_finite()) {
+                Some(u) => search += u,
+                None => unpriced += 1,
+            }
+        }
+        usd += search;
         for k in by.values_mut() {
             k.transcribe = round6(k.transcribe);
             k.summarise = round6(k.summarise);
@@ -484,6 +513,8 @@ pub fn report(
             meetings: n,
             unpriced,
             by_provider: by,
+            search: round6(search),
+            searches: count,
         });
     }
     Ok(Report {

@@ -300,6 +300,11 @@ pub fn search(query: &str, filter: &str, limit: i32) -> String {
     with_app(|app| app.search_json(query, filter, limit))
 }
 
+/// `nativeRecogniseQuery(png)` (F19-FR9): blocking, at most 15 s.
+pub fn recognise_query(png: &[u8]) -> String {
+    with_app(|app| app.recognise_query_json(png))
+}
+
 /// `nativeIndexStatus()` (F19-FR5): `{state, done, total}`.
 pub fn index_status() -> String {
     with_app(App::index_status_json)

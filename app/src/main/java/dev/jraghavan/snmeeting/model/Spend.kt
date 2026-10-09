@@ -35,10 +35,10 @@ object Spend {
 /** One provider's spend in a month, by kind. */
 data class ProviderSpend(val provider: String, val transcribe: Double, val summarise: Double)
 
-/** One month of nativeSpend. */
+/** One month of nativeSpend; [search] is the handwritten queries' cost (F19-FR9). */
 data class SpendMonth(
     val month: String, val usd: Double, val meetings: Int, val unpriced: Int, val label: String,
-    val byProvider: List<ProviderSpend>,
+    val byProvider: List<ProviderSpend>, val search: Double = 0.0, val searches: Int = 0,
 ) {
     companion object {
         fun from(o: JSONObject): SpendMonth? {
@@ -54,6 +54,8 @@ data class SpendMonth(
                 unpriced = o.int("unpriced") ?: 0,
                 label = o.strOr("label", ""),
                 byProvider = providers,
+                search = o.num("search"),
+                searches = o.int("searches") ?: 0,
             )
         }
     }
@@ -66,11 +68,11 @@ data class SpendReport(val months: List<SpendMonth>, val unpriced: Int, val note
 
     fun rows(): List<Row> = months.reversed().map { m ->
         val plus = if (m.unpriced > 0) "+" else ""
-        val total = if (m.meetings == 0) "—" else Spend.money(m.usd) + plus
+        val total = if (m.meetings == 0 && m.searches == 0) "—" else Spend.money(m.usd) + plus
         val lines = m.byProvider.map { p ->
             Format.providerName(p.provider) + "  ·  Transcription " + Spend.money(p.transcribe) +
                 "  ·  Minutes " + Spend.money(p.summarise)
-        }
+        } + (if (m.searches > 0) listOf("Search  ·  " + Spend.money(m.search)) else emptyList())
         Row(Spend.monthName(m.month), total, lines)
     }
 

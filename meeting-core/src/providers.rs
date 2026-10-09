@@ -10,7 +10,8 @@ mod calls;
 mod measured;
 pub use calls::{
     AudioIn, CallError, CallFail, GEMINI_TRANSCRIBE_SYSTEM, Http, ImageIn, JsonAsk,
-    MAX_REPLY_CHARS, NO_SPEECH, Replied, classify_call, complete_json, provider_name, transcribe,
+    MAX_REPLY_CHARS, NO_SPEECH, Replied, classify_call, complete_json, complete_text,
+    provider_name, transcribe,
 };
 pub use measured::Measured;
 

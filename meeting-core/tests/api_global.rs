@@ -45,6 +45,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("repriceAll", api::reprice_all(true)),
         ("setRates", api::set_rates("[]")),
         ("search", api::search("x", "all", 0)),
+        ("recogniseQuery", api::recognise_query(b"x")),
         ("indexStatus", api::index_status()),
         ("indexUpdate", api::index_update()),
         ("rebuildIndex", api::rebuild_index()),

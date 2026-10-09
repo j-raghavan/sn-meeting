@@ -56,6 +56,16 @@ class SpendTest {
         assertEquals(1, r.unpriced)
     }
 
+    @Test fun handwrittenQueriesShowAsSearch() {
+        val json = """{"months":[{"month":"2026-10","usd":0.003,"meetings":0,"unpriced":0,
+            "label":"October · < ${'$'}0.01 spent · 0 meetings","byProvider":{},"search":0.003,"searches":2}],
+            "unpriced":0,"notes":[]}"""
+        val r = (CoreJson.obj(json, SpendReport::from) as CoreResult.Ok).value
+        val row = r.rows().single()
+        assertEquals("< \$0.01", row.total)
+        assertEquals(listOf("Search  ·  < \$0.01"), row.lines)
+    }
+
     private val rates = """{"asOf":"2026-11-02","problems":["Your rate for gpt-x has an error; using the default"],"entries":[
         {"provider":"openai","model":"whisper-1","unit":"minute","perMinute":0.006,"asOf":"2026-10-08","source":"https://x","origin":"default"},
         {"provider":"gemini","model":"gemini-3.8-flash","unit":"tokens","input":1.5,"output":7.5,"validFrom":"2027-01-01",

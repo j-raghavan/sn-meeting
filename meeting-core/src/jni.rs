@@ -2,7 +2,7 @@
 //! `EnvUnowned::with_env` wraps the closure in `catch_unwind` (jni-0.22.4 env.rs:4793-4812);
 //! `api::guarded` already turns core panics into `{"error":…}`, so this is the second net.
 use jni::EnvUnowned;
-use jni::objects::{JClass, JString};
+use jni::objects::{JByteArray, JClass, JString};
 use jni::sys::{jboolean, jint, jlong};
 
 #[unsafe(no_mangle)]
@@ -477,6 +477,20 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSearch<'l
         let query: String = query.try_to_string(env)?;
         let filter: String = filter.try_to_string(env)?;
         env.new_string(crate::api::search(&query, &filter, limit))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Blocking for up to 15 s (F19-FR9): call it on a background thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRecogniseQuery<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    png: JByteArray<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let bytes = env.convert_byte_array(&png)?;
+        env.new_string(crate::api::recognise_query(&bytes))
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }

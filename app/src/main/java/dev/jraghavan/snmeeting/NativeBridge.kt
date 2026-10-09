@@ -113,7 +113,8 @@ object NativeBridge {
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,
-     *  usd, meetings, unpriced, label, byProvider: {openai: {transcribe, summarise}}}], unpriced}`.
+     *  usd, meetings, unpriced, label, byProvider: {openai: {transcribe, summarise}}, search, searches}],
+     *  unpriced}`; `search` is handwritten queries (F19-FR9), included in `usd`.
      *  `label` is Home's line ("October · $3.20 spent · 6 meetings"). */
     external fun nativeSpend(fromMonth: String, toMonth: String): String
 
@@ -138,6 +139,11 @@ object NativeBridge {
      *  time, snippet: [{text, bold}], region, bbox, strokeIds, changed}]}], more, totalGroups,
      *  indexing}`. */
     external fun nativeSearch(query: String, filter: String, limit: Int): String
+
+    /** Reads a handwritten query strip (a PNG, at most 1568 × 200 px) with the summarise
+     *  provider, the only Search call that leaves the device (F19-FR9). Blocking for up to 15 s.
+     *  `{text}`, or `{error, offline}`: fall back to the keyboard either way. */
+    external fun nativeRecogniseQuery(png: ByteArray): String
 
     /** `{state: ready|indexing|missing, done, total}`; "Indexing 120/340" while it runs. */
     external fun nativeIndexStatus(): String

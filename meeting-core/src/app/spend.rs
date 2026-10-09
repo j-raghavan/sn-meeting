@@ -100,7 +100,8 @@ impl App {
     /// byProvider: {openai: {transcribe, summarise}}}], unpriced}` over every listed sidecar.
     pub fn spend_json(&self, from: &str, to: &str) -> String {
         let meetings = self.library().sidecars();
-        match crate::spend::report(&meetings, self.tz.as_ref(), from, to) {
+        let searches = self.query_usage();
+        match crate::spend::report_with(&meetings, &searches, self.tz.as_ref(), from, to) {
             Ok(r) => json!(r).to_string(),
             Err(e) => crate::api::error_json(&e),
         }

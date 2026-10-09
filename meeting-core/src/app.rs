@@ -16,6 +16,7 @@ mod search;
 mod spend;
 mod templates;
 pub use run::Job;
+pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};
 
 #[derive(Debug)]
 pub struct App {
