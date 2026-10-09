@@ -373,3 +373,70 @@ fn summarise_again_sends_only_the_regions_written_on_since() {
     let after = read_sidecar(&fx.dir, &fx.id).extra["notesRecognisedAt"].clone();
     assert!(after.is_string() && at.is_string());
 }
+
+/// Every file in `dir` with its bytes and modification time.
+fn snapshot(dir: &std::path::Path) -> Vec<(String, Vec<u8>, std::time::SystemTime)> {
+    let mut v: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| {
+            let e = e.unwrap();
+            let name = e.file_name().to_string_lossy().into_owned();
+            (
+                name,
+                std::fs::read(e.path()).unwrap(),
+                e.metadata().unwrap().modified().unwrap(),
+            )
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// F19-FR8 / INV12: recognition writes notes-text.json and nothing else in the notes folder;
+/// the ink, its view and the minutes ink keep their bytes and times, through a full
+/// recognition, a partial one and an index rebuild.
+#[test]
+fn recognised_text_never_changes_ink() {
+    let cur = Arc::new(std::sync::Mutex::new(input(2)));
+    let c = cur.clone();
+    let fx = fixture_src(NotesSource(Arc::new(move |_, _| {
+        Some(c.lock().unwrap().clone())
+    })));
+    let notes = fx.dir.join(format!("{}.notes", fx.id));
+    std::fs::create_dir_all(&notes).unwrap();
+    for (name, bytes) in [
+        ("canvas.inkbin", &b"INK1 strokes"[..]),
+        ("minutes.inkbin", b"INK1 minutes"),
+        ("view.json", b"{\"x\":0}"),
+    ] {
+        std::fs::write(notes.join(name), bytes).unwrap();
+    }
+    let ink = snapshot(&notes);
+    let reply = minutes(json!([{"region": 1, "lines": [{"text": "Q3", "box": [0, 0, 1, 1]}]}]));
+    fx.mount("", anthropic(&reply));
+    assert_eq!(fx.run()["meeting"]["status"], "done");
+    cur.lock().unwrap().strokes.push(StrokeBox {
+        id: 20,
+        bbox: [140.0, 60.0, 150.0, 70.0],
+        at_ms: None,
+        new: true,
+    });
+    assert_eq!(fx.run()["meeting"]["status"], "done");
+    fx.app.rebuild_index_json();
+    let after = snapshot(&notes);
+    let names: Vec<&str> = after.iter().map(|(n, _, _)| n.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "canvas.inkbin",
+            "minutes.inkbin",
+            "notes-text.json",
+            "view.json"
+        ]
+    );
+    let without_text: Vec<_> = after
+        .into_iter()
+        .filter(|(n, _, _)| n != "notes-text.json")
+        .collect();
+    assert_eq!(without_text, ink, "the ink is untouched");
+}
