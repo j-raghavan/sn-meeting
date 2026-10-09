@@ -30,7 +30,7 @@ step "cargo test";                   cargo test -p meeting-core
 step "cargo llvm-cov (>= 97% lines)"
 cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex 'meeting-core/src/jni\.rs$'
 step "install guard (stub adb)";     "$ROOT/scripts/test_install_guard.sh"
-step "check-audio (tone, silence, noise)"; "$ROOT/scripts/test_check_audio.sh"
+step "check-audio (tone, silence, noise, speech, clipped)"; "$ROOT/scripts/test_check_audio.sh"
 step "licences of linked crates";    "$ROOT/scripts/check_licenses.sh"
 step "gradle lintRelease (JDK $JDK)"
 JAVA_HOME="$JDK" ./gradlew -q lintRelease
