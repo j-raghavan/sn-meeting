@@ -45,7 +45,9 @@ class CalendarTest {
         assertEquals(sync, CalendarFormat.current(d.rows))
         val rec = d.rows[1]
         assertFalse(rec.isEvent)
-        assertEquals("Unscheduled recording · tap to link", CalendarFormat.rowTitle(rec))
+        assertNull(CalendarFormat.rowTitle(rec))
+        assertEquals("Unscheduled · tap to link", CalendarFormat.meetingLine(rec, hasLinks = true))
+        assertEquals("no links: nothing to link to", "", CalendarFormat.meetingLine(rec, hasLinks = false))
         assertEquals(Marks.NONE, d.allDay[0].marks)
         assertNull(a.day(LocalDate.of(2026, 10, 11)))
     }
@@ -58,12 +60,17 @@ class CalendarTest {
         assertEquals("10:00", CalendarFormat.range(ten, ten, la))
         assertEquals("Room 4 · Priya Shah, Ana Ruiz", CalendarFormat.detail(sync))
         assertEquals("Weekly sync", CalendarFormat.rowTitle(sync))
-        assertEquals(listOf("●" to true, "✎" to false, "≡" to true, "☐2" to false), CalendarFormat.marks(sync.marks))
-        // All to-dos ticked: the box is filled.
-        assertEquals("☐" to true, CalendarFormat.marks(Marks(false, false, false, 0, 3))[3])
-        assertEquals("☐" to false, CalendarFormat.marks(Marks.NONE)[3])
+        assertEquals(listOf("●" to true, "✎" to false, "≡" to true, "☐ 2" to false), CalendarFormat.marks(sync.marks))
+        // No open to-dos: the slot stays empty.
+        assertNull(CalendarFormat.marks(Marks(false, false, false, 0, 3))[3])
         val untitled = sync.copy(isEvent = false, unscheduled = false, title = " ")
-        assertEquals(Format.UNTITLED, CalendarFormat.rowTitle(untitled))
+        assertNull(CalendarFormat.rowTitle(untitled))
+        val titled = untitled.copy(title = "Budget", durationMs = 38 * 60_000L, cost = "≈ \$0.01")
+        assertEquals("Budget", CalendarFormat.rowTitle(titled))
+        assertEquals("0:38 · \$0.01", CalendarFormat.meetingLine(titled, hasLinks = true))
+        assertEquals("1:05", CalendarFormat.length(65 * 60_000L))
+        assertEquals("0:01", CalendarFormat.length(5_000L))
+        assertEquals("0:00", CalendarFormat.length(0L))
         assertEquals("(No title)", CalendarFormat.rowTitle(sync.copy(title = null)))
         assertEquals("", CalendarFormat.detail(sync.copy(location = null, people = "")))
     }

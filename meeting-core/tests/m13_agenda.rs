@@ -122,6 +122,10 @@ fn a_day_of_events_and_recordings() {
     );
     assert_eq!(u["meetingId"], loose.as_str());
     assert_eq!(u["endMs"], TEN + 300 * MIN + 60_000);
+    assert_eq!(u["durationMs"], 60_000);
+    assert_eq!(u["spend"]["label"], "—", "nothing spent yet");
+    assert_eq!(s["durationMs"], 60_000, "the linked meeting's length");
+    assert_eq!(rows[1]["durationMs"], Value::Null);
     // Tomorrow: not current, whatever the time.
     assert_eq!(day(&a, "2026-10-10")["rows"][0]["current"], false);
 }

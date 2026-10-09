@@ -135,6 +135,8 @@ impl App {
                 "recurring": e.recurring, "transparent": e.transparent(), "tzUnknown": e.tz_unknown,
                 "current": is_current,
                 "meetingId": newest.map(|(m, _)| m.id.clone()),
+                "durationMs": newest.and_then(|(m, _)| m.duration_ms),
+                "spend": newest.map(|(m, _)| m.spend.clone()),
                 "meetings": linked.iter().map(|(m, _)| m.id.clone()).collect::<Vec<_>>(),
                 "marks": marks(newest.map(|(_, sc)| sc), newest.map(|(m, _)| m.folder.as_str())),
             });
@@ -168,6 +170,7 @@ impl App {
                 json!({
                     "kind": "meeting", "meetingId": m.id, "title": title,
                     "startMs": m.started_at_ms, "endMs": end, "status": m.status,
+                    "durationMs": m.duration_ms, "spend": m.spend,
                     "unscheduled": ev.is_none(),
                     "eventKey": ev.as_ref().map(|l| l.event_key.clone()),
                     "marks": marks(Some(sc), Some(&m.folder)),

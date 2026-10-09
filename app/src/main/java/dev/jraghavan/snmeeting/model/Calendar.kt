@@ -28,6 +28,8 @@ data class AgendaRow(
     val location: String?, val people: String, val calendar: String?,
     val recurring: Boolean, val current: Boolean, val unscheduled: Boolean,
     val marks: Marks, val fromLastTime: List<TodoRef>,
+    /** The (linked) meeting's length and cost, "—" for none (F16-FR5). */
+    val durationMs: Long? = null, val cost: String = "—",
 ) {
     companion object {
         fun from(o: JSONObject): AgendaRow? {
@@ -42,6 +44,7 @@ data class AgendaRow(
                 unscheduled = o.bool("unscheduled") ?: false,
                 marks = Marks.from(o.obj("marks")),
                 fromLastTime = o.arr("fromLastTime").mapObj(TodoRef::from),
+                durationMs = o.long("durationMs"), cost = Spend.label(o.obj("spend")),
             )
         }
     }
@@ -163,20 +166,37 @@ object CalendarFormat {
         return if (failed > 0) "$base · $failed failed" else base
     }
 
-    /** F18-FR7's marks in their fixed order: (glyph, filled). ☐n shows the open count. */
-    fun marks(m: Marks): List<Pair<String, Boolean>> = listOf(
+    /**
+     * F18-FR7's marks in their fixed slots, as boxes: (glyph, filled), filled (white on black)
+     * when it exists, outlined when not yet. The fourth is "☐ n", the open to-dos, and is null
+     * (an empty slot) when none are open.
+     */
+    fun marks(m: Marks): List<Pair<String, Boolean>?> = listOf(
         "●" to m.recording,
         "✎" to m.notes,
         "≡" to m.minutes,
-        (if (m.todosOpen > 0) "☐${m.todosOpen}" else "☐") to (m.todosTotal > 0 && m.todosOpen == 0),
+        if (m.todosOpen > 0) "☐ ${m.todosOpen}" to false else null,
     )
 
-    /** An event row's title, or the meeting's: an unscheduled one asks to be linked. */
-    fun rowTitle(r: AgendaRow): String = when {
-        r.isEvent -> r.title?.ifBlank { null } ?: "(No title)"
-        r.unscheduled -> "Unscheduled recording · tap to link"
-        else -> r.title?.ifBlank { null } ?: Format.UNTITLED
+    /** A row's main line: the event's title, or the meeting's (null for an untitled one). */
+    fun rowTitle(r: AgendaRow): String? = if (r.isEvent) r.title?.ifBlank { null } ?: "(No title)" else r.title?.ifBlank { null }
+
+    /** "0:38", hours and minutes; a recording under a minute reads "0:01". */
+    fun length(ms: Long): String {
+        val min = ((ms + 59_999) / 60_000).coerceAtLeast(if (ms > 0) 1 else 0)
+        return "%d:%02d".format(Locale.ROOT, min / 60, min % 60)
     }
+
+    /**
+     * A recording's secondary line: "0:38 · $0.01" (the cost left out when nothing is known),
+     * then "Unscheduled · tap to link" when it is outside any event and there are events to
+     * link to (F18-FR10).
+     */
+    fun meetingLine(r: AgendaRow, hasLinks: Boolean): String = listOfNotNull(
+        r.durationMs?.let(::length),
+        r.cost.removePrefix("≈ ").takeIf { it != "—" && it.isNotBlank() },
+        if (!r.isEvent && r.unscheduled && hasLinks) "Unscheduled · tap to link" else null,
+    ).joinToString(" · ")
 
     /** The italic line under a row: room and attendees, as one line. */
     fun detail(r: AgendaRow): String = listOfNotNull(r.location?.ifBlank { null }, r.people.ifBlank { null }).joinToString(" · ")

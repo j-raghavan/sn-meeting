@@ -57,6 +57,8 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
     }
 
     private var shown: LocalDate = LocalDate.now()
+    /** Whether any calendar link is set: only then can a recording be linked (F18-FR10). */
+    private var hasLinks = false
 
     /** The two columns: the day (wider) and the to-dos, equal heights, each scrolling inside. */
     val columns: View = LinearLayout(a).apply {
@@ -120,6 +122,7 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
     /** The day's rows. [recording]: a meeting is being recorded (the box shows its timer). */
     fun showDay(day: AgendaDay?, d: LocalDate, today: LocalDate, hasLinks: Boolean, recording: Boolean, error: String? = null) {
         shown = d
+        this.hasLinks = hasLinks
         dayTitle.text = CalendarFormat.dayTitle(d, today)
         timeline.removeAllViews()
         timer = null
@@ -137,7 +140,7 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
                 isClickable = true
                 setOnClickListener { actions.onEvent(r) }
                 addView(ui.eyebrow("All day", ui.textMuted), LinearLayout.LayoutParams(ui.dim(110), LinearLayout.LayoutParams.WRAP_CONTENT))
-                addView(ui.body(CalendarFormat.rowTitle(r), 16f).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                addView(ui.body(CalendarFormat.rowTitle(r) ?: "", 16f).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
                     LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             })
             timeline.addView(ui.hairline())
@@ -157,41 +160,49 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
         setOnClickListener {
             when {
                 r.isEvent -> actions.onEvent(r)
-                r.unscheduled -> actions.onUnscheduled(r)
+                r.unscheduled && hasLinks -> actions.onUnscheduled(r)
                 else -> r.meetingId?.let(actions::onMeeting)
             }
         }
         addView(LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
             addView(ui.eyebrow(CalendarFormat.range(r.startMs, r.endMs, zone)))
-            addView(ui.body(CalendarFormat.rowTitle(r), 17f, bold = r.isEvent || !r.unscheduled).apply {
+            val title = CalendarFormat.rowTitle(r)
+            addView(ui.body(title ?: Format.UNTITLED, 17f, bold = title != null).apply {
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END
-                if (r.unscheduled) { typeface = ui.serifItalic; setTextColor(ui.inkSoft) }
+                if (title == null) { typeface = ui.serifItalic; setTextColor(ui.textMuted) }
             }, ui.fullWidth().apply { topMargin = ui.dim(4) })
             val detail = CalendarFormat.detail(r)
             if (detail.isNotEmpty()) addView(ui.note(detail, 13f).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
                 ui.fullWidth().apply { topMargin = ui.dim(2) })
+            // Length and cost, and for a recording outside any event the way to link it.
+            val line = CalendarFormat.meetingLine(r, hasLinks)
+            if (line.isNotEmpty()) addView(ui.eyebrow(line, ui.inkSoft).apply { isAllCaps = false; text = line },
+                ui.fullWidth().apply { topMargin = ui.dim(4) })
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addView(marks(r.marks))
     }
 
-    /** ● ✎ ≡ ☐n: each in its own fixed slot, ink when it exists or is done, grey when not yet. */
+    /**
+     * ● ✎ ≡ ☐ n as small boxes in fixed slots (the mock-up): white on black when it exists,
+     * outlined when not yet; the to-do box shows the open count and is left empty at none.
+     */
     private fun marks(m: Marks): View = LinearLayout(a).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        CalendarFormat.marks(m).forEach { (glyph, filled) ->
+        val box = ui.dim(30)
+        CalendarFormat.marks(m).forEachIndexed { i, mark ->
+            val wide = i == 3
             addView(TextView(a).apply {
-                text = if (filled) filledGlyph(glyph) else glyph
-                textSize = ui.fs(15f); typeface = ui.mono; gravity = Gravity.CENTER
-                setTextColor(if (filled) ui.ink else ui.textMuted)
-            }, LinearLayout.LayoutParams(ui.dim(38), LinearLayout.LayoutParams.WRAP_CONTENT))
+                gravity = Gravity.CENTER; includeFontPadding = false
+                textSize = ui.fs(if (wide) 12f else 14f); typeface = ui.serifBold
+                if (mark == null) { visibility = View.INVISIBLE; return@apply }
+                val (glyph, filled) = mark
+                text = glyph
+                setTextColor(if (filled) Color.WHITE else ui.ink)
+                background = ui.outline(ui.dim(4), if (filled) ui.ink else Color.WHITE)
+            }, LinearLayout.LayoutParams(if (wide) ui.dim(50) else box, box).apply { marginStart = ui.dim(6) })
         }
-    }
-
-    private fun filledGlyph(g: String) = when {
-        g == "●" -> "●"
-        g.startsWith("☐") && g.length == 1 -> "☑"
-        else -> g
     }
 
     /** The current event: boxed, with "● Record" (or the running timer) and "From last time". */
