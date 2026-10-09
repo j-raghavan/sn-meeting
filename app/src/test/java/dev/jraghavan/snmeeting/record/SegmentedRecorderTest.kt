@@ -14,6 +14,8 @@ class SegmentedRecorderTest {
     private var stopOk = true
     private var nextOk = true
     private var startFails = false
+    private var stopThrows = false
+    private var spaceThrows = false
     private var beginReply: CoreResult<Begun>? = null
     private val rejected = mutableSetOf<AudioSpec>()
     private lateinit var events: RecorderEvents
@@ -21,6 +23,7 @@ class SegmentedRecorderTest {
     private val first = "/s/EXPORT/sn-meeting/$id-01.m4a"
     private val plan = Begun(id, first, 900_000, 13_499_997)
     private var ended: Pair<String?, String>? = null
+    private val faults = mutableListOf<String>()
 
     private val core = object : RecorderCore {
         override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) {
@@ -44,10 +47,13 @@ class SegmentedRecorderTest {
             this@SegmentedRecorderTest.events = events
         }
         override fun setNext(path: String): Boolean { log += "next ${path.substringAfterLast('-')} $nextOk"; return nextOk }
-        override fun stop(): Boolean { log += "stop $stopOk"; return stopOk }
+        override fun stop(): Boolean {
+            if (stopThrows) { log += "stop throws"; throw IllegalStateException() }
+            log += "stop $stopOk"; return stopOk
+        }
     }
     private val storage = object : StoragePort {
-        override fun usableBytes(path: String) = free
+        override fun usableBytes(path: String): Long = if (spaceThrows) throw IllegalStateException("statfs") else free
         override fun delete(path: String) { log += "delete ${path.substringAfterLast('-')}" }
     }
     private val clock = object : ClockPort { override fun elapsedMs() = now; override fun wallMs() = 0L }
@@ -55,7 +61,7 @@ class SegmentedRecorderTest {
         override fun onRecording(id: String, startElapsedMs: Long) { log += "recording" }
         override fun onSegmentStarted(index: Int) {}
         override fun onEnded(id: String?, message: String) { ended = id to message }
-    })
+    }, log = { where, _ -> faults += where })
     private val usb = MicOption(MicKind.USB, "USB", 7)
 
     private fun startUsb() { sr.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB)); log.clear() }
@@ -273,4 +279,56 @@ class SegmentedRecorderTest {
         assertEquals(EndReason.MIC_LOST, EndReason.ofMessage("Microphone disconnected — recording saved"))
         assertEquals(null, EndReason.ofMessage(SegmentedRecorder.TOO_SHORT))
     }
+
+    // The on-device crash: native threw IllegalStateException on the recorder thread mid-recording.
+    @Test fun aRecorderThatThrowsAsTheMicGoesStillEndsAsMicLoss() { // F2-FR3
+        startUsb(); now += 36_600; stopThrows = true
+        events.onRoutedTo(3) // nothing escapes
+        // The file may well hold audio: kept, measured, with the elapsed time as the fallback.
+        assertEquals(listOf("stop throws", "close 0 01.m4a measure=true ~36600", "finish 36600 'mic disconnected' discard=false"), log)
+        assertEquals(id to EndReason.MIC_LOST.message, ended)
+        events.onRoutedTo(3); sr.onMicLost(); events.onError(1) // late: no-ops
+        assertEquals(3, log.size)
+    }
+
+    @Test fun aCallbackThatThrowsEndsAsARecorderError() {
+        startUsb(); now += 2_000; spaceThrows = true
+        events.onApproachingLimit() // nothing escapes
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~2000", "finish 2000 'recorder error' discard=false"), log)
+        assertEquals(id to EndReason.RECORDER_ERROR.message, ended)
+        assertEquals(1, faults.size)
+    }
+
+    @Test fun aFaultReportedByTheAdapterEndsAsARecorderError() {
+        startUsb(); now += 1_000
+        events.onFault("routing", IllegalStateException())
+        events.onFault("info", IllegalStateException()) // once only
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~1000", "finish 1000 'recorder error' discard=false"), log)
+        assertEquals(id to EndReason.RECORDER_ERROR.message, ended)
+    }
+
+    @Test fun theAdapterReportingMicLossEndsOnce() { // F2-FR3 / EC1: routing and device removal race
+        startUsb(); now += 1_000
+        events.onMicLost(); sr.onMicLost(); events.onMicLost()
+        assertEquals(listOf("stop true", "close 0 01.m4a measure=true ~1000", "finish 1000 'mic disconnected' discard=false"), log)
+    }
+
+    @Test fun aCloseThatThrowsStillFinishesOnceAndKeepsTheFile() {
+        val flaky = object : RecorderCore by core {
+            override fun closeSegment(id: String, index: Int, path: String, measure: Boolean, fallbackMs: Long) {
+                log += "close throws"; throw IllegalStateException("queue")
+            }
+        }
+        val r = SegmentedRecorder(flaky, rec, storage, clock, object : SegmentedRecorder.Listener {
+            override fun onRecording(id: String, startElapsedMs: Long) {}
+            override fun onSegmentStarted(index: Int) {}
+            override fun onEnded(id: String?, message: String) { ended = id to message }
+        })
+        r.start(usb, 7, InputSource.MIC, listOf(AudioSpec.USB)); log.clear()
+        now += 4_000; r.onMicLost()
+        // Never a second stop that would read as "no audio" and delete the file.
+        assertEquals(listOf("stop true", "close throws", "finish 4000 'recorder error' discard=false"), log)
+        assertEquals(id to EndReason.RECORDER_ERROR.message, ended)
+    }
+
 }

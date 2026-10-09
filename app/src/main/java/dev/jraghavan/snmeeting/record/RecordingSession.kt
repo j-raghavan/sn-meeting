@@ -122,6 +122,23 @@ class RecordingSession(private val env: Env, private val btWaitMs: Long = BT_WAI
         }
     }
 
+    /**
+     * Something on the recorder thread threw (Safely, or the thread's last-resort handler): a
+     * recording under way ends as a recorder error with its segment finalised and finished once;
+     * before that, everything is released. Ending twice is a no-op.
+     */
+    fun onFault(t: Throwable) {
+        when (phase) {
+            Phase.RECORDER -> recorder?.onFault("recorder thread", t) ?: end(RecState.Idle(EndReason.RECORDER_ERROR.message, null))
+            Phase.IDLE, Phase.PICKING, Phase.CONNECTING -> {
+                try { sco?.close() } catch (_: Throwable) {} // never reports ready now
+                recorder?.stop() // not started: it ends, and a late start does nothing
+                end(RecState.Idle(EndReason.RECORDER_ERROR.message, null))
+            }
+            Phase.ENDED -> Unit
+        }
+    }
+
     /** The service is being destroyed by the system: finalise what we can, release (INV7). */
     fun destroy() {
         recorder?.stop()

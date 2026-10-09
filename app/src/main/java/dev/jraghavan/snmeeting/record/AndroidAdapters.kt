@@ -9,6 +9,7 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.PowerManager
 import android.os.SystemClock
+import android.util.Log
 import dev.jraghavan.snmeeting.CoreJobs
 import dev.jraghavan.snmeeting.NativeBridge
 import dev.jraghavan.snmeeting.model.Begun
@@ -25,9 +26,10 @@ object AndroidClock : ClockPort {
     override fun wallMs() = System.currentTimeMillis()
 }
 
-class HandlerTimer(private val h: Handler) : TimerPort {
+/** [guard]: the recorder thread's Safely, so a timer that throws ends the recording, not the app. */
+class HandlerTimer(private val h: Handler, private val guard: Safely? = null) : TimerPort {
     override fun after(ms: Long, r: () -> Unit): Cancel {
-        val task = Runnable(r)
+        val task = Runnable { if (guard != null) guard.run("timer", r) else r() }
         h.postDelayed(task, ms)
         return Cancel { h.removeCallbacks(task) }
     }
@@ -46,6 +48,8 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
     private var r: MediaRecorder? = null
     private var path: String? = null
     private var routing: AudioRouting.OnRoutingChangedListener? = null
+    /** This MediaRecorder's watch: closed before stop()/release(), so late callbacks are no-ops. */
+    private var watch: RoutingWatch? = null
 
     /** A configured recorder; released again if any step throws (setAudioSource can, S11). */
     @Suppress("DEPRECATION") // MediaRecorder(Context) is API 31+ and crashed on this device (F2 Facts)
@@ -87,30 +91,45 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
         } catch (e: Exception) {
             File(path).delete(); throw e
         }
+        // F2-FR3: the input actually in use. Reading it throws once the USB mic is unplugged
+        // (IllegalStateException from native_getRoutedDeviceId): that, or any other input, is mic loss.
+        val w = RoutingWatch(deviceId) { m.routedDevice?.id }
         try {
             m.setMaxFileSize(maxFileBytes)
             m.setMaxDuration(maxDurationMs)
+            // Every callback on the recorder thread: ignored once stopping, never throws (guarded).
             m.setOnInfoListener { _, what, _ ->
-                when (what) {
-                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_APPROACHING -> events.onApproachingLimit()
-                    MediaRecorder.MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED -> events.onNextFileStarted()
-                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED,
-                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED -> events.onLimitReached()
+                if (w.live) guarded(events, "info $what") {
+                    when (what) {
+                        MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_APPROACHING -> events.onApproachingLimit()
+                        MediaRecorder.MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED -> events.onNextFileStarted()
+                        MediaRecorder.MEDIA_RECORDER_INFO_MAX_DURATION_REACHED,
+                        MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED -> events.onLimitReached()
+                    }
                 }
             }
-            m.setOnErrorListener { _, what, _ -> events.onError(what) }
+            m.setOnErrorListener { _, what, _ -> if (w.live) guarded(events, "error $what") { events.onError(what) } }
             m.prepare()
             m.start()
         } catch (e: Exception) {
-            m.release(); File(path).delete(); throw e
+            w.close(); m.release(); File(path).delete(); throw e
         }
-        // F2-FR3: the input actually in use; any other than the pinned one is mic loss.
-        val l = AudioRouting.OnRoutingChangedListener { ar -> events.onRoutedTo(ar.routedDevice?.id) }
-        m.addOnRoutingChangedListener(l, handler)
-        r = m; this.path = path; routing = l
+        val l = AudioRouting.OnRoutingChangedListener { _ -> routed(w, events, "routing") }
+        r = m; this.path = path; watch = w
+        try {
+            m.addOnRoutingChangedListener(l, handler)
+            routing = l
+        } catch (t: Throwable) {
+            // No routing reports: the device callback still sees the unplug (RecordingService).
+            Log.w(TAG, "routing listener: ${t.javaClass.simpleName}")
+        }
         // INV1: already routed elsewhere at start? Reported once the recorder is RECORDING.
-        val routed = m.routedDevice?.id
-        if (Pin.routedAway(deviceId, routed)) handler.post { events.onRoutedTo(routed) }
+        handler.post { routed(w, events, "routing at start") }
+    }
+
+    /** The routing verdict for [w]; a no-op once that recorder is stopping (late callback). */
+    private fun routed(w: RoutingWatch, events: RecorderEvents, where: String) = guarded(events, where) {
+        if (w.check() == RoutingWatch.Verdict.MIC_LOST) events.onMicLost()
     }
 
     override fun setNext(path: String): Boolean = try {
@@ -119,22 +138,33 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
         false
     }
 
+    /** Never throws: callbacks are silenced and removed before stop() and release(). */
     override fun stop(): Boolean {
         val m = r ?: return false
         r = null
-        routing?.let { m.removeOnRoutingChangedListener(it) }
+        watch?.close(); watch = null
+        routing?.let { l -> quietly("remove routing") { m.removeOnRoutingChangedListener(l) } }
         routing = null
+        quietly("clear listeners") { m.setOnInfoListener(null); m.setOnErrorListener(null) }
         val ok = try {
             m.stop(); true
-        } catch (e: RuntimeException) {
-            // stop() also throws after an automatic stop at a limit: keep a file with audio in it.
+        } catch (e: Throwable) {
+            // stop() also throws after an automatic stop at a limit, or once the mic is unplugged:
+            // keep a file with audio in it.
             (path?.let { File(it).length() } ?: 0L) > NO_AUDIO_BYTES
         }
-        m.release()
+        quietly("release") { m.release() }
         return ok
     }
 
-    companion object { const val NO_AUDIO_BYTES = 4096L }
+    private inline fun quietly(what: String, block: () -> Unit) {
+        try { block() } catch (t: Throwable) { Log.w(TAG, "$what: ${t.javaClass.simpleName}") }
+    }
+
+    companion object {
+        const val NO_AUDIO_BYTES = 4096L
+        const val TAG = "Meetings"
+    }
 }
 
 object FileStorage : StoragePort {
@@ -160,10 +190,10 @@ object RetrieverDuration : DurationPort {
  * RecorderCore over NativeBridge on CoreJobs' thread; results back on the recording handler, or
  * on the worker itself once that handler's thread has quit (S12).
  */
-class CoreRecorderBridge(private val h: Handler, private val duration: DurationPort) : RecorderCore {
+class CoreRecorderBridge(private val h: Handler, private val duration: DurationPort, private val guard: Safely? = null) : RecorderCore {
     private fun <T> call(work: () -> T, done: (T) -> Unit) = CoreJobs.exec {
         val v = work()
-        postOrRun(h::post) { done(v) } // the recorder thread may have quit (S12)
+        postOrRun(h::post) { if (guard != null) guard.run("core reply") { done(v) } else done(v) } // the recorder thread may have quit (S12)
     }
 
     override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) =

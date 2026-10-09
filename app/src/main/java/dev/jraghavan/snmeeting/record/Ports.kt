@@ -38,6 +38,9 @@ interface RecorderEvents {
     fun onLimitReached() // MAX_DURATION_REACHED, or MAX_FILESIZE_REACHED with no next file
     fun onError(what: Int)
     fun onRoutedTo(deviceId: Int?) // the input actually in use
+    fun onMicLost() // the input in use could not be read, or is not the pinned one (RoutingWatch)
+    /** A platform callback threw: end as a recorder error, never crash the recorder thread. */
+    fun onFault(where: String, t: Throwable)
 }
 
 /** One MediaRecorder at a time. All calls on the recording thread. */

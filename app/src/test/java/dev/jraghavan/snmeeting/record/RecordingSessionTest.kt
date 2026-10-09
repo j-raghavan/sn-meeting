@@ -23,6 +23,8 @@ class RecordingSessionTest {
     private var scoInput: Int? = null
     private var onBtChange: (() -> Unit)? = null
     private lateinit var link: ScoLink
+    private lateinit var events: RecorderEvents
+    private var stopThrows = false
 
     private val core = object : RecorderCore {
         override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) {
@@ -39,9 +41,14 @@ class RecordingSessionTest {
         override fun accepts(spec: AudioSpec, source: InputSource, deviceId: Int) = true
         override fun start(spec: AudioSpec, source: InputSource, deviceId: Int, path: String, maxFileBytes: Long, maxDurationMs: Int, events: RecorderEvents) {
             log += "mediarecorder start dev=$deviceId"
+            this@RecordingSessionTest.events = events
         }
         override fun setNext(path: String) = true
-        override fun stop(): Boolean { log += "mediarecorder stop"; return true }
+        override fun stop(): Boolean {
+            log += "mediarecorder stop"
+            if (stopThrows) throw IllegalStateException()
+            return true
+        }
     }
     private val storage = object : StoragePort {
         override fun usableBytes(path: String) = Long.MAX_VALUE / 4
@@ -173,4 +180,52 @@ class RecordingSessionTest {
         session.stop()
         assertEquals(RecState.Idle(null, null), ended)
     }
+
+    private fun recordUsb() { btReady = true; session.begin(MicChoice.Auto); log.clear() }
+
+    @Test fun routingThenDeviceRemovalEndsOnce() { // F2-FR3: whichever fires first ends it
+        recordUsb()
+        events.onMicLost()
+        session.onDevicesRemoved(listOf(7))
+        assertEquals(RecState.Idle(EndReason.MIC_LOST.message, "m"), ended)
+        assertEquals(1, log.count { it == "core finish discard=false" })
+        assertEquals(1, log.count { it == "mediarecorder stop" })
+    }
+
+    @Test fun deviceRemovalThenRoutingEndsOnce() {
+        recordUsb()
+        session.onDevicesRemoved(listOf(7))
+        events.onRoutedTo(3); events.onMicLost(); events.onFault("routing", IllegalStateException())
+        assertEquals(RecState.Idle(EndReason.MIC_LOST.message, "m"), ended)
+        assertEquals(1, log.count { it == "core finish discard=false" })
+        assertEquals(1, published.count { it is RecState.Idle })
+    }
+
+    @Test fun aRecorderThatThrowsAsTheMicIsUnpluggedEndsSavedWithoutCrashing() { // the on-device crash
+        recordUsb(); stopThrows = true
+        events.onMicLost()
+        session.onDevicesRemoved(listOf(7))
+        assertEquals(RecState.Idle(EndReason.MIC_LOST.message, "m"), ended)
+        assertEquals(listOf("mediarecorder stop", "core close 0", "core finish discard=false"), log.take(3))
+        assertEquals(1, log.count { it == "core finish discard=false" })
+        assertTrue(log.containsAll(listOf("devices off", "wake release", "bt close")))
+    }
+
+    @Test fun aFaultOnTheRecorderThreadEndsTheRecordingAsARecorderError() {
+        recordUsb()
+        session.onFault(IllegalStateException())
+        session.onFault(IllegalStateException()) // once only
+        assertEquals(RecState.Idle(EndReason.RECORDER_ERROR.message, "m"), ended)
+        assertEquals(1, log.count { it == "core finish discard=false" })
+    }
+
+    @Test fun aFaultBeforeRecordingCancelsAndReleases() {
+        session.begin(MicChoice.Auto) // waiting for Bluetooth
+        session.onFault(IllegalStateException())
+        assertEquals(RecState.Idle(EndReason.RECORDER_ERROR.message, null), ended)
+        assertTrue(log.containsAll(listOf("timer cancel 1500", "bt close")))
+        session.onFault(IllegalStateException())
+        assertEquals(1, published.count { it is RecState.Idle })
+    }
+
 }

@@ -20,6 +20,7 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import dev.jraghavan.snmeeting.CoreJobs
 import dev.jraghavan.snmeeting.MainActivity
 import dev.jraghavan.snmeeting.R
@@ -52,9 +53,25 @@ class RecordingService : Service() {
         life.created()
         CoreJobs.init(filesDir.absolutePath)
         am = getSystemService(AudioManager::class.java)
-        thread = HandlerThread("recorder").also { it.start() }
+        thread = HandlerThread("recorder").also { t ->
+            // Last resort: something escaped every guard. The looper is gone with this thread, so
+            // quit it first (later core replies then run on the worker, S12), end the recording
+            // in order, and defer to the default handler (a crash) only if that fails.
+            val fallback = t.uncaughtExceptionHandler
+            t.setUncaughtExceptionHandler { th, e ->
+                t.quit()
+                if (!safely.fail("uncaught", e)) fallback?.uncaughtException(th, e)
+            }
+            t.start()
+        }
         h = Handler(thread.looper)
     }
+
+    /** The recorder thread's one guard: a throw ends the recording as a recorder error. */
+    private val safely = Safely({ what, t -> Log.w(TAG, "$what: ${t.javaClass.name}", t) }) { session?.onFault(it) }
+
+    /** Every post to the recorder thread goes through [safely]. */
+    private fun onRecorder(where: String, block: () -> Unit) = h.post { safely.run(where, block) }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         lastStartId = startId
@@ -65,9 +82,9 @@ class RecordingService : Service() {
                 startForeground(NOTE_ID, shown ?: notification("Starting…", null).also { shown = it },
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
                 val choice = MicChoice.of(intent.getStringExtra(EXTRA_MIC))
-                h.post { begin(choice) }
+                onRecorder("start") { begin(choice) }
             }
-            ACTION_STOP -> h.post { (session ?: RecordingSession(env).also { session = it }).stop() }
+            ACTION_STOP -> onRecorder("stop") { (session ?: RecordingSession(env).also { session = it }).stop() }
             else -> stopSelf(startId) // a restart with no intent can't resume a recording (F3-FR5)
         }
         return START_NOT_STICKY
@@ -81,13 +98,14 @@ class RecordingService : Service() {
 
     /** The platform behind RecordingSession's ports, all on the recorder thread. */
     private val env = object : RecordingSession.Env {
-        override val timer: TimerPort by lazy { HandlerTimer(h) }
+        override val timer: TimerPort by lazy { HandlerTimer(h, safely) }
         override fun usbInputs() = usbInputs(am)
         override fun openBluetooth(onChange: () -> Unit): BtPort =
-            BluetoothState(this@RecordingService, h, onChange).also { it.open() }
+            BluetoothState(this@RecordingService, h) { safely.run("bluetooth", onChange) }.also { it.open() }
         override fun newRecorder(listener: SegmentedRecorder.Listener) =
-            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration), MediaRecorderAdapter(this@RecordingService, h), FileStorage, AndroidClock, listener)
-        override fun newSco(listener: ScoLink.Listener) = ScoLink(AndroidScoAudio(am), HandlerTimer(h), listener)
+            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration, safely), MediaRecorderAdapter(this@RecordingService, h), FileStorage, AndroidClock, listener,
+                log = { what, t -> Log.w(TAG, "$what: ${t.javaClass.name}", t) })
+        override fun newSco(listener: ScoLink.Listener) = ScoLink(AndroidScoAudio(am), HandlerTimer(h, safely), listener)
         override fun wake(): WakePort = AndroidWake(this@RecordingService)
         override fun watchDevices(): Cancel {
             am.registerAudioDeviceCallback(devices, h)
@@ -108,13 +126,16 @@ class RecordingService : Service() {
     }
 
     private val devices = object : AudioDeviceCallback() {
-        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) { session?.onDevicesRemoved(removed.map { it.id }) }
-        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) { session?.onDevicesAdded() }
+        // F2-FR3: the pinned input removed. Races the routing report on an unplug; whichever
+        // reaches the recorder first ends it, the other is a no-op (SegmentedRecorder.end).
+        override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) =
+            safely.run("devices removed") { session?.onDevicesRemoved(removed.map { it.id }) }
+        override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = safely.run("devices added") { session?.onDevicesAdded() }
     }
 
     /** EC10: SCO dropping or the headset disconnecting (out of range, battery). */
     private val scoReceiver = object : BroadcastReceiver() {
-        override fun onReceive(c: Context, i: Intent) {
+        override fun onReceive(c: Context, i: Intent) = safely.run("sco broadcast") {
             when (i.action) {
                 AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED ->
                     session?.onScoState(i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, ScoState.ERROR))
@@ -143,7 +164,7 @@ class RecordingService : Service() {
         destroyed = true
         val s = session
         h.post {
-            s?.destroy()
+            safely.run("destroy") { s?.destroy() }
             life.destroyed { CoreJobs.exec(it) }
         }
         thread.quitSafely()
@@ -191,6 +212,7 @@ class RecordingService : Service() {
         private const val CHANNEL = "recording"
         private const val NOTE_ID = 1
         private const val END_NOTE_ID = 2
+        private const val TAG = "Meetings"
 
         private val life = RunningFlag()
 
