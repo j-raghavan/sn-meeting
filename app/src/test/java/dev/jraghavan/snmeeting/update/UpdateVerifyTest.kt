@@ -59,7 +59,33 @@ class UpdateVerifyTest {
         assertFalse(UpdateVerify.matchesPublishedSha(apkBytes, "garbage"))
     }
 
-    // ---- the staged-APK gate (F14-AC4: a mismatch installs nothing and leaves no file) ----
+    @Test
+    fun certsMatch_true_for_same_set_any_order() {
+        val a = byteArrayOf(1, 2, 3)
+        val b = byteArrayOf(4, 5, 6)
+        assertTrue(UpdateVerify.certsMatch(listOf(a, b), listOf(b.copyOf(), a.copyOf())))
+    }
+
+    @Test
+    fun certsMatch_false_on_different_signer() {
+        val installed = listOf(byteArrayOf(1, 2, 3))
+        val attacker = listOf(byteArrayOf(9, 9, 9))
+        assertFalse(UpdateVerify.certsMatch(installed, attacker))
+    }
+
+    @Test
+    fun certsMatch_false_on_empty_or_size_mismatch() {
+        val a = byteArrayOf(1, 2, 3)
+        assertFalse(UpdateVerify.certsMatch(emptyList(), listOf(a)))
+        assertFalse(UpdateVerify.certsMatch(listOf(a), emptyList()))
+        // Subset must not pass (size differs).
+        assertFalse(UpdateVerify.certsMatch(listOf(a), listOf(a.copyOf(), byteArrayOf(7))))
+    }
+
+    // ---- the staged-APK gate (F14-AC4: a refused APK installs nothing and leaves no file) ----
+
+    private val me = listOf(byteArrayOf(1, 2, 3))
+    private val sameKey: (java.io.File) -> List<ByteArray> = { listOf(byteArrayOf(1, 2, 3)) }
 
     private fun staged(bytes: ByteArray): java.io.File =
         java.io.File.createTempFile("update", ".apk").apply { writeBytes(bytes); deleteOnExit() }
@@ -67,27 +93,62 @@ class UpdateVerifyTest {
     @Test
     fun gate_keeps_a_matching_apk() {
         val apk = staged(apkBytes)
-        assertEquals(apk, UpdateVerify.gate(apk, "${UpdateVerify.sha256Hex(apkBytes)}  meetings.apk\n"))
+        assertEquals(apk, UpdateVerify.gate(apk, "${UpdateVerify.sha256Hex(apkBytes)}  meetings.apk\n", me, sameKey))
         assertTrue(apk.exists())
     }
 
     @Test
     fun gate_deletes_an_apk_whose_checksum_does_not_match() {
         val apk = staged(apkBytes)
-        assertNull(UpdateVerify.gate(apk, "${"0".repeat(64)}  meetings.apk"))
+        assertNull(UpdateVerify.gate(apk, "${"0".repeat(64)}  meetings.apk", me, sameKey))
         assertFalse(apk.exists())
     }
 
     @Test
     fun gate_skips_the_checksum_when_none_is_published() {
         val apk = staged(apkBytes)
-        assertEquals(apk, UpdateVerify.gate(apk, null))
-        assertEquals(apk, UpdateVerify.gate(apk, "not a checksum"))
+        assertEquals(apk, UpdateVerify.gate(apk, null, me, sameKey))
+        assertEquals(apk, UpdateVerify.gate(apk, "not a checksum", me, sameKey))
+    }
+
+    @Test
+    fun gate_deletes_an_apk_signed_by_another_key_even_with_a_matching_checksum() {
+        // F14-AC7: the checksum proves only that the asset is what was published.
+        val apk = staged(apkBytes)
+        val good = "${UpdateVerify.sha256Hex(apkBytes)}  meetings.apk"
+        assertNull(UpdateVerify.gate(apk, good, me) { listOf(byteArrayOf(9, 9, 9)) })
+        assertFalse(apk.exists())
+    }
+
+    @Test
+    fun gate_fails_closed_when_signers_cannot_be_read() {
+        val unreadable = staged(apkBytes)
+        assertNull(UpdateVerify.gate(unreadable, null, me) { throw IllegalStateException("no PackageInfo") })
+        assertFalse(unreadable.exists())
+        // No installed signers at all fails closed too.
+        val apk = staged(apkBytes)
+        assertNull(UpdateVerify.gate(apk, null, emptyList(), sameKey))
+        assertFalse(apk.exists())
     }
 
     @Test
     fun gate_refuses_a_missing_file() {
         val gone = staged(apkBytes).also { it.delete() }
-        assertNull(UpdateVerify.gate(gone, null))
+        assertNull(UpdateVerify.gate(gone, null, me, sameKey))
+    }
+
+    // ---- the release-key pin (F14-AC2: a debug copy says it can't update itself) ----
+
+    @Test
+    fun signedWith_matches_the_pinned_certificate_only() {
+        val cert = byteArrayOf(4, 5, 6)
+        val pin = UpdateVerify.sha256Hex(cert)
+        assertTrue(UpdateVerify.signedWith(listOf(cert), pin))
+        assertTrue(UpdateVerify.signedWith(listOf(cert), pin.uppercase().chunked(2).joinToString(":"))) // keytool form
+        assertFalse(UpdateVerify.signedWith(listOf(byteArrayOf(7)), pin)) // the debug key
+        assertFalse(UpdateVerify.signedWith(emptyList(), pin))
+        assertFalse(UpdateVerify.signedWith(listOf(cert, byteArrayOf(7)), pin)) // not the release set
+        assertFalse(UpdateVerify.signedWith(listOf(cert), "")) // no pin
+        assertFalse(UpdateVerify.signedWith(listOf(cert), "zz"))
     }
 }

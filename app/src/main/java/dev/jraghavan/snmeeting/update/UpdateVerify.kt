@@ -10,7 +10,7 @@ import java.security.MessageDigest
  *
  * Two independent gates must both pass before the system installer is invoked:
  *  - **checksum** ([matchesPublishedSha]): the bytes are exactly what the release published;
- *  - **signer pin** (certsMatch, F14-FR6): the APK is signed by *this* installed app's key.
+ *  - **signer pin** ([certsMatch], F14-FR6): the APK is signed by *this* installed app's key.
  */
 object UpdateVerify {
 
@@ -53,16 +53,48 @@ object UpdateVerify {
     }
 
     /**
-     * The staged-APK gate [UpdateController.downloadAndVerify] applies (F14-AC4): a *published*
-     * digest must match the file; an absent one skips this gate, as inkread. Returns [apk] when
-     * it passes; otherwise deletes it (nothing is left in the cache slot) and returns `null`.
+     * Whether the candidate APK's signer set equals the installed app's signer set. Both lists hold
+     * the raw signing-certificate bytes (`Signature.toByteArray()`); a match requires the same
+     * multiset of certificates and at least one signer on each side (an empty set never matches —
+     * an unsigned or signer-stripped APK is rejected).
      */
-    fun gate(apk: File, checksumText: String?): File? {
+    fun certsMatch(installed: List<ByteArray>, candidate: List<ByteArray>): Boolean {
+        if (installed.isEmpty() || candidate.isEmpty()) return false
+        if (installed.size != candidate.size) return false
+        val remaining = candidate.toMutableList()
+        for (cert in installed) {
+            val idx = remaining.indexOfFirst { it.contentEquals(cert) }
+            if (idx < 0) return false
+            remaining.removeAt(idx)
+        }
+        return remaining.isEmpty()
+    }
+
+    /**
+     * The staged-APK gate [UpdateController.downloadAndVerify] applies (F14-AC4): a *published*
+     * digest must match the file (an absent one skips this gate, as inkread), and the file's
+     * signers ([candidate], read from it) must equal the [installed] app's ([certsMatch]).
+     * Returns [apk] when both pass; otherwise deletes it (nothing is left in the cache slot) and
+     * returns `null`.
+     */
+    fun gate(apk: File, checksumText: String?, installed: List<ByteArray>, candidate: (File) -> List<ByteArray>): File? {
         val bytes = runCatching { apk.readBytes() }.getOrNull()
         val ok = bytes != null &&
-            (expectedShaFrom(checksumText) == null || matchesPublishedSha(bytes, checksumText))
+            (expectedShaFrom(checksumText) == null || matchesPublishedSha(bytes, checksumText)) &&
+            certsMatch(installed, runCatching { candidate(apk) }.getOrDefault(emptyList()))
         if (!ok) apk.delete()
         return if (ok) apk else null
+    }
+
+    /**
+     * Whether the installed app is signed by the release key whose certificate SHA-256 is [pinHex]
+     * (BuildConfig.RELEASE_CERT_SHA256). A copy signed with another key (a local debug build) can
+     * never take a release update, so Settings says so instead of offering one (F14-AC2). This
+     * only decides what to show: installs are gated on [certsMatch].
+     */
+    fun signedWith(installed: List<ByteArray>, pinHex: String): Boolean {
+        val pin = pinHex.replace(":", "").lowercase()
+        return isSha256Hex(pin) && installed.size == 1 && constantTimeEquals(pin, sha256Hex(installed[0]))
     }
 
     private fun isSha256Hex(s: String): Boolean =

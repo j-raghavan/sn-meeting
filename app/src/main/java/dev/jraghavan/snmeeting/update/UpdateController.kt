@@ -1,6 +1,8 @@
 package dev.jraghavan.snmeeting.update
 
 import android.content.Context
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.util.Log
 import dev.jraghavan.snmeeting.BuildConfig
 import dev.jraghavan.snmeeting.NativeBridge
@@ -12,7 +14,7 @@ import java.io.File
  * (ADR-INKREAD-0014). The network and the install live here; the Rust core only decides: this
  * fetches the GitHub `releases/latest` payload, hands it to [NativeBridge.nativeUpdateDecide]
  * for the semver decision, then on the user's say-so downloads the APK and verifies it
- * ([UpdateVerify]).
+ * ([UpdateVerify]: published SHA-256 + installed-signer pin).
  *
  * Every method here blocks on I/O; callers invoke them off the UI thread ([UpdateGate]). The
  * controller is mechanism only: the skip/throttle/busy policy lives in [UpdateGate].
@@ -56,9 +58,16 @@ class UpdateController(private val context: Context) {
     }
 
     /**
+     * Whether this copy is signed with the release key (BuildConfig.RELEASE_CERT_SHA256). A copy
+     * signed with another key, such as a local debug build, can't take a release update, so
+     * [UpdateGate] says so rather than offer one (F14-AC2).
+     */
+    fun canUpdateItself(): Boolean = UpdateVerify.signedWith(installedSignerCerts(), BuildConfig.RELEASE_CERT_SHA256)
+
+    /**
      * Download [a]'s APK to the one private cache slot and verify it: the published SHA-256 (when
-     * present) must match. Returns the verified file, or `null` on any failure, with the file
-     * gone. Blocking.
+     * present) must match, and the signer set must equal the installed app's (F14-FR6, fails
+     * closed). Returns the verified file, or `null` on any failure, with the file gone. Blocking.
      */
     fun downloadAndVerify(a: Available): File? {
         val dir = File(context.cacheDir, UPDATE_DIR).apply { mkdirs() }
@@ -73,10 +82,27 @@ class UpdateController(private val context: Context) {
         } else {
             null
         }
-        return UpdateVerify.gate(apk, checksumText).also {
-            if (it == null) Log.w(TAG, "update APK checksum mismatch; discarded")
+        return UpdateVerify.gate(apk, checksumText, installedSignerCerts(), ::archiveSignerCerts).also {
+            if (it == null) Log.w(TAG, "update APK failed its checksum or signer check; discarded")
         }
     }
+
+    // ---- signer extraction (minSdk 30: GET_SIGNING_CERTIFICATES only) ----
+
+    private fun installedSignerCerts(): List<ByteArray> = runCatching {
+        certBytesOf(context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES))
+    }.getOrDefault(emptyList())
+
+    private fun archiveSignerCerts(apk: File): List<ByteArray> =
+        context.packageManager.getPackageArchiveInfo(apk.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+            ?.let { certBytesOf(it) }
+            .orEmpty()
+
+    // apkContentsSigners = the certs the package is CURRENTLY signed by, symmetric for an installed
+    // app and a downloaded archive. signingCertificateHistory would add the on-device rotation
+    // lineage the archive lacks, which certsMatch's size check would then falsely reject (inkread).
+    private fun certBytesOf(info: PackageInfo): List<ByteArray> =
+        info.signingInfo?.apkContentsSigners?.map { it.toByteArray() }.orEmpty()
 
     companion object {
         private const val TAG = "UpdateController"
