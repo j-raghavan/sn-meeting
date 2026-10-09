@@ -88,14 +88,27 @@ class Inkwell(private val activity: Activity) {
 
     // ---- type ----
 
-    fun wordmark(text: String, size: Float = 58f): TextView = TextView(activity).apply {
-        this.text = swashCaps(text); setTextColor(ink); textSize = fs(size)
-        typeface = scriptBold; paint.isFakeBoldText = true; gravity = Gravity.CENTER
+    /**
+     * The "Meetings" wordmark: spaced serif capitals (owner decision 2026-10-09, option C). Its
+     * styling lives here only, so a new typeface is a one-line change. The footer tagline stays
+     * in Pinyon Script ([closingMark]).
+     */
+    fun wordmark(text: String, size: Float = 24f): TextView = TextView(activity).apply {
+        this.text = text.uppercase(); setTextColor(ink); textSize = fs(size)
+        typeface = serifBold; letterSpacing = 0.32f; gravity = Gravity.CENTER
         includeFontPadding = false
     }
 
-    /** The app icon over the script wordmark and its eyebrow, as on inkread's home screen. */
-    fun brandBlock(eyebrowText: String, size: Float = 58f): View = LinearLayout(activity).apply {
+    /** Home's lockup: the app icon left of the wordmark, on one centred line. */
+    fun lockup(size: Float = 24f, icon: Int = dim(44)): View = LinearLayout(activity).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER
+        addView(appIcon(), LinearLayout.LayoutParams(icon, icon))
+        addView(wordmark("Meetings", size), wrap().apply { marginStart = dim(12) })
+    }
+
+    /** The app icon over the wordmark and its eyebrow, as on inkread's home screen. */
+    fun brandBlock(eyebrowText: String, size: Float = 26f): View = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         val logo = dim(56)
@@ -292,7 +305,7 @@ class Inkwell(private val activity: Activity) {
             isClickable = true; setOnClickListener { activity.finish() }
             setPadding(0, dim(8), dim(8), dim(8))
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        addView(wordmark("Meetings", 30f))
+        addView(wordmark("Meetings", 18f))
         addView(View(activity), LinearLayout.LayoutParams(0, 1, 1f))
         layoutParams = fullWidth()
     }
