@@ -176,6 +176,16 @@ object NativeBridge {
      *  todosTotal}`. Read from the cache: no network. */
     external fun nativeAgenda(fromDay: String, toDay: String): String
 
+    /** An event's sheet: `{calendar, event: {eventKey, title, startMs, endMs, allDay, location,
+     *  attendees, agenda, recurring, tzUnknown, …}, template: {id, keyword}, series: [{meetingId,
+     *  title, startedAt, openTodos}], fromLastTime: [TodoRef], linked: [meetingId]}`, or
+     *  `{error}` once the event has left the calendar. */
+    external fun nativeEvent(eventKey: String): String
+
+    /** As [nativeBeginMeeting], linked to the event (`linkSource: user`) when it is still in
+     *  the calendar; recording never depends on that (an unknown key records unlinked). */
+    external fun nativeBeginMeetingForEvent(startedAtMs: Long, micJson: String, audioJson: String, eventKey: String): String
+
     // Updates (F14).
 
     /** Is `releaseJson` (GitHub releases/latest, fetched by the shell) newer than

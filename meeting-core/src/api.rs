@@ -336,6 +336,29 @@ pub fn agenda(from: &str, to: &str) -> String {
     with_app(|app| app.agenda_json(from, to))
 }
 
+/// `nativeEvent(eventKey)` (F18-FR8): the event sheet.
+pub fn event(key: &str) -> String {
+    with_app(|app| app.event_json(key))
+}
+
+/// `nativeBeginMeetingForEvent(startedAtMs, micJson, audioJson, eventKey)` (F18-FR8): as
+/// `nativeBeginMeeting`, linked to the event (`linkSource: user`).
+pub fn begin_meeting_for_event(
+    started_at_ms: i64,
+    mic_json: &str,
+    audio_json: &str,
+    key: &str,
+) -> String {
+    with_app(|app| {
+        app.begin_linked(
+            started_at_ms,
+            mic_json,
+            audio_json,
+            Some(key).filter(|k| !k.is_empty()),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

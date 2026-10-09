@@ -375,8 +375,11 @@ class MainActivity : Activity(), HomeLists.Actions {
         if (sameWeek) drawAgenda() else { drawnAgenda = null; gate.request() }
     }
 
-    /** F18-FR8 arrives in its own commit; until then an event opens its meeting, if any. */
-    override fun onEvent(r: AgendaRow) { r.meetingId?.let { openMeeting(it, null) } }
+    /** F18-FR8: the event's sheet. */
+    override fun onEvent(r: AgendaRow) {
+        val key = r.eventKey ?: return
+        EventSheetDialog.open(this, ui, key, micLine.text.toString()) { k, t -> recordFor(k, t) }
+    }
 
     override fun onUnscheduled(r: AgendaRow) { r.meetingId?.let { openMeeting(it, null) } }
 
@@ -460,9 +463,10 @@ class MainActivity : Activity(), HomeLists.Actions {
             Permissions.OnNew.START -> Unit
         }
         val p = pick()
+        val event = pendingEvent
         pendingEvent = null
         if (!p.canRecord) { pendingTemplate = null; return render() }
-        RecordingService.start(this, micChoice) // linked by time (F18-FR9); FR8 names the event
+        RecordingService.start(this, micChoice, event)
     }
 
     private fun render() {

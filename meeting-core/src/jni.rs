@@ -535,3 +535,41 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeAgenda<'l
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeEvent<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    event_key: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let key: String = event_key.try_to_string(env)?;
+        env.new_string(crate::api::event(&key))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeBeginMeetingForEvent<
+    'local,
+>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    started_at_ms: jlong,
+    mic_json: JString<'local>,
+    audio_json: JString<'local>,
+    event_key: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let mic: String = mic_json.try_to_string(env)?;
+        let audio: String = audio_json.try_to_string(env)?;
+        let key: String = event_key.try_to_string(env)?;
+        env.new_string(crate::api::begin_meeting_for_event(
+            started_at_ms,
+            &mic,
+            &audio,
+            &key,
+        ))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

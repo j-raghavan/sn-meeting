@@ -7,6 +7,7 @@ use crate::calendar::ics::{self, Event};
 use crate::calendar::link::{self, EventLink, LinkSource};
 use crate::calendar::links::{self, Link, Links};
 use crate::library::{MeetingSummary, TodoRef};
+use crate::settings::Settings;
 use crate::sidecar::Sidecar;
 use serde_json::{Value, json};
 use std::path::PathBuf;
@@ -333,6 +334,65 @@ impl App {
                 due: t.due,
             })
             .collect()
+    }
+
+    /// F18-FR8: the template an event's title picks by the keyword rules (case-insensitive,
+    /// first match, only a template a job could use), else Settings' default. The keyword that
+    /// matched, if any.
+    pub fn template_for(&self, title: &str) -> (String, Option<String>) {
+        self.template_in(&self.settings().0, title)
+    }
+
+    /// [`App::template_for`] under settings `s` the caller already holds (Record holds the
+    /// state lock).
+    pub(crate) fn template_in(&self, s: &Settings, title: &str) -> (String, Option<String>) {
+        let t = title.to_lowercase();
+        s.calendar
+            .template_rules
+            .iter()
+            .find(|r| {
+                t.contains(&r.keyword.to_lowercase())
+                    && self
+                        .templates
+                        .get(&r.template_id)
+                        .is_some_and(|e| e.usable())
+            })
+            .map(|r| (r.template_id.clone(), Some(r.keyword.clone())))
+            .unwrap_or_else(|| (self.effective_default(s), None))
+    }
+
+    /// `nativeEvent(eventKey)` (F18-FR8): the event sheet: the event, its calendar, the template
+    /// its title picks, "Earlier in this series" (recurring only, newest first, F18-FR11), "From
+    /// last time" and the meetings linked to this instance.
+    pub fn event_json(&self, key: &str) -> String {
+        let Some((cal, e)) = self.find_event(key) else {
+            return crate::api::error_json("This event is no longer in the calendar");
+        };
+        let (tid, keyword) = self.template_for(&e.title);
+        let series: Vec<Value> = if e.recurring {
+            self.series_meetings(&e)
+                .into_iter()
+                .map(|(m, sc)| {
+                    json!({"meetingId": m.id, "title": sc.title, "startedAt": m.started_at,
+                           "openTodos": m.open_todo_count})
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let linked: Vec<String> = self
+            .library()
+            .all()
+            .into_iter()
+            .filter(|(_, sc)| link::event_of(sc).is_some_and(|l| l.event_key == e.event_key))
+            .map(|(m, _)| m.id)
+            .collect();
+        json!({
+            "calendar": cal, "event": e,
+            "template": {"id": tid, "keyword": keyword},
+            "series": series, "fromLastTime": self.from_last_time(&e), "linked": linked,
+        })
+        .to_string()
     }
 
     /// Every cached event of the links in the file, with its link's name.

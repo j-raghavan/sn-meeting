@@ -96,6 +96,8 @@ pub struct CalendarSettings {
     /// OQ25: a linked meeting's event (title, time, attendees' names, agenda) goes with the
     /// minutes call (on by default).
     pub event_in_minutes: bool,
+    /// F18-FR8: the template an event's title picks, first match wins (case-insensitive).
+    pub template_rules: Vec<TemplateRule>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -106,9 +108,51 @@ impl Default for CalendarSettings {
             refresh_min: DEFAULT_REFRESH_MIN,
             link_by_time: true,
             event_in_minutes: true,
+            template_rules: default_template_rules(),
             extra: Extra::new(),
         }
     }
+}
+
+/// One keyword rule: an event whose title contains `keyword` records with `template_id`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateRule {
+    pub keyword: String,
+    pub template_id: String,
+}
+
+/// The most rules Settings keeps, and the longest keyword.
+pub const MAX_TEMPLATE_RULES: usize = 50;
+pub const MAX_KEYWORD: usize = 64;
+
+/// F18-FR8's defaults.
+pub fn default_template_rules() -> Vec<TemplateRule> {
+    [
+        ("1:1", "one-on-one"),
+        ("1-1", "one-on-one"),
+        ("one on one", "one-on-one"),
+        ("stand-up", "standup"),
+        ("standup", "standup"),
+        ("daily", "standup"),
+        ("interview", "interview"),
+        ("lecture", "lecture"),
+        ("talk", "lecture"),
+    ]
+    .into_iter()
+    .map(|(k, t)| TemplateRule {
+        keyword: k.into(),
+        template_id: t.into(),
+    })
+    .collect()
+}
+
+fn rule_ok(r: &TemplateRule) -> bool {
+    let k = r.keyword.trim();
+    !k.is_empty()
+        && k.chars().count() <= MAX_KEYWORD
+        && !k.chars().any(char::is_control)
+        && is_template_id(&r.template_id)
 }
 
 /// The remembered mic: `"auto"` (USB first, then Bluetooth), `"usb:<device name>"` or
@@ -354,6 +398,8 @@ fn sanitised(mut s: Settings) -> Settings {
     if !REFRESH_CHOICES.contains(&s.calendar.refresh_min) {
         s.calendar.refresh_min = DEFAULT_REFRESH_MIN;
     }
+    s.calendar.template_rules.retain(rule_ok);
+    s.calendar.template_rules.truncate(MAX_TEMPLATE_RULES);
     for role in Role::ALL {
         let rs = s.role_mut(role);
         if rs.provider.is_some_and(|p| !role.providers().contains(&p)) {
@@ -497,11 +543,40 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
     for role in Role::ALL {
         check_role(current, &mut next, role, ctx)?;
     }
+    if next.calendar.template_rules != current.calendar.template_rules {
+        check_rules(&mut next.calendar.template_rules, ctx)?;
+    }
     if next.save_folder != current.save_folder {
         next.save_folder = validate_save_folder(ctx.storage_root, &next.save_folder)?;
         next.previous_folders = folder::remember(current, &next.save_folder);
     }
     Ok(next)
+}
+
+/// F18-FR8 / FR13: keyword rules as edited in Settings → Calendar: trimmed, each a keyword and
+/// a template id, at most [`MAX_TEMPLATE_RULES`]; a link (or a cut of one) is never kept as a
+/// keyword (INV15).
+fn check_rules(rules: &mut [TemplateRule], ctx: &Ctx<'_>) -> Result<(), SettingsError> {
+    if rules.len() > MAX_TEMPLATE_RULES {
+        return Err(err("calendar.templateRules", "at most 50 rules"));
+    }
+    let secrets: Vec<&str> = ctx.secrets.iter().map(String::as_str).collect();
+    for r in rules.iter_mut() {
+        r.keyword = r.keyword.trim().to_owned();
+        if crate::scrub::contains_secret(&r.keyword, &secrets) {
+            return Err(err(
+                "calendar.templateRules",
+                "that is a link or a key, not a keyword",
+            ));
+        }
+        if !rule_ok(r) {
+            return Err(err(
+                "calendar.templateRules",
+                "each rule needs a keyword (up to 64 characters) and a template",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// F10-FR4: a role's provider must suit the role, and a newly chosen one must have a usable

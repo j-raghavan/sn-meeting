@@ -190,14 +190,22 @@ object RetrieverDuration : DurationPort {
  * RecorderCore over NativeBridge on CoreJobs' thread; results back on the recording handler, or
  * on the worker itself once that handler's thread has quit (S12).
  */
-class CoreRecorderBridge(private val h: Handler, private val duration: DurationPort, private val guard: Safely? = null) : RecorderCore {
+class CoreRecorderBridge(
+    private val h: Handler, private val duration: DurationPort, private val guard: Safely? = null,
+    /** F18-FR8: the event "● Record" named; the meeting is linked to it. */
+    private val eventKey: String? = null,
+) : RecorderCore {
     private fun <T> call(work: () -> T, done: (T) -> Unit) = CoreJobs.exec {
         val v = work()
         postOrRun(h::post) { if (guard != null) guard.run("core reply") { done(v) } else done(v) } // the recorder thread may have quit (S12)
     }
 
     override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) =
-        call({ CoreJson.obj(NativeBridge.nativeBeginMeeting(startedAtMs, micJson, audioJson), Begun::from) }, done)
+        call({
+            val reply = if (eventKey == null) NativeBridge.nativeBeginMeeting(startedAtMs, micJson, audioJson)
+                else NativeBridge.nativeBeginMeetingForEvent(startedAtMs, micJson, audioJson, eventKey)
+            CoreJson.obj(reply, Begun::from)
+        }, done)
 
     override fun addSegment(id: String, path: String, startOffsetMs: Long, done: (CoreResult<SegmentAdded>) -> Unit) =
         call({ CoreJson.obj(NativeBridge.nativeAddSegment(id, path, startOffsetMs), SegmentAdded::from) }, done)

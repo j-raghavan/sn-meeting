@@ -202,8 +202,13 @@ impl App {
                     .and_then(|k| self.user_link(k))
                     .or_else(|| by_time.then(|| self.auto_link(started_at_ms)).flatten());
                 if let Some(l) = link {
-                    // Best effort: the recording has begun whatever happens here.
+                    // F18-FR8: the event's keyword rule picks the template; best effort, as
+                    // the recording has begun whatever happens here.
+                    let (tid, keyword) = self.template_in(&st.settings, &l.title);
                     let _ = self.library_of(&st.settings).update(&b.id, |sc, _| {
+                        if keyword.is_some() {
+                            sc.template_id.get_or_insert(tid);
+                        }
                         crate::calendar::link::set_event(sc, Some(l));
                         Ok(())
                     });
@@ -433,6 +438,7 @@ impl App {
             .iter()
             .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
             .map(|k| k.expose().to_owned())
+            .chain(self.link_secrets())
             .collect();
         let ctx = Ctx {
             storage_root: &self.storage_root,

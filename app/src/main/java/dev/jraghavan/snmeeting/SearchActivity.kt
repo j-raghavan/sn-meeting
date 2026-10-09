@@ -197,8 +197,13 @@ class SearchActivity : Activity() {
                 startActivity(i)
                 overridePendingTransition(0, 0)
             }
-            // M13 hook: the event sheet (F18-FR8). Until the calendar arrives, its title and time.
-            is SearchModel.Open.Event -> InkDialog.info(this, o.title, SearchModel.stamp(o.startMs))
+            // F18-FR8: the event's sheet; "● Record" goes back to Home, which records it.
+            is SearchModel.Open.Event -> EventSheetDialog.open(this, ui, o.key, "The microphone Home shows") { key, template ->
+                startActivity(android.content.Intent(this, MainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(MainActivity.EXTRA_RECORD_EVENT, key).putExtra(MainActivity.EXTRA_TEMPLATE, template))
+                overridePendingTransition(0, 0)
+            }
         }
     }
 
