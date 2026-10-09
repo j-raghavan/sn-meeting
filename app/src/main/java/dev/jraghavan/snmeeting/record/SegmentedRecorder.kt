@@ -164,6 +164,15 @@ class SegmentedRecorder(
             }
         }
 
+        /** F15-FR4: reported while recording and while stopping (the last chunk), never after finish. */
+        override fun onChunk(c: ChunkDone) {
+            safely("chunk") {
+                if (phase != Phase.RECORDING && phase != Phase.STOPPING) return
+                if (finishing) return
+                core.chunkReady(begun.id, c)
+            }
+        }
+
         override fun onLimitReached() {
             safely("limit") {
                 if (phase != Phase.RECORDING) return

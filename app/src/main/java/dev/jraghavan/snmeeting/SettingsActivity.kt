@@ -266,6 +266,23 @@ class SettingsActivity : Activity() {
     }
 
     /**
+     * F15 / ADR D14: which recorder a new meeting uses. Standard (the default) is Android's
+     * recorder, transcribed after Stop; Near-live (new) records through its own encoder and
+     * writes the transcript while recording. A meeting under way keeps the recorder it began with.
+     */
+    private fun recorderSection(column: LinearLayout) {
+        val s = settings ?: return
+        ui.section(column, "Recorder").apply {
+            choice("Standard", "Transcribe after you stop", !s.nearLive) { patch(SettingsPatch.recorder(SettingsView.STANDARD)) }
+            addView(ui.hairline())
+            choice("Near-live (new)", "The transcript fills in while you record, about twice a minute", s.nearLive) {
+                patch(SettingsPatch.recorder(SettingsView.NEAR_LIVE))
+            }
+            errors["recorder"]?.let { addView(error(it)) }
+        }
+    }
+
+    /**
      * F10-FR3: EXPORT/sn-meeting, Document/Meetings or a folder typed relative to internal
      * storage. The core validates it (inside storage, writable, not a keys or templates folder)
      * and its reason shows under the field.
@@ -526,6 +543,7 @@ class SettingsActivity : Activity() {
         }
 
         micSection(column)
+        recorderSection(column)
         errors[""]?.let { column.addView(error(it)) }
 
         saveSection(column)

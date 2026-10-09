@@ -79,6 +79,8 @@ class MainActivity : Activity(), HomeLists.Actions {
     private var unlisten: (() -> Unit)? = null
     private var bt: BluetoothState? = null
     private var micChoice: MicChoice = MicChoice.Auto
+    /** F15: Settings → Recorder; Standard until the settings are read. */
+    private var nearLive = false
     private var saveFolder = "EXPORT/sn-meeting"
     private var prefs = CalendarPrefs()
 
@@ -277,7 +279,7 @@ class MainActivity : Activity(), HomeLists.Actions {
             SearchJobs.refresh() // F19-FR5: re-index what changed, off the core queue
         }
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
-            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; render() } }
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; nearLive = it.nearLive; render() } }
             prefs = CoreJson.obj(json) { o -> CalendarPrefs.from(o.optJSONObject("settings")?.optJSONObject("calendar")) }.getOrNull() ?: prefs
             refreshCalendar(force = false) // the links file may have changed on the desktop (F18-FR1)
         }
@@ -475,7 +477,7 @@ class MainActivity : Activity(), HomeLists.Actions {
         val event = pendingEvent
         pendingEvent = null
         if (!p.canRecord) { pendingTemplate = null; return render() }
-        RecordingService.start(this, micChoice, event)
+        RecordingService.start(this, micChoice, event, nearLive)
     }
 
     private fun render() {

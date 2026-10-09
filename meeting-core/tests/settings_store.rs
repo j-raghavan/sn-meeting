@@ -14,6 +14,7 @@ fn defaults_json() -> Value {
         "defaultTemplate": "general",
         "noticeShown": {"openai": false, "gemini": false, "anthropic": false},
         "debug": {"segmentMs": null},
+        "recorder": "standard",
         "updates": {"autoCheck": true, "autoInstall": false, "lastCheckMs": 0, "skipVersion": ""},
         "calendar": {"refreshMin": 30, "linkByTime": true, "eventInMinutes": true, "templateRules": [
             {"keyword": "1:1", "templateId": "one-on-one"}, {"keyword": "1-1", "templateId": "one-on-one"},
@@ -56,6 +57,7 @@ fn unknown_fields_survive_a_save_at_every_level() {
         "defaultTemplate": "general",
         "noticeShown": {"openai": true, "gemini": false, "anthropic": false, "deepseek": true},
         "debug": {"segmentMs": 60000, "y": [2]},
+        "recorder": "near-live",
         "updates": {"autoCheck": false, "autoInstall": false, "lastCheckMs": 7, "skipVersion": "0.2.0", "w": 4},
         "calendar": {"refreshMin": 60, "linkByTime": false, "eventInMinutes": false, "templateRules": [{"keyword": "sync", "templateId": "general"}], "v": 5},
         "transcriptOptions": {"z": 3}

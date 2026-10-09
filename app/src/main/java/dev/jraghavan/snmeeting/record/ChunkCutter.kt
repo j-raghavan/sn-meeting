@@ -116,12 +116,14 @@ class ChunkCutter(
     private val rms: RmsMeter,
     private val out: (ChunkDone) -> Unit,
     private val log: (String, Throwable) -> Unit = { _, _ -> },
+    /** The first chunk's index: a restarted recorder numbers on (PcmPipeline.Base). */
+    firstIndex: Int = 0,
 ) {
     private val buf = ArrayList<AacFrame>()
     /** Frames at the start of [buf] that the previous chunk already holds. */
     private var repeated = 0
     private var segIndex = 0
-    private var next = 0
+    private var next = firstIndex
     private val maxFrames = msToFrames(MAX_MS, rateHz).toInt()
 
     /** Chunks written so far (the next chunk's index). */

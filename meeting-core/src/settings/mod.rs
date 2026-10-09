@@ -49,6 +49,9 @@ pub struct Settings {
     /// Security: the one-time "audio is sent to <provider>" notice, per provider.
     pub notice_shown: NoticeShown,
     pub debug: DebugSettings,
+    /// F15 / D14: which recorder a new meeting uses. A bad value in the file reads as Standard.
+    #[serde(deserialize_with = "lenient_recorder")]
+    pub recorder: Recorder,
     /// F14-FR8: the in-app updater's choices (inkread keeps these in its AppSettings).
     pub updates: UpdateSettings,
     /// F16-FR4: the user's rate entries, kept as written so a bad one is ignored on its own
@@ -73,12 +76,31 @@ impl Default for Settings {
             default_template: DEFAULT_TEMPLATE.into(),
             notice_shown: NoticeShown::default(),
             debug: DebugSettings::default(),
+            recorder: Recorder::Standard,
             updates: UpdateSettings::default(),
             rates: Vec::new(),
             calendar: CalendarSettings::default(),
             extra: Extra::new(),
         }
     }
+}
+
+/// F15 / ADR D14: the recorder behind `RecorderPort`. **Standard** (the default) is today's
+/// `MediaRecorder` path, transcribed after Stop. **Near-live** is D14's `AudioRecord` → AAC →
+/// two muxers pipeline, which writes ~30 s chunks and transcribes them while recording. It
+/// stays opt-in until the owner's device spike accepts D14 (R13).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Recorder {
+    #[default]
+    #[serde(rename = "standard")]
+    Standard,
+    #[serde(rename = "near-live")]
+    NearLive,
+}
+
+fn lenient_recorder<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Recorder, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
 }
 
 /// F18-FR4's refresh intervals, in minutes: 15 min / 30 min / 1 h / 4 h / manual only (0).
@@ -509,6 +531,11 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
             .as_str()
             .ok_or_else(|| err("mic", "mic must be a string"))?;
         MicChoice::try_from(m.to_owned()).map_err(|e| err("mic", e))?;
+    }
+    if let Some(r) = patch.get("recorder").filter(|r| !r.is_null())
+        && serde_json::from_value::<Recorder>(r.clone()).is_err()
+    {
+        return Err(err("recorder", "recorder must be standard or near-live"));
     }
     if let Some(v) = patch
         .get("updates")

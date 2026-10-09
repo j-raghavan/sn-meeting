@@ -123,7 +123,7 @@ class ChunkCutterTest { // F15-FR4
     @Test fun aChunkThatCantBeWrittenIsStillReportedAndNeverStopsTheRecording() { // INV10
         failWrite = true
         val logged = mutableListOf<String>()
-        val c = ChunkCutter(rate, dir, planner, files, rms, { done += it }) { what, _ -> logged += what }
+        val c = ChunkCutter(rate, dir, planner, files, rms, { done += it }, log = { what, _ -> logged += what })
         repeat(50) { c.add(AacFrame(it.toLong(), byteArrayOf(0)), 0) }
         plans += ChunkPlan(5_000, 0, 5_000)
         c.finish()

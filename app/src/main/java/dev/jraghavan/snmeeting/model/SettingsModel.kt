@@ -68,7 +68,11 @@ data class SettingsView(
     val origin: String, val effectiveTranscribe: Effective, val effectiveSummarise: Effective,
     val saveFolderPath: String, val effectiveDefaultTemplate: String, val keys: Map<String, KeyStatus>,
     val updates: UpdatePrefs = UpdatePrefs(),
+    /** F15 / D14: [STANDARD] (MediaRecorder, the default) or [NEAR_LIVE]. */
+    val recorder: String = STANDARD,
 ) {
+    val nearLive get() = recorder == NEAR_LIVE
+
     fun effective(role: String) = if (role == TRANSCRIBE) effectiveTranscribe else effectiveSummarise
     fun choice(role: String) = if (role == TRANSCRIBE) transcribe else summarise
 
@@ -76,6 +80,8 @@ data class SettingsView(
         const val TRANSCRIBE = "transcribe"
         const val SUMMARISE = "summarise"
         val PROVIDERS = listOf("openai", "gemini", "anthropic")
+        const val STANDARD = "standard"
+        const val NEAR_LIVE = "near-live"
 
         /** Anthropic takes no audio (Non-Goals), so it summarises only. */
         fun providersFor(role: String) = if (role == TRANSCRIBE) listOf("openai", "gemini") else PROVIDERS
@@ -103,6 +109,7 @@ data class SettingsView(
                 effectiveDefaultTemplate = e.strOr("defaultTemplate", default),
                 keys = PROVIDERS.mapNotNull { p -> k?.obj(p)?.let { p to KeyStatus.from(it) } }.toMap(),
                 updates = UpdatePrefs.from(s.obj("updates")),
+                recorder = if (s.str("recorder") == NEAR_LIVE) NEAR_LIVE else STANDARD,
             )
         }
     }
@@ -117,6 +124,8 @@ object SettingsPatch {
     fun model(role: String, m: String) = """{"$role":{"model":${if (m.isBlank()) "null" else CoreJson.quote(m.trim())}}}"""
     fun defaultTemplate(id: String) = """{"defaultTemplate":${CoreJson.quote(id)}}"""
     /** F2-AC3's hidden segment length; null returns to the standard plan. */
+    /** F15: Standard or Near-live (new). */
+    fun recorder(r: String) = """{"recorder":${CoreJson.quote(r)}}"""
     fun segmentMs(ms: Long?) = """{"debug":{"segmentMs":${ms ?: "null"}}}"""
     /** Turning auto-check off turns auto-install off; turning auto-install on turns auto-check
      *  on (as inkread's Settings). */

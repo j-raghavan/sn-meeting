@@ -75,6 +75,7 @@ class SegmentScheduleTest { // F15-FR2
             log += "close $index measure=$measure ~$fallbackMs"
         }
         override fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit) { log += "finish"; done() }
+        override fun chunkReady(id: String, c: ChunkDone) { log += "chunk ${c.index}" }
     }
     private val timed = object : RecorderPort {
         override val timeDriven = true
@@ -83,7 +84,7 @@ class SegmentScheduleTest { // F15-FR2
             log += "start ${path.substringAfterLast('-')} bytes=$maxFileBytes ms=$maxDurationMs"; this@SegmentScheduleTest.events = events
         }
         override fun setNext(path: String): Boolean { log += "next ${path.substringAfterLast('-')}"; return true }
-        override fun stop(): Boolean { log += "stop"; return true }
+        override fun stop(): Boolean { log += "stop"; events.onChunk(chunk(9)); return true }
     }
     private val storage = object : StoragePort {
         override fun usableBytes(path: String) = 10_000_000_000L
@@ -108,5 +109,15 @@ class SegmentScheduleTest { // F15-FR2
         log.clear()
         events.onNextFileStartedAt(1_800_010)
         assertEquals(emptyList<String>(), log)
+        // F15-FR4: chunks go to the core while recording, and the last one while stopping,
+        // before the segment is closed and the meeting finished; never after.
+        events.onChunk(chunk(8))
+        sr.stop()
+        assertEquals(listOf("chunk 8", "stop", "chunk 9", "close 1 measure=true ~12340", "finish", "ended Saved"), log)
+        log.clear()
+        events.onChunk(chunk(10))
+        assertEquals(emptyList<String>(), log)
     }
+
+    private fun chunk(i: Int) = ChunkDone(i, "/f/chunks/$id/c-000$i.m4a", 0, 30_000, 0, 30_000, 0, true)
 }

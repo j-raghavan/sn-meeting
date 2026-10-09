@@ -492,3 +492,27 @@ fn a_listing_with_no_transcription_model_shows_the_code_default() {
         json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "default"})
     );
 }
+
+#[test]
+fn the_recorder_is_standard_unless_near_live_is_chosen() {
+    // F15 / D14: the Standard (MediaRecorder) path stays the default.
+    let e = Env::new();
+    let app = e.app();
+    assert_eq!(get(&app)["settings"]["recorder"], "standard");
+    let v = set(&app, json!({"recorder": "near-live"}));
+    assert_eq!(v["settings"]["recorder"], "near-live");
+    assert!(e.saved().contains("\"recorder\": \"near-live\""));
+    let v = set(&app, json!({"recorder": "fast"}));
+    assert_eq!(
+        v,
+        json!({"error": "recorder must be standard or near-live", "field": "recorder"})
+    );
+    assert_eq!(get(&app)["settings"]["recorder"], "near-live");
+    // A hand edit the app can't read is Standard.
+    fs::write(
+        e.data.path().join("settings.json"),
+        r#"{"schema": 1, "recorder": 3}"#,
+    )
+    .unwrap();
+    assert_eq!(get(&e.app())["settings"]["recorder"], "standard");
+}

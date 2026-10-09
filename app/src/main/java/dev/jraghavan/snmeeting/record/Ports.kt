@@ -40,6 +40,8 @@ interface RecorderEvents {
      * clock (samples ÷ rate), not the elapsed time it was heard. MediaRecorder never calls it.
      */
     fun onNextFileStartedAt(offsetMs: Long) = onNextFileStarted()
+    /** F15-FR4: a near-live chunk file was finalised. MediaRecorder never calls it. */
+    fun onChunk(c: ChunkDone) {}
     fun onLimitReached() // MAX_DURATION_REACHED, or MAX_FILESIZE_REACHED with no next file
     fun onError(what: Int)
     fun onRoutedTo(deviceId: Int?) // the input actually in use
@@ -91,6 +93,8 @@ interface RecorderCore {
     fun closeSegment(id: String, index: Int, path: String, measure: Boolean, fallbackMs: Long)
     /** finish, then (if [discard]) nativeDeleteMeeting: a meeting with no audio leaves nothing behind. */
     fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit)
+    /** F15-FR5: a chunk file is finalised (nativeChunkReady), queued before the next close or finish. */
+    fun chunkReady(id: String, c: ChunkDone) {}
 }
 
 /** Measures a finalised file (MediaMetadataRetriever METADATA_KEY_DURATION); null if unreadable. */

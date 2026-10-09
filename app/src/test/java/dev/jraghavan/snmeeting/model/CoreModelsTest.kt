@@ -126,6 +126,12 @@ class CoreModelsTest {
         assertEquals("""{"noticeShown":{"openai":true,"anthropic":true}}""", SettingsPatch.noticeShown(listOf("openai", "anthropic")))
         assertEquals("""{"debug":{"segmentMs":60000}}""", SettingsPatch.segmentMs(60_000))
         assertEquals("""{"debug":{"segmentMs":null}}""", SettingsPatch.segmentMs(null))
+        // F15: no recorder in the file (or a value this build doesn't know) is Standard.
+        assertFalse(s.nearLive)
+        assertEquals(SettingsView.STANDARD, s.recorder)
+        val live = (CoreJson.obj(j.replace("\"debug\":{\"segmentMs\":null}}", "\"debug\":{\"segmentMs\":null},\"recorder\":\"near-live\"}"), SettingsView::from) as CoreResult.Ok).value
+        assertTrue(live.nearLive)
+        assertEquals("""{"recorder":"near-live"}""", SettingsPatch.recorder(SettingsView.NEAR_LIVE))
     }
 
     @Test fun testResultReadsSnakeCase() {
