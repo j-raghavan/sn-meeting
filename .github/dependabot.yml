@@ -1,0 +1,42 @@
+version: 2
+# Weekly, grouped minor/patch updates. Subjects start with "Deps:" so they pass the
+# commit-checks subject gate; cargo updates are still licence-checked in CI.
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Deps"
+    ignore:
+      # rig is pre-1.0 and pinned exactly (=0.44.0, ADR D2); upgrades are deliberate.
+      - dependency-name: "rig-core"
+      - dependency-name: "rig-reqwest"
+      # jni majors change the bridge's API; bump them by hand with the JNI code.
+      - dependency-name: "jni"
+        update-types: ["version-update:semver-major"]
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: gradle
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "Deps"
+    groups:
+      gradle-minor-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "Deps"
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]
