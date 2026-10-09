@@ -156,3 +156,43 @@ fn a_rate_edit_changes_nothing_until_re_price() {
     // Nothing left to change.
     assert_eq!(parse(&app.reprice_json(false))["meetings"], 0);
 }
+
+/// F16-FR7: spend comes from the sidecars this device lists, in the current and previous save
+/// folders; a sidecar copied in from another device counts, one outside them doesn't.
+#[test]
+fn spend_is_what_this_device_lists() {
+    let e = Env::new();
+    let app = e.app();
+    let at = "2026-10-07T22:00:00-07:00";
+    let (old, old_dir) = meeting_with(&app, T0, vec![tokens("gpt-4o-mini", at, 1_000_000)]);
+    let r = parse(&app.set_settings_json(r#"{"saveFolder": "Document/Meetings"}"#));
+    assert!(r.get("error").is_none(), "{r}");
+    let (_, new_dir) = meeting_with(
+        &app,
+        T0 + 60_000,
+        vec![tokens("gpt-4o-mini", at, 2_000_000)],
+    );
+    assert_ne!(old_dir, new_dir);
+    // Copied from another device into the current folder: counted (records carry no device id).
+    let mut copy = read_sidecar(&old_dir, &old);
+    copy.id = "meeting-20261007-220000".into();
+    copy.segments.clear();
+    meeting::sidecar::write(&new_dir, &copy).unwrap();
+    // In a folder this device doesn't list: not counted.
+    let elsewhere = e.folder("Document/Other");
+    copy.id = "meeting-20261007-220500".into();
+    meeting::sidecar::write(&elsewhere, &copy).unwrap();
+    let r = parse(&app.spend_json("2026-10", "2026-10"));
+    let oct = &r["months"][0];
+    assert_eq!(
+        (oct["usd"].clone(), oct["meetings"].clone()),
+        (json!(0.6), json!(3))
+    );
+    assert_eq!(
+        r["notes"],
+        json!([
+            "Counted from the meetings in this device's save folders",
+            "Failed requests aren't counted"
+        ])
+    );
+}

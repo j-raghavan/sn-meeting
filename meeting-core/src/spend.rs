@@ -314,6 +314,13 @@ pub struct Month {
     pub by_provider: std::collections::BTreeMap<String, ByKind>,
 }
 
+/// F16-FR7: spend is per device. It is read from the sidecars in this device's current and
+/// previous save folders; there is no account, server or sync, and records carry no device id
+/// (OQ17), so a sidecar copied in from another device counts here too.
+pub const NOTE_DEVICE: &str = "Counted from the meetings in this device's save folders";
+/// OQ16: a request that failed without a reply reports no usage, so it is not counted.
+pub const NOTE_FAILED: &str = "Failed requests aren't counted";
+
 /// `nativeSpend`'s reply.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -321,6 +328,8 @@ pub struct Report {
     pub months: Vec<Month>,
     /// Records in these months with no price.
     pub unpriced: usize,
+    /// What the totals do and don't include, for Settings → SPEND.
+    pub notes: Vec<&'static str>,
 }
 
 /// The most months one report covers (ten years).
@@ -422,6 +431,7 @@ pub fn report(
     Ok(Report {
         months: out,
         unpriced: unpriced_all,
+        notes: vec![NOTE_DEVICE, NOTE_FAILED],
     })
 }
 
