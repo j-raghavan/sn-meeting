@@ -1,0 +1,6 @@
+# rig-core 0.44.0 needs Rust 1.95.0 (ADR D2). armv7 is for toolchain parity with inkread only;
+# the APK ships arm64-v8a alone.
+[toolchain]
+channel = "1.95.0"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
+targets = ["aarch64-linux-android", "armv7-linux-androideabi"]

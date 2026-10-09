@@ -1,0 +1,102 @@
+name: Commit checks
+
+# The form of a contribution, next to ci.yml's gates: commit subjects name the requirement
+# they implement (this repo's style, e.g. "F8-FR1: run every gate in CI on all pull requests"),
+# and no commit, PR title or PR body carries AI or co-author attribution.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+concurrency:
+  group: commit-checks-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  no-attribution:
+    name: no AI attribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Commit messages, PR title and PR body
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          # "Anthropic" alone is allowed: it is one of the app's summary providers.
+          pattern='co-authored-by|generated with|claude|🤖|noreply@anthropic\.com'
+          fail=0
+          while IFS= read -r sha; do
+            [[ -n "$sha" ]] || continue
+            # Dependabot bodies quote upstream release notes and commit lists; check its
+            # subjects only.
+            if [[ "$(git log -1 --format=%ae "$sha")" == *"dependabot[bot]@users.noreply.github.com" ]]; then
+              msg="$(git log -1 --format=%s "$sha")"
+            else
+              msg="$(git log -1 --format=%B "$sha")"
+            fi
+            if hits="$(grep -inE "$pattern" <<< "$msg")"; then
+              echo "::error::Attribution in commit $sha:"
+              echo "$hits"
+              fail=1
+            fi
+          done < <(git rev-list "$BASE_SHA..$HEAD_SHA")
+          if hits="$(grep -inE "$pattern" <<< "$PR_TITLE")"; then
+            echo "::error::Attribution in the PR title: $hits"; fail=1
+          fi
+          if [[ "$PR_AUTHOR" != "dependabot[bot]" ]] && hits="$(grep -inE "$pattern" <<< "$PR_BODY")"; then
+            echo "::error::Attribution in the PR body:"
+            echo "$hits"
+            fail=1
+          fi
+          [[ "$fail" -eq 0 ]] || exit 1
+          echo "No attribution in $(git rev-list --count "$BASE_SHA..$HEAD_SHA") commits, the PR title or body."
+
+  subject-style:
+    name: commit subject style
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Subjects name a requirement
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # One or more comma-separated ids (F<n>-FR<n>, F<n>-AC<n>, INV<n>, EC<n>, NFR<n>,
+          # ADR D<n>, Security, Deps for Dependabot, or Release for release.yml's version sync),
+          # then ": " and what the commit does.
+          id='(F[0-9]+-(FR|AC)[0-9]+|INV[0-9]+|EC[0-9]+|NFR[0-9]+|ADR D[0-9]+|Security|Deps|Release)'
+          pattern="^${id}(, ${id})*: [^ ].*\$"
+          max=80   # every subject so far is within 80; over 72 only warns
+          fail=0
+          while IFS= read -r sha; do
+            [[ -n "$sha" ]] || continue
+            subject="$(git log -1 --format=%s "$sha")"
+            if ! grep -qE "$pattern" <<< "$subject"; then
+              echo "::error::Subject doesn't start with a requirement id: '$subject' ($sha)"
+              fail=1
+            fi
+            if (( ${#subject} > max )); then
+              echo "::error::Subject over $max chars (${#subject}): '$subject' ($sha)"
+              fail=1
+            elif (( ${#subject} > 72 )); then
+              echo "::warning::Subject over 72 chars (${#subject}): '$subject'"
+            fi
+          done < <(git rev-list --no-merges "$BASE_SHA..$HEAD_SHA")
+          [[ "$fail" -eq 0 ]] || { echo "::error::Write subjects as '<ID>: <what it does>', e.g. 'F8-FR1: run every gate in CI on all pull requests'"; exit 1; }
+          echo "All $(git rev-list --no-merges --count "$BASE_SHA..$HEAD_SHA") subjects conform."

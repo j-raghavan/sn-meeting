@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 432 432" width="432" height="432">
+<g transform="translate(216 216) scale(0.93) translate(-207.5 -213)">
+  <!-- Meetings mark: a desk calendar block with depth and a studio mic in front of it.
+       Inkwell language, as inkread's mark: a few bold ink shapes and large paper areas, separations in the
+       background colour, simple enough to read on the 70 px launcher tile and the 56 dp home logo. -->
+  <!-- Calendar block: extruded right and bottom faces, one bold page edge on each, cut in paper -->
+  <path d="M336 104 L356 122 L356 334 L336 316 Z" fill="#F2ECDE"/>
+  <path d="M128 316 L336 316 L356 334 L148 334 Z" fill="#F2ECDE"/>
+  <g stroke="#111111" stroke-width="6" stroke-linecap="round" fill="none">
+    <line x1="160" y1="326" x2="338" y2="326"/>
+    <line x1="346" y1="136" x2="346" y2="314"/>
+  </g>
+  <!-- Front face: an ink header band over a large paper page -->
+  <rect x="128" y="96" width="208" height="220" rx="18" fill="#F2ECDE" stroke="#111111" stroke-width="10"/>
+  <rect x="140" y="150" width="184" height="154" rx="10" fill="#111111"/>
+  <!-- Four days: three outlined, today solid -->
+  <g fill="none" stroke="#F2ECDE" stroke-width="9">
+    <rect x="190" y="172" width="50" height="44" rx="8"/><rect x="256" y="172" width="50" height="44" rx="8"/>
+    <rect x="190" y="238" width="50" height="44" rx="8"/>
+  </g>
+  <rect x="252" y="234" width="58" height="52" rx="10" fill="#F2ECDE"/>
+  <!-- Binder rings -->
+  <rect x="172" y="74" width="24" height="52" rx="12" fill="#F2ECDE" stroke="#111111" stroke-width="10"/>
+  <rect x="268" y="74" width="24" height="52" rx="12" fill="#F2ECDE" stroke="#111111" stroke-width="10"/>
+
+  <!-- Studio microphone in front, over the calendar's left edge: a solid capsule with two grille bars,
+       its holder, stem and base, each lifted off the calendar by a band of the background colour -->
+  <path d="M74 236 v14 a45 45 0 0 0 90 0 v-14" fill="none" stroke="#111111" stroke-width="30" stroke-linecap="round"/>
+  <path d="M74 236 v14 a45 45 0 0 0 90 0 v-14" fill="none" stroke="#F2ECDE" stroke-width="13" stroke-linecap="round"/>
+  <rect x="110" y="292" width="18" height="40" fill="#F2ECDE" stroke="#111111" stroke-width="10"/>
+  <rect x="78" y="328" width="82" height="24" rx="12" fill="#F2ECDE" stroke="#111111" stroke-width="10"/>
+  <rect x="82" y="150" width="74" height="132" rx="37" fill="#F2ECDE" stroke="#111111" stroke-width="14"/>
+  <g stroke="#111111" stroke-width="9" stroke-linecap="round">
+    <line x1="102" y1="192" x2="136" y2="192"/><line x1="102" y1="218" x2="136" y2="218"/>
+  </g>
+</g>
+</svg>

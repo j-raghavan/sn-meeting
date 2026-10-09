@@ -1,0 +1,51 @@
+# Meetings — Rust workspace (F1-FR1).
+#   meeting-core : the cdylib core (libmeeting.so) + feature-gated JNI bridge.
+# INV5: a bare `cargo test -p meeting-core` builds with `jni` absent from the resolved graph.
+[workspace]
+resolver = "3"
+members = ["meeting-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95.0"
+license = "AGPL-3.0-only"
+authors = ["J-Raghavan"]
+
+[workspace.dependencies]
+# rig is pre-1.0: exact pin, upgrades are deliberate (C8). No default features: no derive, no
+# epub/pdf/image/websocket. `reqwest` + `rustls` give rig its bundled transport.
+rig-core = { version = "=0.44.0", default-features = false, features = ["reqwest", "rustls"] }
+# Direct dep only to name `ReqwestClient` and reach the re-exported reqwest 0.13 (one version in
+# the graph; no separate reqwest dep).
+rig-reqwest = { version = "=0.44.0", default-features = false, features = ["rustls"] }
+# Mozilla roots as DER for reqwest's `tls_certs_only`: avoids rustls-platform-verifier, which
+# panics on Android unless initialised from a JVM Context (R9).
+webpki-root-certs = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+# Local time for ids and startedAt (F3-FR1, F3-FR4). No default features: no wasm/oldtime bits.
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+# Template layouts (F11, ADR D6): no default features, so no loader, macros or
+# multi-template (include/extends/import); fuel bounds a hostile layout.
+minijinja = { version = "=2.24.0", default-features = false, features = ["builtins", "serde", "fuel"] }
+# TODO ids (F5-FR5); already in the graph through rig. v4 only.
+uuid = { version = "1", default-features = false, features = ["v4"] }
+# NFC for the to-do merge key (F5-FR5), so composed and decomposed accents match.
+unicode-normalization = "0.1.25"
+# F14-FR3: the updater compares the release tag with the installed version (as inkread-update).
+semver = "1"
+jni = "0.22.4"
+wiremock = "0.6"
+tempfile = "3"
+
+[profile.release]
+# Keep panic = "unwind" (the default): the JNI edge catches panics (INV6/NFR4); "abort" would
+# make catch_unwind impossible.
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "unwind"

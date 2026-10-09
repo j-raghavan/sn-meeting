@@ -7,10 +7,39 @@
          /storage/emulated/0/EXPORT/sn-meeting folder (same approach as inkread's PDF export). -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- The Rust core calls the provider APIs over HTTPS (Test connection, transcription). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- F2-FR1: recording runs in a foreground service of type microphone.
+         FOREGROUND_SERVICE_MICROPHONE is required from targetSdk 34. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- F2-FR6: a partial wakelock while recording, so the screen may sleep. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- The ongoing recording notification. A runtime grant only from API 33; nothing to ask on
+         this API-30 device, but lint requires it at targetSdk 34. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- F2-FR10: a Bluetooth headset mic (HFP/SCO). BLUETOOTH is the API-30 permission;
+         BLUETOOTH_CONNECT replaces it from API 31. MODIFY_AUDIO_SETTINGS starts SCO.
+         No scan or location permissions: pairing stays in Supernote Settings. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!-- F14-FR7 (as inkread): the in-app updater hands a verified, release-signed APK to
+         PackageInstaller. Android still shows its own final install confirmation. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <application
         android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="Meetings"
-        android:theme="@style/Meetings">
+        android:theme="@style/Meetings"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"
@@ -36,5 +65,17 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
+
+        <!-- F2-FR1: one recording at a time. Not exported: only our activity and notification start it. -->
+        <service
+            android:name=".record.RecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- F14-FR7: receives the PackageInstaller session result and launches the OS install
+             confirmation (unless a recording or job started meanwhile). Internal only. -->
+        <receiver
+            android:name=".update.UpdateInstallReceiver"
+            android:exported="false" />
     </application>
 </manifest>

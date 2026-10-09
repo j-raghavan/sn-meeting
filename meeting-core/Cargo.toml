@@ -1,0 +1,37 @@
+[package]
+name = "meeting-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Meetings core (libmeeting.so): key files, provider calls via rig-core, and a feature-gated JNI bridge."
+
+[lib]
+name = "meeting"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rig-core = { workspace = true }
+rig-reqwest = { workspace = true }
+webpki-root-certs = { workspace = true }
+tokio = { workspace = true, features = ["macros", "sync"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+minijinja = { workspace = true }
+unicode-normalization = { workspace = true }
+semver = { workspace = true }
+jni = { workspace = true, optional = true }
+
+[features]
+default = []
+# Only the Android build enables this (buildApk.sh); host tests never see `jni` (INV5).
+jni-bridge = ["dep:jni"]
+
+[dev-dependencies]
+wiremock = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["macros", "test-util"] }

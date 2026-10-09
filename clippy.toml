@@ -1,0 +1,23 @@
+# Every default client in rig/reqwest uses rustls-platform-verifier, which panics on Android
+# ("Expect rustls-platform-verifier to be initialized"). Build clients with providers::http_client
+# and hand them to rig through providers::rig_http instead (F1-FR9, R9).
+disallowed-methods = [
+  { path = "rig_reqwest::shared", reason = "platform verifier panics on Android; use providers::rig_http" },
+  { path = "rig_core::providers::openai::OpenAI::new", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::anthropic::Anthropic::new", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::gemini::Gemini::new", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::openai::OpenAIConfig::client", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::anthropic::AnthropicConfig::client", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::gemini::GeminiConfig::client", reason = "uses the shared platform-verifier client" },
+  { path = "rig_reqwest::reqwest::Client::new", reason = "platform verifier; use providers::http_client" },
+  { path = "rig_reqwest::reqwest::get", reason = "platform verifier; use providers::http_client" },
+  { path = "rig_core::providers::openai::OpenAI::from_env", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::anthropic::Anthropic::from_env", reason = "uses the shared platform-verifier client" },
+  { path = "rig_core::providers::gemini::Gemini::from_env", reason = "uses the shared platform-verifier client" },
+  { path = "rig_reqwest::reqwest::ClientBuilder::new", reason = "build clients only in providers::http_client" },
+  { path = "rig_reqwest::reqwest::Client::builder", reason = "build clients only in providers::http_client" },
+  { path = "rig_core::providers::registry::connect", reason = "uses the shared platform-verifier client; use connect_with(.., rig_http(..))" },
+  { path = "rig_core::providers::registry::ProviderRef::completion_model", reason = "uses the shared platform-verifier client; use completion_model_with" },
+]
+# Trait impls (ReqwestClient::default, reqwest::Client::default) can't be named here; the
+# source scan in meeting-core/tests/no_shared_client.rs covers them.
