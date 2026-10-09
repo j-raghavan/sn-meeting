@@ -93,6 +93,9 @@ pub struct CalendarSettings {
     pub refresh_min: u32,
     /// F18-FR9: a recording started during an event links to it (on by default).
     pub link_by_time: bool,
+    /// OQ25: a linked meeting's event (title, time, attendees' names, agenda) goes with the
+    /// minutes call (on by default).
+    pub event_in_minutes: bool,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -102,6 +105,7 @@ impl Default for CalendarSettings {
         CalendarSettings {
             refresh_min: DEFAULT_REFRESH_MIN,
             link_by_time: true,
+            event_in_minutes: true,
             extra: Extra::new(),
         }
     }

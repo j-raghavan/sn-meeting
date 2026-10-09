@@ -57,17 +57,34 @@ pub async fn summarise(
     let Ok(started) = DateTime::parse_from_rfc3339(&sc.started_at) else {
         return fail("The meeting's start time can't be read".into());
     };
+    // F18-FR12: a linked meeting's event goes before the transcript, as data.
+    let event = plan
+        .event_block
+        .then(|| crate::calendar::link::event_of(&sc))
+        .flatten()
+        .map(|e| summarise::event_block(&e));
+    let user = match &event {
+        Some(b) => summarise::user_message_with_event(&joined(&sc), b),
+        None => summarise::user_message(&joined(&sc)),
+    };
+    let with_event = |system: String| match &event {
+        Some(_) => format!("{system}\n{}", summarise::EVENT_RULE),
+        None => system,
+    };
     let ask = match &notes_in {
         None => JsonAsk {
-            system: summarise::system_prompt(&tpl.instructions, &started),
-            user: summarise::user_message(&joined(&sc)),
+            system: with_event(summarise::system_prompt(&tpl.instructions, &started)),
+            user,
             schema: summarise::response_schema(),
             max_tokens: summarise::MAX_OUTPUT_TOKENS,
             images: Vec::new(),
         },
         Some(n) => JsonAsk {
-            system: summarise::system_prompt_with_notes(&tpl.instructions, &started),
-            user: summarise::user_message(&joined(&sc)),
+            system: with_event(summarise::system_prompt_with_notes(
+                &tpl.instructions,
+                &started,
+            )),
+            user,
             schema: summarise::response_schema_with_notes(),
             max_tokens: summarise::MAX_OUTPUT_TOKENS,
             images: notes::images(n, 0),

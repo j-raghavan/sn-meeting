@@ -15,7 +15,7 @@ fn defaults_json() -> Value {
         "noticeShown": {"openai": false, "gemini": false, "anthropic": false},
         "debug": {"segmentMs": null},
         "updates": {"autoCheck": true, "autoInstall": false, "lastCheckMs": 0, "skipVersion": ""},
-        "calendar": {"refreshMin": 30, "linkByTime": true}
+        "calendar": {"refreshMin": 30, "linkByTime": true, "eventInMinutes": true}
     })
 }
 
@@ -52,7 +52,7 @@ fn unknown_fields_survive_a_save_at_every_level() {
         "noticeShown": {"openai": true, "gemini": false, "anthropic": false, "deepseek": true},
         "debug": {"segmentMs": 60000, "y": [2]},
         "updates": {"autoCheck": false, "autoInstall": false, "lastCheckMs": 7, "skipVersion": "0.2.0", "w": 4},
-        "calendar": {"refreshMin": 60, "linkByTime": false, "v": 5},
+        "calendar": {"refreshMin": 60, "linkByTime": false, "eventInMinutes": false, "v": 5},
         "transcriptOptions": {"z": 3}
     });
     fs::write(&p, v.to_string()).unwrap();

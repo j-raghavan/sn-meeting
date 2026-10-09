@@ -123,6 +123,7 @@ impl App {
             budgets: self.budgets,
             rates: self.rates(),
             notes: self.notes.clone(),
+            event_block: s.calendar.event_in_minutes,
         })
     }
 

@@ -67,6 +67,7 @@ fn plan(uri: &str) -> JobPlan {
         budgets: Default::default(),
         rates: Default::default(),
         notes: meeting::notes_text::NotesSource::canvas(),
+        event_block: true,
     }
 }
 

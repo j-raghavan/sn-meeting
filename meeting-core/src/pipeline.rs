@@ -56,6 +56,8 @@ pub struct JobPlan {
     pub rates: RateTable,
     /// Where the summarise step gets the note regions to recognise (F19-FR6).
     pub notes: crate::notes_text::NotesSource,
+    /// F18-FR12 / OQ25: send a linked meeting's calendar event with the minutes call.
+    pub event_block: bool,
 }
 
 /// F16-FR2: the usage records of calls whose result is not yet written. Each call that got a
