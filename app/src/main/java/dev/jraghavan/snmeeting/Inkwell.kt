@@ -10,6 +10,7 @@ import android.text.style.RelativeSizeSpan
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -93,9 +94,12 @@ class Inkwell(private val activity: Activity) {
         includeFontPadding = false
     }
 
+    /** The app icon over the script wordmark and its eyebrow, as on inkread's home screen. */
     fun brandBlock(eyebrowText: String, size: Float = 58f): View = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
+        val logo = dim(56)
+        addView(appIcon(), LinearLayout.LayoutParams(logo, logo).apply { bottomMargin = dim(8) })
         addView(wordmark("Meetings", size))
         addView(eyebrow(eyebrowText).apply { gravity = Gravity.CENTER; setPadding(0, dim(10), 0, 0) })
     }
@@ -301,7 +305,10 @@ class Inkwell(private val activity: Activity) {
         return card(padV = dim(8)).also { parent.addView(it) }
     }
 
-    /** Muted script tagline over a rule · dot · rule line (inkread's closingMark). */
+    /** The launcher icon, as inkread's home and footer show it. */
+    fun appIcon(): ImageView = ImageView(activity).apply { setImageResource(R.mipmap.ic_launcher) }
+
+    /** Muted script tagline over a rule · icon · rule line (inkread's closingMark). */
     fun closingMark(tagline: String = "Every Word, Kept"): View = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
@@ -315,9 +322,7 @@ class Inkwell(private val activity: Activity) {
             gravity = Gravity.CENTER
             setPadding(0, dim(6), 0, 0)
             addView(rule())
-            addView(View(activity).apply {
-                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(ink) }
-            }, LinearLayout.LayoutParams(dim(6), dim(6)).apply { marginStart = dim(12); marginEnd = dim(12) })
+            addView(appIcon(), LinearLayout.LayoutParams(dim(20), dim(20)).apply { marginStart = dim(12); marginEnd = dim(12) })
             addView(rule())
         })
     }
