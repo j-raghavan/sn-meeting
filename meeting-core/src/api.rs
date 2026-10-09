@@ -285,7 +285,10 @@ mod tests {
     #[test]
     fn version_json_is_the_version() {
         assert_eq!(version_json(), crate::version());
-        assert_eq!(crate::version(), "0.1.0");
+        // release.yml stamps the tag's version into Cargo.toml (F14-FR2), so check its shape.
+        let parts: Vec<&str> = crate::version().split(['.', '-']).collect();
+        assert!(parts.len() >= 3, "{}", crate::version());
+        assert!(parts[..3].iter().all(|p| p.parse::<u64>().is_ok()));
     }
 
     #[test]

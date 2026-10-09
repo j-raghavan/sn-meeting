@@ -78,8 +78,9 @@ jobs:
         run: |
           set -euo pipefail
           # One or more comma-separated ids (F<n>-FR<n>, F<n>-AC<n>, INV<n>, EC<n>, NFR<n>,
-          # ADR D<n>, Security, or Deps for Dependabot), then ": " and what the commit does.
-          id='(F[0-9]+-(FR|AC)[0-9]+|INV[0-9]+|EC[0-9]+|NFR[0-9]+|ADR D[0-9]+|Security|Deps)'
+          # ADR D<n>, Security, Deps for Dependabot, or Release for release.yml's version sync),
+          # then ": " and what the commit does.
+          id='(F[0-9]+-(FR|AC)[0-9]+|INV[0-9]+|EC[0-9]+|NFR[0-9]+|ADR D[0-9]+|Security|Deps|Release)'
           pattern="^${id}(, ${id})*: [^ ].*\$"
           max=80   # every subject so far is within 80; over 72 only warns
           fail=0
