@@ -78,10 +78,15 @@ use_pinned_rust() {
 }
 
 # =========================================================
-# use_ndk — default ANDROID_NDK_HOME to the newest NDK in the SDK.
+# use_ndk — ANDROID_NDK_HOME if set, else the GitHub runner's ANDROID_NDK_LATEST_HOME or
+# ANDROID_NDK_ROOT, else the newest NDK in the SDK (ANDROID_HOME, ANDROID_SDK_ROOT, or the
+# macOS Android Studio default).
 # =========================================================
 use_ndk() {
-    local sdk="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+    local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+    if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
+        ANDROID_NDK_HOME="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+    fi
     if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
         ANDROID_NDK_HOME="$(ls -d "$sdk"/ndk/*/ 2>/dev/null | sort -V | tail -1)"
         ANDROID_NDK_HOME="${ANDROID_NDK_HOME%/}"
