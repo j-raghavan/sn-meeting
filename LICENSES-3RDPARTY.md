@@ -1,5 +1,10 @@
 # Third-party components
 
+Meetings is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`;
+see `LICENSE`). Every component below is under a permissive licence (MIT, Apache-2.0, BSD,
+ISC, MIT-0, Zlib, Unicode-3.0, CDLA-Permissive-2.0, Unlicense, SIL OFL 1.1), all compatible with
+distributing them as part of an AGPL-3.0 work.
+
 ## Bundled fonts
 
 | Font | Source | License | Styles |
