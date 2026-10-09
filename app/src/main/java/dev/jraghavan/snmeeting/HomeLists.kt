@@ -130,7 +130,8 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
         val all = day?.allDay.orEmpty()
         val rows = day?.rows.orEmpty()
         if (all.isEmpty() && rows.isEmpty()) {
-            return empty(timeline, "Nothing on this day. Tap ＋ New to record a meeting.")
+            return empty(timeline, if (hasLinks) "Nothing on the calendar. Tap ＋ New to record a meeting."
+                else "No recordings this day. Tap ＋ New to record one.")
         }
         all.forEach { r ->
             timeline.addView(LinearLayout(a).apply {

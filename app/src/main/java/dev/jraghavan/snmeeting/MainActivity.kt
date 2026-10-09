@@ -356,7 +356,10 @@ class MainActivity : Activity(), HomeLists.Actions {
         lists.showWeek(week, today, selected, a.days.filter { it.dot }.map { it.day }.toSet())
         lists.showDay(a.day(selected), selected, today, a.hasLinks, rec is RecState.Recording)
         if (rec is RecState.Recording) { handler.removeCallbacks(tick); handler.post(tick) }
-        updatedCell.text = CalendarFormat.updated(a.updatedAtMs, a.failed, zone).uppercase()
+        // F18-FR14: no link set: the bottom row offers the how-to instead of a refresh time.
+        calendarCell.text = if (a.hasLinks) "CALENDAR" else "CALENDAR · ADD A CALENDAR LINK"
+        updatedCell.text = if (a.hasLinks) CalendarFormat.updated(a.updatedAtMs, a.failed, zone).uppercase() else ""
+        updatedCell.isClickable = a.hasLinks
         scheduleBoundary(a)
     }
 
@@ -431,8 +434,10 @@ class MainActivity : Activity(), HomeLists.Actions {
         }
     }
 
-    /** "CALENDAR": Settings → Calendar. */
+    /** "CALENDAR": Settings → Calendar; with no link set, the how-to (F18-FR14). */
     private fun openCalendarSettings() {
+        val a = agenda
+        if (a != null && !a.hasLinks) return InkDialog.info(this, "Add a calendar link", CalendarFormat.HOW_TO + "\n\n" + CalendarFormat.LIMIT)
         startActivity(Intent(this, SettingsActivity::class.java))
         overridePendingTransition(0, 0)
     }

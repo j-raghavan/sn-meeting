@@ -131,6 +131,23 @@ fn a_day_of_events_and_recordings() {
 }
 
 #[test]
+fn no_link_builds_the_day_from_recordings_alone() {
+    let env = Env::new();
+    let app = env.app();
+    let (id, _) = record(&app, TEN);
+    let a = app
+        .agenda_at("2026-10-09", "2026-10-09", TEN + MIN)
+        .unwrap();
+    assert_eq!(a["hasLinks"], false, "F18-AC7");
+    assert_eq!(a["updatedAtMs"], Value::Null);
+    let fri = day(&a, "2026-10-09");
+    assert_eq!(fri["dot"], true);
+    assert_eq!(fri["rows"][0]["meetingId"], id.as_str());
+    assert_eq!(fri["rows"][0]["unscheduled"], true);
+    assert!(fri["allDay"].as_array().unwrap().is_empty());
+}
+
+#[test]
 fn a_linked_meeting_whose_event_is_gone_keeps_its_title() {
     let env = Env::new();
     let app = env.app();
