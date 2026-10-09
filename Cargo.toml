@@ -40,6 +40,11 @@ semver = "1"
 # F19-FR4 / ADR D19: the search index. `bundled` compiles SQLite with FTS5 (libsqlite3-sys
 # build.rs); no default features (no statement cache, no wasm). Exact pin, as C8.
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+# F18 / ADR D18: iCalendar parsing and recurrence (RRULE, EXDATE, RDATE, RECURRENCE-ID; IANA,
+# Windows and MS CDO zone names). No default features: no JMAP (uuid, serde_json conversions).
+# Exact pins, as C8; chrono-tz is calcard's zone database.
+calcard = { version = "=0.3.14", default-features = false }
+chrono-tz = { version = "=0.10.4", default-features = false }
 # F18-FR2: a calendar link's id is the first 8 hex of its SHA-256; already in the graph via rig.
 sha2 = "0.10.9"
 # F18-FR3: "gzip accepted" for calendar feeds, inflated with a cap (EC25); pure Rust backend.

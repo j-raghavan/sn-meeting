@@ -34,6 +34,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | Crate | Version | License |
 |-------|---------|---------|
 | adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
+| ahash | 0.8.12 | MIT OR Apache-2.0 |
 | android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | async-stream | 0.3.6 | MIT |
 | atomic-waker | 1.1.2 | Apache-2.0 OR MIT |
@@ -44,9 +45,11 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | bitflags | 2.13.2 | MIT OR Apache-2.0 |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 |
 | bytes | 1.12.1 | MIT |
+| calcard | 0.3.14 | Apache-2.0 OR MIT |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
+| chrono-tz | 0.10.4 | MIT OR Apache-2.0 |
 | combine | 4.6.8 | MIT |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 |
 | crc32fast | 1.5.2 | MIT OR Apache-2.0 |
@@ -106,6 +109,8 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | litemap | 0.8.3 | Unicode-3.0 |
 | log | 0.4.34 | MIT OR Apache-2.0 |
 | lru-slab | 0.1.3 | MIT OR Apache-2.0 OR Zlib |
+| mail-builder | 1.0.0 | Apache-2.0 OR MIT |
+| mail-parser | 0.11.9 | Apache-2.0 OR MIT |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memo-map | 0.3.4 | Apache-2.0 |
 | mime | 0.3.17 | MIT OR Apache-2.0 |
@@ -117,6 +122,8 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
 | ordered-float | 5.5.0 | MIT |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 |
+| phf | 0.12.1 | MIT |
+| phf_shared | 0.12.1 | MIT |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT |
 | potential_utf | 0.1.6 | Unicode-3.0 |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
@@ -154,6 +161,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | simd-adler32 | 0.3.10 | MIT |
 | simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
 | simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
+| siphasher | 1.0.4 | MIT OR Apache-2.0 |
 | slab | 0.4.12 | MIT |
 | smallvec | 1.16.2 | MIT OR Apache-2.0 |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |
