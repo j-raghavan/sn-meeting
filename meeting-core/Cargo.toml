@@ -26,6 +26,7 @@ unicode-normalization = { workspace = true }
 semver = { workspace = true }
 rusqlite = { workspace = true }
 sha2 = { workspace = true }
+flate2 = { workspace = true }
 jni = { workspace = true, optional = true }
 
 [features]

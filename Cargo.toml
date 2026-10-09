@@ -42,6 +42,8 @@ semver = "1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 # F18-FR2: a calendar link's id is the first 8 hex of its SHA-256; already in the graph via rig.
 sha2 = "0.10.9"
+# F18-FR3: "gzip accepted" for calendar feeds, inflated with a cap (EC25); pure Rust backend.
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 jni = "0.22.4"
 wiremock = "0.6"
 # Tests decode what rig sends on the wire (F19-AC4); already in the graph through rig.

@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
+pub mod calendar;
 mod calls;
 mod measured;
 pub use calls::{

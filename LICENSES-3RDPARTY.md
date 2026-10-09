@@ -33,6 +33,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 
 | Crate | Version | License |
 |-------|---------|---------|
+| adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
 | android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | async-stream | 0.3.6 | MIT |
 | atomic-waker | 1.1.2 | Apache-2.0 OR MIT |
@@ -48,6 +49,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
 | combine | 4.6.8 | MIT |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 |
+| crc32fast | 1.5.2 | MIT OR Apache-2.0 |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 |
 | data-encoding | 2.11.1 | MIT |
 | digest | 0.10.7 | MIT OR Apache-2.0 |
@@ -57,6 +59,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
 | fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 |
 | fnv | 1.0.7 | Apache-2.0 / MIT |
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 |
 | futures | 0.3.34 | MIT OR Apache-2.0 |
@@ -108,6 +111,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | mime | 0.3.17 | MIT OR Apache-2.0 |
 | mime_guess | 2.0.5 | MIT |
 | minijinja | 2.24.0 | Apache-2.0 |
+| miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.4 | MIT |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
@@ -147,6 +151,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | serde_json | 1.0.151 | MIT OR Apache-2.0 |
 | sha1 | 0.10.7 | MIT OR Apache-2.0 |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 |
+| simd-adler32 | 0.3.10 | MIT |
 | simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
 | simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
 | slab | 0.4.12 | MIT |
