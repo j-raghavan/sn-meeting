@@ -125,7 +125,7 @@ class MeetingActivity : Activity() {
         // read transcribing with no job; recovery (cheap, queued first) moves it on.
         val alive = RecordingService.running
         CoreJobs.exec {
-            deviceRecoverer().run(alive)
+            deviceRecoverer().run(alive)?.let { StopJob.resume(it.resume) } // F15-AC8: catch up
         }
         // Settings and templates may have changed in their screens or on the desktop. CoreJobs
         // answers in order, so both are in hand when the meeting arrives: one redraw.
@@ -351,9 +351,11 @@ class MeetingActivity : Activity() {
 
     /** Runs on the job lane; the result is already in the sidecar, so the screen just re-reads it. */
     private fun start(job: Actions.Job) {
+        val chunked = view?.meeting?.nearLive == true
         val started = LongJobs.lane.run(id, {
             when (job) {
-                Actions.Job.TRANSCRIBE -> NativeBridge.nativeTranscribe(id)
+                // F15-FR9: a near-live meeting's gone chunk files are re-cut from its segments first.
+                Actions.Job.TRANSCRIBE -> if (chunked) ChunkJob.device(again = false).run(id) else NativeBridge.nativeTranscribe(id)
                 Actions.Job.TRANSCRIBE_AGAIN -> NativeBridge.nativeTranscribeAgain(id)
                 Actions.Job.SUMMARISE -> NativeBridge.nativeSummarise(id)
             }

@@ -124,6 +124,7 @@ impl App {
             rates: self.rates(),
             notes: self.notes.clone(),
             event_block: s.calendar.event_in_minutes,
+            chunks: None,
         })
     }
 
@@ -137,10 +138,14 @@ impl App {
         let Some(guard) = self.jobs.start(id) else {
             return error_json("meeting is busy");
         };
-        let plan = match self.plan(job) {
+        let mut plan = match self.plan(job) {
             Ok(p) => p,
             Err(e) => return error_json(&e),
         };
+        plan.chunks = Some(crate::pipeline::ChunkCtx {
+            root: self.chunk_root(),
+            lane: self.lane(id),
+        });
         let lib = self.library();
         let cancel = &guard.cancel;
         let r = crate::runtime::block_on(async {

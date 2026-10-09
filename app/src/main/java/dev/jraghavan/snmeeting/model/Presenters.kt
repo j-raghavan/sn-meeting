@@ -140,6 +140,8 @@ data class Actions(
     companion object {
         /** "Transcribing 2/3": the segment in flight (1-based) over the total. */
         fun transcribing(m: Sidecar): String {
+            // F15-FR9: a near-live meeting counts its chunks ("Transcribing 41/42").
+            if (m.chunkTotal > 0) return "Transcribing ${minOf(m.chunksDone + 1, m.chunkTotal)}/${m.chunkTotal}"
             val total = m.segments.size
             val n = minOf(m.segments.count { it.text != null } + 1, total)
             return "Transcribing $n/$total"

@@ -83,7 +83,58 @@ pub(crate) fn pieces(root: &Path, sc: &Sidecar, seg: usize) -> Vec<Piece> {
         .collect()
 }
 
+/// `nativeChunksToCut`'s rows: a chunk whose file is gone, to re-cut from its segment.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToCut {
+    pub index: u32,
+    pub seg_index: usize,
+    /// The range within the segment file, in ms from its start.
+    pub from_ms: u64,
+    pub to_ms: u64,
+    /// The segment to read and the chunk file to write.
+    pub seg_path: String,
+    pub path: String,
+    /// The chunk's place on the recording clock, for `nativeChunkReady`.
+    pub start_offset_ms: u64,
+    pub duration_ms: u64,
+}
+
 impl Library<'_> {
+    /// F15-FR9 / FR10: the chunks the next transcription will send whose file is gone, with the
+    /// range of their (closed, readable) segment to re-cut each from by remuxing its frames. That
+    /// is the pending chunks; for a meeting already transcribed (Transcribe again, F15-FR10),
+    /// every chunk. A chunk whose segment is open, flagged or gone is not listed.
+    pub fn chunks_to_cut(&self, id: &str, root: &Path) -> Result<Vec<ToCut>, LibError> {
+        let (dir, sc) = self.load_for_write(id)?;
+        let again = matches!(sc.status, Status::Transcribed | Status::Done);
+        Ok(sc
+            .chunks
+            .iter()
+            .filter(|c| again || c.state == ChunkState::Pending)
+            .filter(|c| !chunk_path(root, id, c.index).exists())
+            .filter_map(|c| {
+                let seg = sc.segments.get(c.seg_index)?;
+                let seg_ms = seg.duration_ms.filter(|_| seg.flag.is_none())?;
+                let seg_path = dir.join(&seg.file);
+                if !seg_path.is_file() {
+                    return None;
+                }
+                let from = c.start_offset_ms.saturating_sub(seg.start_offset_ms);
+                Some(ToCut {
+                    index: c.index,
+                    seg_index: c.seg_index,
+                    from_ms: from,
+                    to_ms: (from + c.duration_ms).min(seg_ms.max(from)),
+                    seg_path: seg_path.to_string_lossy().into_owned(),
+                    path: chunk_path(root, id, c.index).to_string_lossy().into_owned(),
+                    start_offset_ms: c.start_offset_ms,
+                    duration_ms: c.duration_ms,
+                })
+            })
+            .collect())
+    }
+
     /// F15-FR5: a chunk file is finalised. While recording it is recorded `pending` (its
     /// segment and its overlap with the one before worked out here); afterwards only a known
     /// chunk may be reported, as its file re-cut from the segment (F15-FR9/FR10), which changes

@@ -20,6 +20,11 @@ pub struct Recovery {
     /// Additive: omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub no_audio: Vec<String>,
+    /// F15-FR9 / F15-AC8: near-live meetings recovered from `recording` with chunks still to
+    /// send (and sending allowed): the shell runs their Stop job, so the transcript catches up
+    /// and the minutes fill in. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resume: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -112,6 +117,14 @@ impl Library<'_> {
             }
             if moved {
                 r.recovered.push(id.clone());
+                let sending = sc.live.as_ref().is_some_and(|l| l.paused.is_none());
+                let pending = sc
+                    .chunks
+                    .iter()
+                    .any(|c| c.state == crate::sidecar::ChunkState::Pending);
+                if sc.status == Status::Recorded && sending && pending {
+                    r.resume.push(id.clone());
+                }
             }
             if empty {
                 r.no_audio.push(id);

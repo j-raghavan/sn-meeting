@@ -23,6 +23,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("startLive", api::start_live("x", true)),
         ("liveDrain", api::live_drain("x")),
         ("liveTranscript", api::live_transcript("x", 0)),
+        ("chunksToCut", api::chunks_to_cut("x")),
         ("finishMeeting", api::finish_meeting("x", 0, "")),
         ("listRecent", api::list_recent(5)),
         ("getMeeting", api::get_meeting("x")),

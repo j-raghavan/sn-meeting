@@ -59,6 +59,18 @@ pub struct JobPlan {
     pub notes: crate::notes_text::NotesSource,
     /// F18-FR12 / OQ25: send a linked meeting's calendar event with the minutes call.
     pub event_block: bool,
+    /// F15-FR9 / FR10: where a near-live meeting's chunk files are, and the lock its chunks are
+    /// sent under; `None` sends segments only (F5's path).
+    pub chunks: Option<ChunkCtx>,
+}
+
+/// F15-FR9: what a job needs to send a near-live meeting's chunks.
+#[derive(Clone, Debug)]
+pub struct ChunkCtx {
+    /// `<filesDir>/chunks`.
+    pub root: PathBuf,
+    /// Held while the chunks are sent: an in-flight near-live chunk finishes first (INV11).
+    pub lane: std::sync::Arc<tokio::sync::Mutex<()>>,
 }
 
 /// F16-FR2: the usage records of calls whose result is not yet written. Each call that got a
@@ -200,7 +212,7 @@ async fn run_transcribe(
             "no transcribe provider".into(),
         )));
     };
-    let (dir, pending, tid, no_audio) = locked(lock, || {
+    let (dir, pending, tid, no_audio, live) = locked(lock, || {
         lib.update(id, |sc, dir| {
             let event = if again {
                 Event::TranscribeAgain
@@ -223,7 +235,21 @@ async fn run_transcribe(
                 extra: Default::default(),
             });
             let none = sc.segments.is_empty();
-            Ok((dir.to_path_buf(), pending(sc), sc.template_id.clone(), none))
+            // F15-FR9: a near-live meeting is sent as its chunks, with the model fixed at Record
+            // when its provider is still the one chosen (F5-FR10).
+            let live = (!sc.chunks.is_empty()).then(|| {
+                sc.live
+                    .as_ref()
+                    .filter(|l| l.provider == key.provider)
+                    .and_then(|l| l.model.clone())
+            });
+            Ok((
+                dir.to_path_buf(),
+                pending(sc),
+                sc.template_id.clone(),
+                none,
+                live,
+            ))
         })
     })
     .map_err(JobError::NotStarted)?;
@@ -236,6 +262,23 @@ async fn run_transcribe(
         return fail(NO_AUDIO.into());
     }
     let vocabulary = vocabulary(plan, tid.as_deref().unwrap_or_default());
+    if let (Some(fixed), Some(cx)) = (live, &plan.chunks) {
+        let model = fixed.unwrap_or_else(|| model.clone());
+        ran_with(lib, lock, id, key, &model)?;
+        let call = live::ChunkCall {
+            http: &plan.http,
+            endpoints: &plan.endpoints,
+            key,
+            model: &model,
+            budgets: plan.budgets,
+            rates: &plan.rates,
+            vocabulary,
+        };
+        if let Some(msg) = live::drain_job(lib, lock, id, cx, &call, cancel).await? {
+            return fail(msg);
+        }
+        return transcribed(lib, lock, id, plan, cancel).await;
+    }
     let mut model = model.clone();
     let mut fallback = plan.transcribe_fallback.clone().filter(|f| *f != model);
     for seg in pending {
@@ -290,6 +333,18 @@ async fn run_transcribe(
         };
         store(lib, lock, id, &seg, text, None, &spent)?;
     }
+    transcribed(lib, lock, id, plan, cancel).await
+}
+
+/// Every segment (or chunk) has its text: `transcribed`, the transcript file, then the summary
+/// (F5-FR2/FR11; for a near-live meeting the one minutes call at Stop, D15).
+async fn transcribed(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    plan: &JobPlan,
+    cancel: &Cancel,
+) -> Result<Phase, JobError> {
     let p = finish(lib, lock, id, Event::AllSegmentsText, None)?;
     // S4: the transcript file exists as soon as there is a transcript (summary empty); a
     // summary re-renders it. A failure here is reported by the summary's own write.

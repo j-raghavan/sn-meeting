@@ -136,6 +136,11 @@ object NativeBridge {
      *  state: off|paused|offline|transcribing|current, reason?, spentUsd, spent}`. */
     external fun nativeLiveTranscript(id: String, afterLine: Int): String
 
+    /** F15-FR9 / FR10: the chunk files the next transcription needs that are gone, each to be
+     *  re-cut from its segment (`[{index, segIndex, fromMs, toMs, segPath, path, startOffsetMs,
+     *  durationMs}]`), then reported with [nativeChunkReady]. */
+    external fun nativeChunksToCut(id: String): String
+
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,

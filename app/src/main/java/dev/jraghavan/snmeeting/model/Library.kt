@@ -86,6 +86,8 @@ data class Sidecar(
     val eventKey: String? = null, val eventTitle: String? = null,
     /** F15: recorded by the near-live recorder (it has `live`, or chunks). */
     val nearLive: Boolean = false,
+    /** F15-FR9: its chunks, and how many have their text (or are missing). */
+    val chunkTotal: Int = 0, val chunksDone: Int = 0,
 ) {
     companion object {
         private fun run(o: JSONObject?): ProviderRun? =
@@ -114,6 +116,8 @@ data class Sidecar(
             eventKey = o.obj("event")?.str("eventKey"),
             eventTitle = o.obj("event")?.str("title"),
             nearLive = o.has("live") || (o.arr("chunks")?.length() ?: 0) > 0,
+            chunkTotal = o.arr("chunks")?.length() ?: 0,
+            chunksDone = o.arr("chunks").mapObj { c -> c.str("state")?.takeIf { it != "pending" } }.size,
         ) }
 
         /** nativeTranscribe / nativeSummarise: `{meeting: <sidecar>}` once a job ran. */
@@ -164,7 +168,11 @@ data class SegmentAdded(val index: Int, val path: String) {
 }
 
 /** nativeRecover. `noAudio` is omitted by the core when empty. */
-data class Recovery(val recovered: List<String>, val measure: List<ToMeasure>, val flagged: List<Flagged>, val noAudio: List<String>) {
+/** [resume]: F15-FR9 / F15-AC8, near-live meetings whose catch-up the Stop job finishes. */
+data class Recovery(
+    val recovered: List<String>, val measure: List<ToMeasure>, val flagged: List<Flagged>, val noAudio: List<String>,
+    val resume: List<String> = emptyList(),
+) {
     /** [chunks]: F15-FR8, the segment's finished chunk files, to rebuild it from if it can't be read. */
     data class ToMeasure(val id: String, val index: Int, val path: String, val chunks: List<Piece> = emptyList())
     /** A chunk file and how much of its start the previous chunk already holds. */
@@ -180,6 +188,7 @@ data class Recovery(val recovered: List<String>, val measure: List<ToMeasure>, v
             },
             o.arr("flagged").mapObj { Flagged(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.strOr("flag", "")) },
             o.arr("noAudio").strings(),
+            o.arr("resume").strings(),
         )
     }
 }

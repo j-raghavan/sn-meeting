@@ -80,4 +80,55 @@ object ChunkRecut : RebuildPort {
             if (tmp.exists()) tmp.delete()
         }
     }
+
+    /**
+     * F15-FR9 / FR10: chunk file [out] re-cut from segment [segPath]'s frames in
+     * [fromMs, toMs) (segment time), each moved to start at 0. True if it was written.
+     */
+    fun cut(segPath: String, fromMs: Long, toMs: Long, out: String): Boolean {
+        val target = File(out)
+        target.parentFile?.mkdirs()
+        val tmp = File("$out.cut")
+        val ex = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        try {
+            ex.setDataSource(segPath)
+            val t = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+                ?: return false
+            ex.selectTrack(t)
+            val fromUs = fromMs * 1000
+            val toUs = toMs * 1000
+            ex.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) // every AAC frame is a sync frame
+            val m = MediaMuxer(tmp.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            muxer = m
+            val track = m.addTrack(ex.getTrackFormat(t))
+            m.start()
+            val buf = ByteBuffer.allocate(64 * 1024)
+            val info = MediaCodec.BufferInfo()
+            var written = 0
+            while (true) {
+                val size = ex.readSampleData(buf, 0)
+                if (size < 0) break
+                val pts = ex.sampleTime
+                if (pts >= toUs) break
+                if (pts >= fromUs) {
+                    info.set(0, size, pts - fromUs, MediaCodec.BUFFER_FLAG_KEY_FRAME)
+                    m.writeSampleData(track, buf, info)
+                    written++
+                }
+                ex.advance()
+            }
+            muxer = null
+            if (written == 0) { m.release(); return false }
+            m.stop(); m.release()
+            return tmp.renameTo(target)
+        } catch (t: Throwable) {
+            Log.w(TAG, "cut: ${t.javaClass.simpleName}")
+            return false
+        } finally {
+            try { muxer?.release() } catch (_: Throwable) {}
+            ex.release()
+            if (tmp.exists()) tmp.delete()
+        }
+    }
 }

@@ -24,6 +24,7 @@ import android.util.Log
 import dev.jraghavan.snmeeting.CoreJobs
 import dev.jraghavan.snmeeting.MainActivity
 import dev.jraghavan.snmeeting.R
+import dev.jraghavan.snmeeting.StopJob
 import dev.jraghavan.snmeeting.model.MicChoice
 
 /**
@@ -156,6 +157,9 @@ class RecordingService : Service() {
     /** The one exit, after the session released everything: leave the foreground, stop. */
     private fun shutdown(end: RecState.Idle) {
         session = null; shown = null
+        // F15-FR9: a near-live recording's remaining chunks are sent and the minutes filled.
+        val id = end.lastId
+        if (id != null && nearLive) StopJob.start(id)
         if (destroyed) return // a late reply after onDestroy (S12): nothing left to stop
         stopForeground(STOP_FOREGROUND_REMOVE)
         // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).

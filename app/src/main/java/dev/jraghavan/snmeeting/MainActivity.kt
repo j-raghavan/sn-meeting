@@ -301,7 +301,7 @@ class MainActivity : Activity(), HomeLists.Actions {
     private fun recover() {
         val alive = RecordingService.running
         CoreJobs.exec {
-            deviceRecoverer().run(alive)
+            deviceRecoverer().run(alive)?.let { StopJob.resume(it.resume) } // F15-AC8: catch up
         }
     }
 

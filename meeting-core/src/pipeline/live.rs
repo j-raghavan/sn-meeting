@@ -146,6 +146,98 @@ pub async fn attempt(
     Ok(outcome)
 }
 
+/// F15-FR9: after Stop, the chunks still pending are sent under the normal job rules: in
+/// order, at most one automatic retry of a transient failure (F5-FR7's wait), and any other
+/// failure ends the job (`failed`, retried later from that chunk). A chunk whose file is gone
+/// and whose segment can't give it back (missing or empty) is `missing` (EC7). The lane's lock
+/// is taken first, so a chunk the near-live lane has in flight finishes before (INV11).
+/// Returns the failure's message, or `None` once every chunk has its text.
+pub(crate) async fn drain_job(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    cx: &super::ChunkCtx,
+    call: &ChunkCall<'_>,
+    cancel: &Cancel,
+) -> Result<Option<String>, JobError> {
+    let _held = cx.lane.lock().await;
+    loop {
+        if cancel.is_cancelled() {
+            return Ok(Some("Cancelled".into()));
+        }
+        let (_, sc) = locked(lock, || lib.load_for_write(id)).map_err(JobError::Storage)?;
+        let Some(c) = sc
+            .chunks
+            .iter()
+            .find(|c| c.state == ChunkState::Pending)
+            .cloned()
+        else {
+            return Ok(None);
+        };
+        let mut retried_once = false;
+        loop {
+            match attempt(lib, lock, id, &cx.root, call, c.index, cancel).await? {
+                Outcome::Stored => break,
+                Outcome::Again => {}
+                Outcome::Retry(_) if !retried_once => {
+                    retried_once = true;
+                    tokio::select! {
+                        biased;
+                        () = cancel.cancelled() => return Ok(Some("Cancelled".into())),
+                        () = tokio::time::sleep(jobs::RETRY_DEFAULT) => {}
+                    }
+                }
+                Outcome::Retry(_) | Outcome::Pause(_) => {
+                    return Ok(Some(last_error(lib, lock, id, c.index)));
+                }
+                Outcome::NoFile => {
+                    // The shell re-cuts a gone chunk from its closed segment before the job
+                    // (F15-FR9); still gone means that audio can't be read. A segment not yet
+                    // closed may still give it: fail, and the next try re-cuts it.
+                    let closed = sc
+                        .segments
+                        .get(c.seg_index)
+                        .is_none_or(|s| s.duration_ms.is_some());
+                    if !closed {
+                        let n = c.index + 1;
+                        return Ok(Some(format!(
+                            "Chunk {n} of the transcript can't be read yet"
+                        )));
+                    }
+                    mark_missing(lib, lock, id, c.index)?;
+                    break;
+                }
+                Outcome::Cancelled => return Ok(Some("Cancelled".into())),
+            }
+        }
+        let _ = lib.prune_chunks(id, &cx.root);
+    }
+}
+
+/// The reason chunk `index` last failed, for the job's `error`.
+fn last_error(lib: &Library<'_>, lock: &Mutex<()>, id: &str, index: u32) -> String {
+    locked(lock, || lib.load_for_write(id))
+        .ok()
+        .and_then(|(_, sc)| sc.chunks.into_iter().find(|c| c.index == index))
+        .and_then(|c| c.last_error)
+        .unwrap_or_else(|| "Transcription failed".into())
+}
+
+/// EC7 for a chunk: its audio is gone for good; it reads "(audio missing)" and is never sent.
+fn mark_missing(lib: &Library<'_>, lock: &Mutex<()>, id: &str, index: u32) -> Result<(), JobError> {
+    locked(lock, || {
+        lib.update(id, |sc, _| {
+            if let Some(c) = sc.chunks.iter_mut().find(|c| c.index == index) {
+                c.state = ChunkState::Missing;
+                c.text = None;
+            }
+            crate::chunk::fill_segments(sc);
+            Ok(())
+        })
+    })
+    .map_err(JobError::Storage)
+}
+
 /// A failed attempt (the chunk's `attempts`-th): it stays pending with the reason; the lane
 /// retries after the back-off or pauses.
 fn failed(e: &CallError, attempts: u32) -> (ChunkState, Option<String>, Option<String>, Outcome) {

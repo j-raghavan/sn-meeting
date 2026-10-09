@@ -254,6 +254,16 @@ impl App {
         self.core.app_data_dir.join("chunks")
     }
 
+    /// `nativeChunksToCut(id)` (F15-FR9 / FR10): `[{index, segIndex, fromMs, toMs, segPath,
+    /// path, startOffsetMs, durationMs}]`, the chunk files to re-cut before a transcription.
+    pub fn chunks_to_cut_json(&self, id: &str) -> String {
+        reply(
+            self.library()
+                .chunks_to_cut(id, &self.chunk_root())
+                .map(|v| json!(v)),
+        )
+    }
+
     /// `nativeChunkReady(id, index, path, startOffsetMs, durationMs, speechMs)` (F15-FR5):
     /// `{index, state, added}`.
     pub fn chunk_ready_json(&self, id: &str, c: crate::library::ChunkIn<'_>) -> String {

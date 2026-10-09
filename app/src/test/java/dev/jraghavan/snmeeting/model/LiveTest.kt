@@ -41,4 +41,14 @@ class LiveTest { // F15-FR6 / FR7, F17-FR6
         assertFalse(plain.meeting.nearLive)
         assertEquals("Hello.", plain.transcript.single().text)
     }
+
+    @Test fun aNearLiveJobCountsItsChunks() { // F15-FR9
+        val m = Sidecar.from(org.json.JSONObject("""{"id":"m","status":"transcribing","segments":[{"startOffsetMs":0}],
+            "chunks":[{"state":"done"},{"state":"missing"},{"state":"pending"},{"state":"pending"}]}"""))!!
+        assertEquals(4, m.chunkTotal)
+        assertEquals(2, m.chunksDone)
+        assertEquals("Transcribing 3/4", Actions.transcribing(m))
+        val r = Recovery.from(org.json.JSONObject("""{"recovered":["m"],"measure":[],"flagged":[],"resume":["m"]}"""))
+        assertEquals(listOf("m"), r.resume)
+    }
 }
