@@ -279,6 +279,12 @@ pub fn spend(from: &str, to: &str) -> String {
     with_app(|app| app.spend_json(from, to))
 }
 
+/// `nativeRepriceAll(dryRun)` (F16-FR6): `{meetings, oldUsd, newUsd, …}`; writes only when
+/// `dry_run` is false.
+pub fn reprice_all(dry_run: bool) -> String {
+    with_app(|app| app.reprice_json(dry_run))
+}
+
 /// `nativeGetRates()` (F16-FR4): `{asOf, entries, problems}`.
 pub fn get_rates() -> String {
     with_app(App::get_rates_json)

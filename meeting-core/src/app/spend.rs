@@ -1,6 +1,7 @@
 //! F16: the spend calls. Rates (F16-FR4) are read from and written to `settings.json`.
 use super::App;
 use crate::rates::{self, Rate, RateTable};
+use crate::spend::Total;
 use chrono::NaiveDate;
 use serde_json::{Value, json};
 
@@ -104,4 +105,58 @@ impl App {
             Err(e) => crate::api::error_json(&e),
         }
     }
+
+    /// `nativeRepriceAll(dryRun)` (F16-FR6): price every record again from its stored counters
+    /// with the rates in force now, unpriced ones included. `{meetings, oldUsd, newUsd,
+    /// unpricedBefore, unpricedAfter}`, where `meetings` is how many would change; only with
+    /// `dry_run = false` are those sidecars rewritten, each under the write lock.
+    pub fn reprice_json(&self, dry_run: bool) -> String {
+        use crate::library::Source;
+        let rates = self.rates();
+        let lib = self.library();
+        let (mut old, mut new) = (Total::default(), Total::default());
+        let mut changed = Vec::new();
+        for (row, sc) in lib.all() {
+            if row.source != Source::Sidecar || sc.usage.is_empty() {
+                continue;
+            }
+            let mut next = sc.usage.clone();
+            for r in &mut next {
+                r.price(&rates);
+            }
+            add(&mut old, &Total::of(&sc.usage));
+            add(&mut new, &Total::of(&next));
+            if next != sc.usage {
+                changed.push(row.id);
+            }
+        }
+        let mut written = 0;
+        if !dry_run {
+            for id in &changed {
+                let _w = self.write_lock();
+                let r = lib.update(id, |sc, _| {
+                    for r in &mut sc.usage {
+                        r.price(&rates);
+                    }
+                    Ok(())
+                });
+                match r {
+                    Ok(()) => written += 1,
+                    Err(e) => return crate::api::error_json(&e.to_string()),
+                }
+            }
+        }
+        json!({
+            "meetings": changed.len(), "written": written,
+            "oldUsd": crate::spend::round6(old.usd), "newUsd": crate::spend::round6(new.usd),
+            "unpricedBefore": old.unpriced, "unpricedAfter": new.unpriced,
+        })
+        .to_string()
+    }
+}
+
+fn add(acc: &mut Total, t: &Total) {
+    acc.usd += t.usd;
+    acc.unpriced += t.unpriced;
+    acc.records += t.records;
 }

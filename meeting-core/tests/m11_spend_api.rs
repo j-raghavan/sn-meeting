@@ -92,3 +92,67 @@ fn months_follow_local_time() {
         json!({"error": "months must be YYYY-MM"})
     );
 }
+
+fn set_rates(app: &App, v: Value) {
+    let r = parse(&app.set_rates_json(&v.to_string()));
+    assert!(r.get("error").is_none(), "{r}");
+}
+
+/// F16-AC5 (whole) and F16-AC7: a rate edit never changes a stored cost; "Re-price" does, after
+/// a dry run that says what would change.
+#[test]
+fn a_rate_edit_changes_nothing_until_re_price() {
+    let e = Env::new();
+    let app = e.app();
+    let at = "2026-10-07T22:00:00-07:00";
+    let (a, dir) = meeting_with(
+        &app,
+        T0,
+        vec![
+            tokens("gpt-4o-mini", at, 2_000_000),
+            tokens("gpt-9", at, 1_000_000),
+        ],
+    );
+    let (b, _) = meeting_with(
+        &app,
+        T0 + 60_000,
+        vec![tokens("gpt-4o-mini", at, 1_000_000)],
+    );
+    meeting_with(&app, T0 + 120_000, vec![]);
+    let before = read_sidecar(&dir, &a);
+    assert_eq!(before.usage[0].usd, Some(0.3));
+    set_rates(
+        &app,
+        json!([{"provider": "openai", "model": "gpt-4o-mini", "unit": "tokens", "input": 0.5,
+                "output": 0.6},
+               {"provider": "openai", "model": "gpt-9", "unit": "tokens", "input": 0.11,
+                "output": 1}]),
+    );
+    // F16-AC7: the edit wrote nothing to the meetings.
+    assert_eq!(read_sidecar(&dir, &a), before);
+    let list = parse(&app.list_recent_json(5));
+    assert_eq!(row(&list, &a)["spend"]["label"], "≈ $0.30+");
+    let dry = parse(&app.reprice_json(true));
+    assert_eq!(
+        dry,
+        json!({"meetings": 2, "written": 0, "oldUsd": 0.45, "newUsd": 1.61,
+               "unpricedBefore": 1, "unpricedAfter": 0})
+    );
+    assert_eq!(read_sidecar(&dir, &a), before, "a dry run writes nothing");
+    let done = parse(&app.reprice_json(false));
+    assert_eq!(done["written"], 2);
+    let after = read_sidecar(&dir, &a);
+    assert_eq!(after.usage[0].usd, Some(1.0));
+    assert_eq!(after.usage[1].usd, Some(0.11));
+    assert_eq!(after.usage[0].input_tokens, before.usage[0].input_tokens);
+    assert_eq!(after.usage[0].id, before.usage[0].id);
+    assert_eq!(
+        after.usage[0].rate.as_ref().unwrap().as_of,
+        app.today().format("%Y-%m-%d").to_string()
+    );
+    let list = parse(&app.list_recent_json(5));
+    assert_eq!(row(&list, &a)["spend"]["label"], "≈ $1.11", "a full total");
+    assert_eq!(row(&list, &b)["spend"]["label"], "≈ $0.50");
+    // Nothing left to change.
+    assert_eq!(parse(&app.reprice_json(false))["meetings"], 0);
+}

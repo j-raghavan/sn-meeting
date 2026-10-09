@@ -117,6 +117,11 @@ object NativeBridge {
      *  `label` is Home's line ("October · $3.20 spent · 6 meetings"). */
     external fun nativeSpend(fromMonth: String, toMonth: String): String
 
+    /** "Re-price with current rates": every stored record priced again from its counters.
+     *  `{meetings, written, oldUsd, newUsd, unpricedBefore, unpricedAfter}`; `meetings` is how
+     *  many change. Writes only when `dryRun` is false, so ask with true first and confirm. */
+    external fun nativeRepriceAll(dryRun: Boolean): String
+
     /** The rates in force: `{asOf, entries: [{provider, model, unit, perMinute?, input?, …,
      *  validFrom?, asOf, source, note?, origin}], problems: [line]}`; origin is `default` or `user`. */
     external fun nativeGetRates(): String

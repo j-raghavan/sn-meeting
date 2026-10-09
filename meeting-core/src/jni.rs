@@ -415,3 +415,16 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSpend<'lo
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// Re-reads every listed sidecar; call it on `CoreJobs`' background thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRepriceAll<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    dry_run: jboolean,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::reprice_all(dry_run))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

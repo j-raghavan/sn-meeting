@@ -42,6 +42,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("previewTemplate", api::preview_template("{}")),
         ("getRates", api::get_rates()),
         ("spend", api::spend("2026-10", "2026-10")),
+        ("repriceAll", api::reprice_all(true)),
         ("setRates", api::set_rates("[]")),
     ]
 }
