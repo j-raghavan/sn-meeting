@@ -117,6 +117,11 @@ object NativeBridge {
      *  quick; it needs no [nativeInit], so the recorder's capture thread calls it directly. */
     external fun nativeChunkPlan(id: String, rmsJson: String): String
 
+    /** F15-FR5: chunk [index]'s file is finalised at [path] (`<filesDir>/chunks/<id>/c-NNNN.m4a`);
+     *  [speechMs] is from [nativeChunkPlan], -1 when unknown. While recording it is recorded
+     *  `pending`; afterwards only a known chunk's re-cut file. `{index, state, added}`. */
+    external fun nativeChunkReady(id: String, index: Int, path: String, startOffsetMs: Long, durationMs: Long, speechMs: Long): String
+
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,

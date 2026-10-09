@@ -43,9 +43,8 @@ import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicPick
 import dev.jraghavan.snmeeting.record.MicSelector
 import dev.jraghavan.snmeeting.record.RecState
-import dev.jraghavan.snmeeting.record.Recoverer
+import dev.jraghavan.snmeeting.record.deviceRecoverer
 import dev.jraghavan.snmeeting.record.RecordingService
-import dev.jraghavan.snmeeting.record.RetrieverDuration
 import dev.jraghavan.snmeeting.record.usbInputs
 import dev.jraghavan.snmeeting.update.UpdateGate
 import java.time.LocalDate
@@ -294,8 +293,7 @@ class MainActivity : Activity(), HomeLists.Actions {
     private fun recover() {
         val alive = RecordingService.running
         CoreJobs.exec {
-            Recoverer(NativeBridge::nativeRecover, RetrieverDuration) { id, i, ms -> NativeBridge.nativeCloseSegment(id, i, ms) }
-                .run(alive)
+            deviceRecoverer().run(alive)
         }
     }
 

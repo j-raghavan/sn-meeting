@@ -274,6 +274,28 @@ pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))
 }
 
+/// `nativeChunkReady(id, index, path, startOffsetMs, durationMs, speechMs)` (F15-FR5): a chunk
+/// file is finalised; `speechMs` is -1 when unknown. `{index, state, added}`.
+pub fn chunk_ready(
+    id: &str,
+    index: i32,
+    path: &str,
+    start_offset_ms: i64,
+    duration_ms: i64,
+    speech_ms: i64,
+) -> String {
+    with_app(|app| {
+        let c = crate::library::ChunkIn {
+            index,
+            path,
+            start_offset_ms,
+            duration_ms,
+            speech_ms,
+        };
+        app.chunk_ready_json(id, c)
+    })
+}
+
 /// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
 /// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
 /// capture thread can ask at any time.

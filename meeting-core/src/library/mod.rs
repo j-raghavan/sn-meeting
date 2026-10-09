@@ -8,9 +8,14 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod chunks;
 mod edit;
 mod list;
 mod recover;
+pub(crate) use chunks::remove_all as remove_chunks;
+pub use chunks::{
+    ChunkIn, ChunkReadied, MAX_CHUNK_MS, MAX_CHUNKS, Piece, chunk_dir, chunk_file_name, chunk_path,
+};
 pub use edit::TodoRef;
 pub(crate) use list::stamp_of;
 pub use list::{MeetingSummary, MeetingView, Source};

@@ -64,6 +64,65 @@ pub struct Sidecar {
         deserialize_with = "crate::spend::lenient_usage"
     )]
     pub usage: Vec<crate::spend::UsageEntry>,
+    /// F15: the near-live chunks, in index order. Only meetings recorded with the near-live
+    /// recorder have them (F15-FR10); absent means none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chunks: Vec<Chunk>,
+    /// F15-FR5: the near-live transcription fixed at Record; absent for the Standard recorder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<Live>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+/// F15: one ~30 s stretch of the recording (spec Data Model, `chunks`). Times are
+/// recording-clock ms (INV13).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Chunk {
+    pub index: u32,
+    /// The segment it lies in (0-based): a chunk never spans a segment boundary (F15-FR4).
+    pub seg_index: usize,
+    pub start_offset_ms: u64,
+    pub duration_ms: u64,
+    /// How much of its start repeats the previous chunk's end (0, or about 1 s after a hard
+    /// cut); removed when the texts are joined (F15-FR6).
+    #[serde(default)]
+    pub overlap_ms: u64,
+    pub state: ChunkState,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub attempts: u32,
+    /// The last failure, user-worded and scrubbed (Security).
+    #[serde(default)]
+    pub last_error: Option<String>,
+    /// Its audio above the pause threshold (F15-FR5's empty-reply rule); absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_ms: Option<u64>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ChunkState {
+    Pending,
+    Done,
+    /// Its audio is gone and can't be re-cut (EC7's rule): "(audio missing)", never sent.
+    Missing,
+}
+
+/// F15-FR5: who transcribes the chunks, fixed when recording began.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Live {
+    pub provider: crate::keyfile::Provider,
+    /// `null` until the account's listing names one (the auto-pick, F5-FR12).
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Why the near-live lane is paused (user-safe), or `null` while it runs.
+    #[serde(default)]
+    pub paused: Option<String>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -277,6 +336,8 @@ pub fn blank(id: &str) -> Sidecar {
         note: None,
         todos: Vec::new(),
         usage: Vec::new(),
+        chunks: Vec::new(),
+        live: None,
         extra: Extra::new(),
     }
 }

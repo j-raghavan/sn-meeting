@@ -28,6 +28,11 @@ pub struct Measure {
     pub id: String,
     pub index: usize,
     pub path: String,
+    /// F15-FR8: the segment's finalised chunk files, in order. If the segment file can't be
+    /// read (its muxer was killed before it wrote the index), the shell rebuilds it from these
+    /// by remuxing their AAC frames, then measures it. Omitted when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub chunks: Vec<super::Piece>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -48,7 +53,8 @@ impl Library<'_> {
     /// has its open, non-empty segments listed (D3: legacy audio a Transcribe tap gave a
     /// sidecar before it was measured). The live meeting and running jobs keep their status. Unreadable sidecars are not touched; legacy audio (no sidecar) is
     /// only listed for measuring.
-    pub fn recover(&self, live: &Liveness) -> Recovery {
+    /// `chunks` is `<filesDir>/chunks`, where a near-live meeting's chunk files are (F15-FR8).
+    pub fn recover(&self, live: &Liveness, chunks: Option<&Path>) -> Recovery {
         let mut r = Recovery::default();
         for (id, f) in self.scan() {
             if !f.has_sidecar {
@@ -111,7 +117,12 @@ impl Library<'_> {
                 r.no_audio.push(id);
             }
             r.flagged.extend(flagged);
-            r.measure.extend(measure);
+            r.measure.extend(measure.into_iter().map(|mut m| {
+                if let Some(root) = chunks {
+                    m.chunks = super::chunks::pieces(root, &sc, m.index);
+                }
+                m
+            }));
         }
         r
     }
@@ -129,6 +140,7 @@ fn legacy_measures(id: &str, f: &super::Found) -> Vec<Measure> {
                 id: id.to_owned(),
                 index,
                 path: path.to_string_lossy().into_owned(),
+                chunks: Vec::new(),
             })
         })
         .collect()
@@ -148,6 +160,7 @@ fn unmeasured(id: &str, dir: &Path, sc: &Sidecar) -> Vec<Measure> {
                 id: id.to_owned(),
                 index,
                 path: path.to_string_lossy().into_owned(),
+                chunks: Vec::new(),
             })
         })
         .collect()
@@ -180,6 +193,7 @@ fn check_segments(id: &str, dir: &Path, sc: &mut Sidecar) -> (Vec<Flagged>, Vec<
                 id: id.to_owned(),
                 index,
                 path: path.to_string_lossy().into_owned(),
+                chunks: Vec::new(),
             }),
             None => {}
         }

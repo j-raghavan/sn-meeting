@@ -156,13 +156,19 @@ data class SegmentAdded(val index: Int, val path: String) {
 
 /** nativeRecover. `noAudio` is omitted by the core when empty. */
 data class Recovery(val recovered: List<String>, val measure: List<ToMeasure>, val flagged: List<Flagged>, val noAudio: List<String>) {
-    data class ToMeasure(val id: String, val index: Int, val path: String)
+    /** [chunks]: F15-FR8, the segment's finished chunk files, to rebuild it from if it can't be read. */
+    data class ToMeasure(val id: String, val index: Int, val path: String, val chunks: List<Piece> = emptyList())
+    /** A chunk file and how much of its start the previous chunk already holds. */
+    data class Piece(val path: String, val skipMs: Long)
     data class Flagged(val id: String, val index: Int, val flag: String)
 
     companion object {
         fun from(o: JSONObject): Recovery = Recovery(
             o.arr("recovered").strings(),
-            o.arr("measure").mapObj { ToMeasure(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.str("path") ?: return@mapObj null) },
+            o.arr("measure").mapObj {
+                ToMeasure(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.str("path") ?: return@mapObj null,
+                    it.arr("chunks").mapObj { p -> Piece(p.str("path") ?: return@mapObj null, p.long("skipMs") ?: 0) })
+            },
             o.arr("flagged").mapObj { Flagged(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.strOr("flag", "")) },
             o.arr("noAudio").strings(),
         )

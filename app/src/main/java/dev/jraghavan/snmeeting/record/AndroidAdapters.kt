@@ -214,6 +214,11 @@ class CoreRecorderBridge(
         NativeBridge.nativeCloseSegment(id, index, (if (measure) measured(duration, path) else null) ?: fallbackMs)
     }
 
+    /** F15-FR5: queued in order with the segment calls, so a chunk is known before its segment closes. */
+    override fun chunkReady(id: String, c: ChunkDone) = CoreJobs.exec {
+        NativeBridge.nativeChunkReady(id, c.index, c.path, c.startOffsetMs, c.durationMs, c.speechMs)
+    }
+
     override fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit) = call({
         NativeBridge.nativeFinishMeeting(id, durationMs, note)
         if (discard) NativeBridge.nativeDeleteMeeting(id)

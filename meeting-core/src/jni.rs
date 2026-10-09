@@ -604,3 +604,29 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeChunkPlan
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeChunkReady<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    index: jint,
+    path: JString<'local>,
+    start_offset_ms: jlong,
+    duration_ms: jlong,
+    speech_ms: jlong,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let path: String = path.try_to_string(env)?;
+        env.new_string(crate::api::chunk_ready(
+            &id,
+            index,
+            &path,
+            start_offset_ms,
+            duration_ms,
+            speech_ms,
+        ))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

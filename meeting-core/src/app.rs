@@ -229,17 +229,32 @@ impl App {
         )
     }
 
-    /// `nativeCloseSegment`; `index` is 0-based.
+    /// `nativeCloseSegment`; `index` is 0-based. A closed segment's finished chunk files are
+    /// no longer needed (F15-FR8).
     pub fn close_segment_json(&self, id: &str, index: i32, duration_ms: i64) -> String {
         let Ok(index) = usize::try_from(index) else {
             return error_json("segIndex must be >= 0");
         };
         let _w = self.write_lock();
-        reply(
-            self.library()
-                .close_segment(id, index, duration_ms)
-                .map(|()| ok()),
-        )
+        let lib = self.library();
+        let r = lib.close_segment(id, index, duration_ms);
+        if r.is_ok() {
+            let _ = lib.prune_chunks(id, &self.chunk_root());
+        }
+        reply(r.map(|()| ok()))
+    }
+
+    /// `<filesDir>/chunks`: the near-live chunk files, app-private (F15-FR4, Security).
+    pub fn chunk_root(&self) -> std::path::PathBuf {
+        self.core.app_data_dir.join("chunks")
+    }
+
+    /// `nativeChunkReady(id, index, path, startOffsetMs, durationMs, speechMs)` (F15-FR5):
+    /// `{index, state, added}`.
+    pub fn chunk_ready_json(&self, id: &str, c: crate::library::ChunkIn<'_>) -> String {
+        let _w = self.write_lock();
+        let lib = self.library();
+        reply(lib.chunk_ready(id, &self.chunk_root(), c).map(|r| json!(r)))
     }
 
     /// `nativeFinishMeeting`; an empty `note` means none. The recording is over either way,
@@ -328,10 +343,11 @@ impl App {
         let _w = self.write_lock();
         let st = self.state();
         let lib = self.library_of(&st.settings);
-        reply(
-            lib.delete(id, &Self::live_of(&st, &self.jobs))
-                .map(|removed| json!({"ok": true, "removed": removed})),
-        )
+        let r = lib.delete(id, &Self::live_of(&st, &self.jobs));
+        if r.is_ok() {
+            crate::library::remove_chunks(&self.chunk_root(), id); // F15-FR8
+        }
+        reply(r.map(|removed| json!({"ok": true, "removed": removed})))
     }
 
     /// `nativeRecover(serviceAlive)` (F3-FR5). A dead service means nothing is recording.
@@ -342,7 +358,8 @@ impl App {
             st.live.recording = None;
         }
         let lib = self.library_of(&st.settings);
-        json!(lib.recover(&Self::live_of(&st, &self.jobs))).to_string()
+        let live = Self::live_of(&st, &self.jobs);
+        json!(lib.recover(&live, Some(&self.chunk_root()))).to_string()
     }
 
     /// Whether `id` is in the effective template set and usable by a job.

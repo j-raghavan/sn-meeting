@@ -28,9 +28,8 @@ import dev.jraghavan.snmeeting.model.TranscriptPages
 import dev.jraghavan.snmeeting.play.MediaPlayerPort
 import dev.jraghavan.snmeeting.play.Playback
 import dev.jraghavan.snmeeting.play.SegmentPlaylist
-import dev.jraghavan.snmeeting.record.Recoverer
+import dev.jraghavan.snmeeting.record.deviceRecoverer
 import dev.jraghavan.snmeeting.record.RecordingService
-import dev.jraghavan.snmeeting.record.RetrieverDuration
 
 /**
  * One meeting (spec F7) in the Inkwell style (F9), read from the core: the title (tap to
@@ -108,7 +107,7 @@ class MeetingActivity : Activity() {
         // read transcribing with no job; recovery (cheap, queued first) moves it on.
         val alive = RecordingService.running
         CoreJobs.exec {
-            Recoverer(NativeBridge::nativeRecover, RetrieverDuration) { m, i, ms -> NativeBridge.nativeCloseSegment(m, i, ms) }.run(alive)
+            deviceRecoverer().run(alive)
         }
         // Settings and templates may have changed in their screens or on the desktop. CoreJobs
         // answers in order, so both are in hand when the meeting arrives: one redraw.
