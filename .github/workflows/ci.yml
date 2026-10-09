@@ -1,0 +1,216 @@
+name: CI
+
+# F8-FR1 / NFR5: every gate in scripts/gates.sh, run on every pull request (any base branch)
+# and on pushes to main and feature branches. One job per gate group, so a failure names the
+# gate. The Rust core is built and tested on the host first (INV5: no `jni` in its graph),
+# then cross-built for the device with cargo-ndk, and the full ./buildApk.sh pipeline assembles
+# the release APK (debug-keystore signed; no secrets).
+#
+# Runners have no Homebrew rust, so `rustup show` installs the rust-toolchain.toml pin and
+# cargo resolves to it. Locally, scripts/gates.sh runs the same gates on macOS.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main, "feat/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Same exclusion as scripts/gates.sh: the JNI edge runs only on the device.
+  COVERAGE_IGNORE: 'meeting-core/src/jni\.rs$'
+
+jobs:
+  rust-host:
+    name: rust host (fmt, clippy, build, test, INV5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain (from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: cargo fmt --check
+        run: cargo fmt --check
+      - name: cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: cargo clippy (jni-bridge)
+        run: cargo clippy --all-targets --features jni-bridge -- -D warnings
+      # --all-targets unifies dev-dependency features into the library; build it alone too.
+      - name: cargo build (library alone, jni-bridge)
+        run: cargo build -p meeting-core --lib --features jni-bridge
+      - name: cargo test
+        run: cargo test -p meeting-core
+      - name: INV5 - jni absent from the host graph
+        run: |
+          set -euo pipefail
+          host="$(cargo tree -p meeting-core -e normal -i jni --target all 2>/dev/null)"
+          if [[ -n "$host" ]]; then
+            echo "::error::jni is in meeting-core's default dependency graph (INV5):"
+            echo "$host"
+            exit 1
+          fi
+          # The check can see jni: with the bridge on it must appear.
+          bridge="$(cargo tree -p meeting-core -e normal -i jni --target all --features jni-bridge)"
+          [[ "$bridge" == jni* ]] || { echo "::error::cargo tree did not find jni with jni-bridge on"; exit 1; }
+          echo "INV5 holds: jni only with --features jni-bridge"
+
+  coverage:
+    name: coverage (>= 97% lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain (llvm-tools-preview from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: cargo llvm-cov (fail under 97% lines)
+        run: cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex "$COVERAGE_IGNORE"
+      - name: lcov report
+        if: success() || failure()
+        run: cargo llvm-cov report -p meeting-core --ignore-filename-regex "$COVERAGE_IGNORE" --lcov --output-path lcov.info
+      - name: Upload lcov
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: lcov
+          path: lcov.info
+          if-no-files-found: warn
+          retention-days: 7
+
+  android-target:
+    name: android target (cargo-ndk, aarch64-linux-android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain + android targets (from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      # cargo-ndk points cc-rs and the linker at the NDK's clang for API 30 (the Supernote's
+      # Android 11), as buildApk.sh does.
+      - name: Use the runner's Android NDK
+        run: |
+          set -euo pipefail
+          ndk="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}}"
+          test -n "$ndk" -a -d "$ndk" || { echo "::error::No Android NDK on the runner"; exit 1; }
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "Using NDK: $ndk"
+      - name: cargo ndk clippy (jni-bridge)
+        run: cargo ndk -t arm64-v8a -P 30 clippy -p meeting-core --lib --features jni-bridge -- -D warnings
+      - name: cargo ndk build (jni-bridge)
+        run: cargo ndk -t arm64-v8a -P 30 build -p meeting-core --lib --features jni-bridge
+
+  licenses:
+    name: licences of linked crates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain
+        run: rustup show
+      # check_licenses.sh reads `cargo metadata --offline`; fetch the locked graph first.
+      - name: cargo fetch
+        run: cargo fetch --locked
+      - name: Linked crates vs LICENSES-3RDPARTY.md
+        run: ./scripts/check_licenses.sh
+
+  kotlin:
+    name: kotlin (lintRelease, unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      # The runner's Android SDK (ANDROID_HOME). Lint and the JVM tests don't load
+      # libmeeting.so, so no native build is needed here; the apk job packages it.
+      - name: gradle lintRelease :app:testDebugUnitTest
+        run: ./gradlew lintRelease :app:testDebugUnitTest --console=plain
+      - name: Upload lint and test reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: kotlin-reports
+          path: |
+            app/build/reports/
+            app/build/test-results/
+          retention-days: 7
+
+  apk:
+    name: apk (buildApk.sh, size budget)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: gradle
+      - name: Install toolchain (from rust-toolchain.toml)
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+      # The gates run in the other jobs; this is the packaging pipeline alone.
+      - name: ./buildApk.sh --no-gates
+        run: ./buildApk.sh --no-gates
+      - name: libmeeting.so is in the APK, and the APK is within budget (F1-FR10)
+        run: |
+          set -euo pipefail
+          # buildApk.sh only builds when run, so sourcing it gives its constants.
+          source ./buildApk.sh
+          apk="$(find app/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
+          test -n "$apk" || { echo "::error::No APK under app/build/outputs/apk/release"; exit 1; }
+          listing="$(unzip -l "$apk")"
+          [[ "$listing" == *"lib/$ABI/$LIB"* ]] || { echo "::error::lib/$ABI/$LIB missing from $apk"; exit 1; }
+          bytes="$(wc -c < "$apk" | tr -d ' ')"
+          echo "APK $apk: $bytes bytes (budget $APK_BUDGET_BYTES)"
+          if (( bytes > APK_BUDGET_BYTES )); then
+            echo "::error::APK is $bytes bytes, over the $APK_BUDGET_BYTES-byte budget (F1-FR10)"
+            exit 1
+          fi
+          echo "APK_PATH=$apk" >> "$GITHUB_ENV"
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: meetings-release-apk
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
+          retention-days: 7
+
+  scripts:
+    name: scripts (install guard, check-audio)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # No afconvert on Linux: check-audio.sh and its fixture test use ffmpeg instead.
+      - name: Install ffmpeg
+        run: sudo apt-get update -q && sudo apt-get install -y -q --no-install-recommends ffmpeg
+      - name: Install guard (stub adb)
+        run: ./scripts/test_install_guard.sh
+      - name: check-audio (tone, silence, noise, speech, clipped)
+        run: ./scripts/test_check_audio.sh
