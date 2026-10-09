@@ -13,17 +13,18 @@ circle of the 108 dp canvas, so no launcher mask clips it.
 Outputs:
   meetings-fg-light.svg  launcher foreground (transparent) and the README's light icon
   meetings-fg-dark.svg   the README's dark-mode icon
-  legacy-square.svg      the pre-adaptive ic_launcher: the adaptive view flattened onto a
-                         rounded square of the launcher background
-  legacy-round.svg       the same on a circle (ic_launcher_round)
+  legacy-square.svg      the pre-adaptive ic_launcher: the mark on a rounded square of the
+                         launcher background, its ink box 68% of the width (inkread's margin)
+  legacy-round.svg       the same on a circle (ic_launcher_round), the ink box 62% of the width
 """
 import os
 
 BG = "#F2ECDE"  # = res/values/ic_launcher_background.xml, as inkread
 FIT = "translate(216 216) scale(0.75) translate(-222 -204)"
-# A launcher shows the middle 72 dp of the 108 dp adaptive canvas, so a flattened legacy icon
-# draws the canvas 1.5x the icon's size, centred.
-LEGACY = "translate(216 216) scale(1.5) translate(-216 -216)"
+# The legacy icons enlarge the fitted mark (ink box 297 x 0.75 = 223 px wide) to inkread's
+# margin: 68% of the width on the square (x 1.32), 62% inside the circle (x 1.20).
+def legacy_scale(k):
+    return f"translate(216 216) scale({k}) translate(-216 -216)"
 
 def mark(bg, ink, paper):
     return f'''  <!-- Meetings mark: a desk calendar block with depth, a studio mic in front, a fountain pen leaning on it.
@@ -85,9 +86,9 @@ def svg(content):
 def fg(bg, ink, paper):
     return svg(f'<g transform="{FIT}">\n{mark(bg, ink, paper)}</g>\n')
 
-def legacy(shape):
+def legacy(shape, k):
     m = mark(BG, "#111111", "#FFFFFF")
-    return svg(f'{shape}\n<g transform="{LEGACY}"><g transform="{FIT}">\n{m}</g></g>\n')
+    return svg(f'{shape}\n<g transform="{legacy_scale(k)}"><g transform="{FIT}">\n{m}</g></g>\n')
 
 here = os.path.dirname(os.path.abspath(__file__))
 def write(name, text):
@@ -96,5 +97,5 @@ def write(name, text):
 
 write("meetings-fg-light.svg", fg(BG, "#111111", "#FFFFFF"))   # launcher + README light
 write("meetings-fg-dark.svg", fg("#111111", BG, "#111111"))    # README dark mode
-write("legacy-square.svg", legacy(f'<rect width="432" height="432" rx="86" fill="{BG}"/>'))
-write("legacy-round.svg", legacy(f'<circle cx="216" cy="216" r="216" fill="{BG}"/>'))
+write("legacy-square.svg", legacy(f'<rect width="432" height="432" rx="86" fill="{BG}"/>', 1.32))
+write("legacy-round.svg", legacy(f'<circle cx="216" cy="216" r="216" fill="{BG}"/>', 1.20))
