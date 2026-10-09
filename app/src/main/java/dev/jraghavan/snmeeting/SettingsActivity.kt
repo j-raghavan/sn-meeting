@@ -7,9 +7,14 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.CalendarFormat
+import dev.jraghavan.snmeeting.model.CalendarLink
+import dev.jraghavan.snmeeting.model.CalendarPatch
+import dev.jraghavan.snmeeting.model.CalendarPrefs
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.IndexStatus
@@ -87,6 +92,14 @@ class SettingsActivity : Activity() {
     private var segmentMs: Long? = null
     private var showSegmentLength = false
 
+    /** F18-FR13: the calendar's settings and links (by name and elided URL, never the URL). */
+    private var calendar = CalendarPrefs()
+    private var links: List<CalendarLink>? = null
+    private var refreshing = false
+    /** Home's "CALENDAR" opens this screen at the Calendar card. */
+    private var calendarCard: View? = null
+    private var scrollToCalendar = false
+
     /** F14-AC2: whether this copy carries the release key (read once; a cheap PackageManager call). */
     private val canUpdate by lazy { UpdateController(this).canUpdateItself() }
     private var unobserveUpdates: (() -> Unit)? = null
@@ -97,6 +110,8 @@ class SettingsActivity : Activity() {
         scope = ScreenScope(this)
         CoreJobs.init(filesDir.absolutePath)
         SearchJobs.init(filesDir.absolutePath)
+        CalendarJobs.init(filesDir.absolutePath)
+        scrollToCalendar = intent.getStringExtra(EXTRA_SECTION) == SECTION_CALENDAR
         render()
     }
 
@@ -125,6 +140,7 @@ class SettingsActivity : Activity() {
         }
         scope.core({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
         loadSpend()
+        loadLinks() // the links file may have changed on the desktop (F18-FR1)
     }
 
     /** F16-FR5: spend by month and the rates' date; one redraw when both are in. */
@@ -205,6 +221,7 @@ class SettingsActivity : Activity() {
                 if (r.value.saveFolder != settings?.saveFolder) editingFolder = false
                 settings = r.value; errors.clear()
                 segmentMs = r.value.segmentMsDebug
+                CoreJson.obj(json) { o -> CalendarPrefs.from(o.optJSONObject("settings")?.optJSONObject("calendar")) }.getOrNull()?.let { calendar = it }
             }
             is CoreResult.Err -> errors[r.field ?: ""] = r.message
         }
@@ -384,7 +401,114 @@ class SettingsActivity : Activity() {
         val p = ui.page(column)
         page = p
         setContentView(p)
-        if (y > 0) p.post { p.scrollTo(0, y) }
+        val target = calendarCard
+        if (scrollToCalendar && target != null && settings != null) {
+            scrollToCalendar = false
+            p.post { p.scrollTo(0, (target.top - ui.dim(40)).coerceAtLeast(0)) }
+        } else if (y > 0) p.post { p.scrollTo(0, y) }
+    }
+
+    /** F18-FR13: each link's name, elided URL and status, as the core reports them. */
+    private fun loadLinks() {
+        scope.core({ NativeBridge.nativeCalendarLinks() }) { json ->
+            CoreJson.list(json, CalendarLink::from).getOrNull()?.let { if (it != links) { links = it; render() } }
+        }
+    }
+
+    /** Refresh now: every link, then the list again (F18-FR4). */
+    private fun refreshLinks() {
+        if (refreshing) return
+        refreshing = true; render()
+        CalendarJobs.refresh(true) { _ ->
+            refreshing = false
+            if (!isDestroyed) { render(); loadLinks() }
+        }
+    }
+
+    /**
+     * F18-FR13: Settings → CALENDAR. The links (added from the computer, read-only here), Refresh
+     * now, the refresh interval, linking by time, sending the event with the minutes (OQ25), the
+     * template keyword rules, and how to add a link.
+     */
+    private fun calendarSection(column: LinearLayout) {
+        if (settings == null) return
+        val card = ui.section(column, "Calendar")
+        calendarCard = card
+        val zone = java.time.ZoneId.systemDefault()
+        val l = links
+        card.apply {
+            when {
+                l == null -> addView(ui.note("Reading the calendar links…", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(10)) })
+                l.isEmpty() -> addView(ui.body("No calendar link yet.", 16f).apply { setPadding(0, ui.dim(10), 0, ui.dim(4)) })
+                else -> l.forEachIndexed { i, link ->
+                    if (i > 0) addView(ui.hairline())
+                    addView(LinearLayout(this@SettingsActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(0, ui.dim(10), 0, ui.dim(10))
+                        addView(ui.body(link.name, 17f, bold = true))
+                        addView(ui.eyebrow(link.elided, ui.textMuted).apply { isAllCaps = false; text = link.elided }, ui.wrap().apply { topMargin = ui.dim(2) })
+                        addView(ui.note(CalendarFormat.linkStatus(link, zone), 13f), ui.wrap().apply { topMargin = ui.dim(4) })
+                    })
+                }
+            }
+            if (!l.isNullOrEmpty()) {
+                addView(ui.pill(if (refreshing) "Refreshing…" else "Refresh now", size = 15f) { refreshLinks() },
+                    ui.wrap().apply { topMargin = ui.dim(6); bottomMargin = ui.dim(10) })
+            }
+            addView(ui.hairline())
+            addView(ui.eyebrow("Refresh").apply { setPadding(0, ui.dim(12), 0, 0) })
+            CalendarFormat.INTERVALS.forEachIndexed { i, (min, label) ->
+                if (i > 0) addView(ui.hairline())
+                choice(label, if (min == 0) "Only when you tap Refresh or UPDATED on Home" else null, calendar.refreshMin == min) {
+                    patch(CalendarPatch.refreshMin(min))
+                }
+            }
+            errors["calendar.refreshMin"]?.let { addView(error(it)) }
+            addView(ui.hairline())
+            toggle("Link recordings to events by time", "A recording started during an event (or 5 minutes before) is linked to it.", calendar.linkByTime) {
+                patch(CalendarPatch.linkByTime(!calendar.linkByTime))
+            }
+            addView(ui.hairline())
+            toggle("Send the event with the minutes", "The title, time, attendees' names and agenda go to the summary provider at Stop.", calendar.eventInMinutes) {
+                patch(CalendarPatch.eventInMinutes(!calendar.eventInMinutes))
+            }
+            addView(ui.hairline())
+            addView(ui.eyebrow("Template by keyword").apply { setPadding(0, ui.dim(12), 0, 0) })
+            addView(ui.note("The first keyword found in an event's title picks its template; otherwise the default.", 13f).apply { setPadding(0, ui.dim(4), 0, ui.dim(6)) })
+            calendar.rules.forEachIndexed { i, (keyword, tid) ->
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, ui.dim(8), 0, ui.dim(8))
+                    val name = templates.firstOrNull { it.id == tid }?.name ?: tid
+                    addView(ui.body("“$keyword”  →  $name", 16f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(ui.eyebrow("Remove", ui.textMuted).apply {
+                        setPadding(ui.dim(12), ui.dim(6), 0, ui.dim(6)); isClickable = true
+                        setOnClickListener { patch(CalendarPatch.rules(calendar.rules.filterIndexed { j, _ -> j != i })) }
+                    })
+                })
+            }
+            errors["calendar.templateRules"]?.let { addView(error(it)) }
+            addView(ui.pill("Add a rule", size = 15f) { addRule() }, ui.wrap().apply { topMargin = ui.dim(6); bottomMargin = ui.dim(12) })
+            addView(ui.hairline())
+            addView(ui.eyebrow("Adding a link").apply { setPadding(0, ui.dim(12), 0, 0) })
+            addView(ui.note(CalendarFormat.HOW_TO, 13f).apply { setPadding(0, ui.dim(6), 0, 0); setLineSpacing(0f, 1.2f) })
+            addView(ui.note(CalendarFormat.LIMIT, 13f).apply { setPadding(0, ui.dim(6), 0, 0) })
+            addView(ui.note(CalendarFormat.SYNC_NOTE, 13f, ui.textMuted).apply { setPadding(0, ui.dim(6), 0, ui.dim(12)) })
+        }
+    }
+
+    /** A keyword, then the template it picks; saved as the whole list (F18-FR13). */
+    private fun addRule() {
+        InkDialog.text(this, ui, "Keyword in the event's title", "") { keyword ->
+            val k = keyword.trim()
+            if (k.isEmpty()) return@text
+            val rows = templates
+            if (rows.isEmpty()) return@text
+            android.app.AlertDialog.Builder(this, R.style.InkDialog).setTitle("Template for “$k”")
+                .setItems(rows.map { it.name }.toTypedArray()) { _, i -> patch(CalendarPatch.rules(calendar.rules + (k to rows[i].id))) }
+                .setNegativeButton("CANCEL", null).show()
+        }
     }
 
     override fun finish() {
@@ -394,7 +518,7 @@ class SettingsActivity : Activity() {
 
     /** Rebuilds the page after each choice; e-ink redraws once per tap, never animates. */
     private fun render() {
-        resultViews.clear(); modelViews.clear()
+        resultViews.clear(); modelViews.clear(); calendarCard = null
         val column = ui.column().apply {
             addView(ui.header("Back"))
             addView(ui.spacer(ui.dim(28)))
@@ -411,6 +535,8 @@ class SettingsActivity : Activity() {
         providerSection(column, "Summary & to-dos", SettingsView.SUMMARISE, null)
 
         templateSection(column)
+
+        calendarSection(column)
 
         spendSection(column)
 
@@ -564,5 +690,8 @@ class SettingsActivity : Activity() {
 
     companion object {
         private const val SHORT_SEGMENT_MS = 60_000L
+        /** Open at a card: Home's "CALENDAR" asks for [SECTION_CALENDAR]. */
+        const val EXTRA_SECTION = "section"
+        const val SECTION_CALENDAR = "calendar"
     }
 }

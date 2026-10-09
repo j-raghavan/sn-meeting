@@ -438,7 +438,7 @@ class MainActivity : Activity(), HomeLists.Actions {
     private fun openCalendarSettings() {
         val a = agenda
         if (a != null && !a.hasLinks) return InkDialog.info(this, "Add a calendar link", CalendarFormat.HOW_TO + "\n\n" + CalendarFormat.LIMIT)
-        startActivity(Intent(this, SettingsActivity::class.java))
+        startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_SECTION, SettingsActivity.SECTION_CALENDAR))
         overridePendingTransition(0, 0)
     }
 
