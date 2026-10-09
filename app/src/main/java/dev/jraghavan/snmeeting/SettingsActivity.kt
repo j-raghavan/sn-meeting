@@ -24,6 +24,9 @@ import dev.jraghavan.snmeeting.record.BtSnapshot
 import dev.jraghavan.snmeeting.record.MicKind
 import dev.jraghavan.snmeeting.record.MicSelector
 import dev.jraghavan.snmeeting.record.usbInputs
+import dev.jraghavan.snmeeting.update.UpdateController
+import dev.jraghavan.snmeeting.update.UpdateGate
+import dev.jraghavan.snmeeting.update.UpdatePolicy
 
 /**
  * Settings (spec F10) in the Inkwell style (F9): microphone, save folder, the transcribe and
@@ -60,6 +63,10 @@ class SettingsActivity : Activity() {
     private var segmentMs: Long? = null
     private var showSegmentLength = false
 
+    /** F14-AC2: whether this copy carries the release key (read once; a cheap PackageManager call). */
+    private val canUpdate by lazy { UpdateController(this).canUpdateItself() }
+    private var unobserveUpdates: (() -> Unit)? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         ui = Inkwell(this)
@@ -72,9 +79,12 @@ class SettingsActivity : Activity() {
         super.onStart()
         // Mics come and go while the screen is open (F10-FR2).
         bt = BluetoothState(this, handler) { render() }.also { it.open() }
+        // F14-FR8: a check or download finishing redraws About with its result.
+        unobserveUpdates = UpdateGate.observe { render() }
     }
 
     override fun onStop() {
+        unobserveUpdates?.invoke(); unobserveUpdates = null
         bt?.close(); bt = null
         super.onStop()
     }
@@ -189,6 +199,83 @@ class SettingsActivity : Activity() {
         }
     }
 
+    /**
+     * F14-FR8, inkread's Settings → Updates in the About card: "Check for updates", the result in
+     * place, Install / Skip this version / Later when one is found, and the two toggles.
+     */
+    private fun updates(card: LinearLayout) {
+        val prefs = settings?.updates ?: return
+        card.addView(ui.hairline())
+        if (!canUpdate) {
+            card.addView(ui.note(UpdatePolicy.CANT_UPDATE, 13f).apply { setPadding(0, ui.dim(12), 0, ui.dim(12)) })
+        } else {
+            val st = UpdateGate.state
+            val busy = st == UpdateGate.State.Checking || st is UpdateGate.State.Downloading
+            card.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, ui.dim(12), 0, ui.dim(8))
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(ui.eyebrow("Updates"))
+                    addView(ui.body("Check for updates", 16f), ui.wrap().apply { topMargin = ui.dim(4) })
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(ui.pill(if (busy) "Checking…" else "Check now", size = 15f) {
+                    if (!busy) UpdateGate.checkNow(this@SettingsActivity, prefs)
+                })
+            })
+            when (st) {
+                UpdateGate.State.Idle -> Unit
+                UpdateGate.State.Checking -> card.addView(updateLine("Checking GitHub for a newer release…"))
+                is UpdateGate.State.Downloading -> card.addView(updateLine("Downloading and verifying v${st.version}…"))
+                is UpdateGate.State.Line -> card.addView(updateLine(st.text))
+                is UpdateGate.State.Found -> found(card, st.available)
+            }
+        }
+        card.addView(ui.hairline())
+        card.toggle("Check for updates automatically",
+            "When Meetings opens, at most every 6 hours, never while recording or transcribing. There is no store to deliver fixes.",
+            prefs.autoCheck) { patch(SettingsPatch.autoCheck(!prefs.autoCheck)) }
+        card.addView(ui.hairline())
+        card.toggle("Install updates automatically",
+            "Download and verify a new release and go straight to Android's install confirmation, without asking first. Off by default.",
+            prefs.autoInstall) { patch(SettingsPatch.autoInstall(!prefs.autoInstall)) }
+    }
+
+    private fun updateLine(text: String): TextView = ui.note(text, 13f).apply { setPadding(0, 0, 0, ui.dim(12)) }
+
+    /** A found release: its version and notes, then Install / Skip this version / Later. */
+    private fun found(card: LinearLayout, a: UpdateController.Available) {
+        card.addView(ui.body("Meetings v${a.version} is available", 16f, bold = true), ui.wrap().apply { topMargin = ui.dim(4) })
+        card.addView(ui.note(UpdatePolicy.notes(a), 13f), ui.wrap().apply { topMargin = ui.dim(6) })
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dim(14), 0, ui.dim(14))
+            addView(ui.pill("Install", filled = true, size = 15f) { UpdateGate.install(this@SettingsActivity, a) })
+            addView(ui.pill("Skip this version", size = 15f) { UpdateGate.skip(a) }, ui.wrap().apply { marginStart = ui.dim(12) })
+            addView(ui.pill("Later", size = 15f) { UpdateGate.later() }, ui.wrap().apply { marginStart = ui.dim(12) })
+        })
+    }
+
+    /** A keyline checkbox row (the toggle style of inkread's Settings), saved at once. */
+    private fun LinearLayout.toggle(label: String, hint: String, on: Boolean, flip: () -> Unit) {
+        addView(LinearLayout(this@SettingsActivity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, ui.dim(12), 0, ui.dim(12))
+            addView(ui.checkbox(on))
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(ui.dim(14), 0, 0, 0)
+                addView(ui.body(label, 17f))
+                addView(ui.note(hint, 13f), ui.wrap().apply { topMargin = ui.dim(2) })
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            isClickable = true
+            setOnClickListener { flip() }
+        })
+    }
+
     /** The core's reason a change was refused, under the field it concerns. */
     private fun error(message: String): TextView = ui.note(message, 13f, ui.ink).apply { setPadding(0, ui.dim(4), 0, ui.dim(10)) }
 
@@ -238,6 +325,7 @@ class SettingsActivity : Activity() {
                 addView(ui.note("Keys are read from MyStyle/SnCopilot (shared with SN-Copilot).", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
+            updates(this)
             if (showSegmentLength || segmentMs != null) segmentLength(this)
         }
 

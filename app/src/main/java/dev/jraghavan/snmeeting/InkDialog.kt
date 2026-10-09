@@ -39,6 +39,17 @@ object InkDialog {
             .showSerif()
     }
 
+    /** Three answers (the update prompt: Install / Skip this version / Later, F14-FR8). */
+    fun choose(a: Activity, title: String, message: String, yes: String, no: String, later: String, onYes: () -> Unit, onNo: () -> Unit, onLater: () -> Unit) {
+        if (gone(a)) return
+        builder(a).setTitle(title).setMessage(message)
+            .setPositiveButton(yes.uppercase()) { _, _ -> onYes() }
+            .setNegativeButton(no.uppercase()) { _, _ -> onNo() }
+            .setNeutralButton(later.uppercase()) { _, _ -> onLater() }
+            .setOnCancelListener { onLater() }
+            .showSerif()
+    }
+
     fun error(a: Activity, title: String, message: String) {
         if (gone(a)) return
         builder(a).setTitle(title).setMessage(message).setPositiveButton("OK", null).showSerif()

@@ -39,6 +39,7 @@ import dev.jraghavan.snmeeting.record.Recoverer
 import dev.jraghavan.snmeeting.record.RecordingService
 import dev.jraghavan.snmeeting.record.RetrieverDuration
 import dev.jraghavan.snmeeting.record.usbInputs
+import dev.jraghavan.snmeeting.update.UpdateGate
 
 /**
  * Home screen (spec F6) in the Inkwell style (F9): the recorder, the 5 most recent meetings,
@@ -183,6 +184,8 @@ class MainActivity : Activity() {
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
             CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; render() } }
         }
+        // F14-FR8: the throttled release check (as inkread's HomeActivity); quiet while recording.
+        UpdateGate.maybeCheckOnLaunch(this)
     }
 
     /**

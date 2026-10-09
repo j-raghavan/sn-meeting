@@ -1,6 +1,7 @@
 package dev.jraghavan.snmeeting.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -80,6 +81,24 @@ class CoreModelsTest {
         val s = CoreJson.obj("""{"recovered":[],"measure":[],"flagged":[{"id":"b","index":0,"flag":"missing"}],"noAudio":["b"]}""", Recovery::from).getOrNull()!!
         assertEquals(listOf("b"), s.noAudio)
         assertEquals("missing", s.flagged.single().flag)
+    }
+
+    @Test fun updatePrefsAndPatches() { // F14-FR8
+        val j = """{"settings":{"updates":{"autoCheck":false,"autoInstall":true,"lastCheckMs":1791000000000,"skipVersion":"0.2.0"}},"effective":{}}"""
+        val u = (CoreJson.obj(j, SettingsView::from) as CoreResult.Ok).value.updates
+        assertEquals(UpdatePrefs(autoCheck = false, autoInstall = true, lastCheckMs = 1_791_000_000_000L, skipVersion = "0.2.0"), u)
+        assertFalse("auto-install acts only with auto-check", u.autoInstallEffective)
+        // An older settings.json without the object: inkread's defaults.
+        val old = (CoreJson.obj("""{"settings":{},"effective":{}}""", SettingsView::from) as CoreResult.Ok).value.updates
+        assertEquals(UpdatePrefs(), old)
+        assertTrue(old.autoCheck)
+        assertFalse(old.autoInstall)
+        assertEquals("""{"updates":{"autoCheck":false,"autoInstall":false}}""", SettingsPatch.autoCheck(false))
+        assertEquals("""{"updates":{"autoCheck":true}}""", SettingsPatch.autoCheck(true))
+        assertEquals("""{"updates":{"autoInstall":true,"autoCheck":true}}""", SettingsPatch.autoInstall(true))
+        assertEquals("""{"updates":{"autoInstall":false}}""", SettingsPatch.autoInstall(false))
+        assertEquals("""{"updates":{"lastCheckMs":42}}""", SettingsPatch.lastCheck(42))
+        assertEquals("""{"updates":{"skipVersion":"0.2.0"}}""", SettingsPatch.skipVersion("0.2.0"))
     }
 
     @Test fun settingsViewAndPatches() {

@@ -38,6 +38,26 @@ sealed class KeyStatus {
 }
 
 data class RoleChoice(val provider: String?, val model: String?)
+
+/** settings.updates (F14-FR8): inkread's update settings, kept in the core's settings.json. */
+data class UpdatePrefs(
+    val autoCheck: Boolean = true,
+    val autoInstall: Boolean = false,
+    val lastCheckMs: Long = 0,
+    val skipVersion: String = "",
+) {
+    /** Auto-install acts only while auto-check is on (as inkread). */
+    val autoInstallEffective get() = autoCheck && autoInstall
+
+    companion object {
+        fun from(o: JSONObject?): UpdatePrefs = UpdatePrefs(
+            autoCheck = o?.bool("autoCheck") ?: true,
+            autoInstall = o?.bool("autoInstall") ?: false,
+            lastCheckMs = o?.long("lastCheckMs") ?: 0,
+            skipVersion = o?.str("skipVersion") ?: "",
+        )
+    }
+}
 data class Effective(val provider: String, val model: String?, val modelSource: String?)
 
 /** nativeGetSettings / nativeSetSettings. */
@@ -47,6 +67,7 @@ data class SettingsView(
     val noticeShown: Map<String, Boolean>, val segmentMsDebug: Long?,
     val origin: String, val effectiveTranscribe: Effective, val effectiveSummarise: Effective,
     val saveFolderPath: String, val effectiveDefaultTemplate: String, val keys: Map<String, KeyStatus>,
+    val updates: UpdatePrefs = UpdatePrefs(),
 ) {
     fun effective(role: String) = if (role == TRANSCRIBE) effectiveTranscribe else effectiveSummarise
     fun choice(role: String) = if (role == TRANSCRIBE) transcribe else summarise
@@ -81,6 +102,7 @@ data class SettingsView(
                 saveFolderPath = e.strOr("saveFolderPath", ""),
                 effectiveDefaultTemplate = e.strOr("defaultTemplate", default),
                 keys = PROVIDERS.mapNotNull { p -> k?.obj(p)?.let { p to KeyStatus.from(it) } }.toMap(),
+                updates = UpdatePrefs.from(s.obj("updates")),
             )
         }
     }
@@ -96,6 +118,12 @@ object SettingsPatch {
     fun defaultTemplate(id: String) = """{"defaultTemplate":${CoreJson.quote(id)}}"""
     /** F2-AC3's hidden segment length; null returns to the standard plan. */
     fun segmentMs(ms: Long?) = """{"debug":{"segmentMs":${ms ?: "null"}}}"""
+    /** Turning auto-check off turns auto-install off; turning auto-install on turns auto-check
+     *  on (as inkread's Settings). */
+    fun autoCheck(on: Boolean) = if (on) """{"updates":{"autoCheck":true}}""" else """{"updates":{"autoCheck":false,"autoInstall":false}}"""
+    fun autoInstall(on: Boolean) = if (on) """{"updates":{"autoInstall":true,"autoCheck":true}}""" else """{"updates":{"autoInstall":false}}"""
+    fun lastCheck(ms: Long) = """{"updates":{"lastCheckMs":$ms}}"""
+    fun skipVersion(v: String) = """{"updates":{"skipVersion":${CoreJson.quote(v)}}}"""
     fun noticeShown(providers: Collection<String>) =
         providers.joinToString(",", """{"noticeShown":{""", "}}") { "${CoreJson.quote(it)}:true" }
 }

@@ -13,7 +13,8 @@ fn defaults_json() -> Value {
         "summarise": {"provider": null, "model": null},
         "defaultTemplate": "general",
         "noticeShown": {"openai": false, "gemini": false, "anthropic": false},
-        "debug": {"segmentMs": null}
+        "debug": {"segmentMs": null},
+        "updates": {"autoCheck": true, "autoInstall": false, "lastCheckMs": 0, "skipVersion": ""}
     })
 }
 
@@ -49,6 +50,7 @@ fn unknown_fields_survive_a_save_at_every_level() {
         "defaultTemplate": "general",
         "noticeShown": {"openai": true, "gemini": false, "anthropic": false, "deepseek": true},
         "debug": {"segmentMs": 60000, "y": [2]},
+        "updates": {"autoCheck": false, "autoInstall": false, "lastCheckMs": 7, "skipVersion": "0.2.0", "w": 4},
         "transcriptOptions": {"z": 3}
     });
     fs::write(&p, v.to_string()).unwrap();

@@ -49,6 +49,8 @@ pub struct Settings {
     /// Security: the one-time "audio is sent to <provider>" notice, per provider.
     pub notice_shown: NoticeShown,
     pub debug: DebugSettings,
+    /// F14-FR8: the in-app updater's choices (inkread keeps these in its AppSettings).
+    pub updates: UpdateSettings,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -65,6 +67,7 @@ impl Default for Settings {
             default_template: DEFAULT_TEMPLATE.into(),
             notice_shown: NoticeShown::default(),
             debug: DebugSettings::default(),
+            updates: UpdateSettings::default(),
             extra: Extra::new(),
         }
     }
@@ -172,6 +175,40 @@ pub struct DebugSettings {
     pub extra: Extra,
 }
 
+/// F14-FR8, as inkread's update settings: check on launch (on by default), install without the
+/// prompt (opt-in, effective only with auto-check), when a check last got an answer (the 6 h
+/// launch throttle), and the version the user chose to skip ("" for none).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UpdateSettings {
+    pub auto_check: bool,
+    pub auto_install: bool,
+    /// Epoch milliseconds; 0 = never.
+    pub last_check_ms: u64,
+    pub skip_version: String,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        UpdateSettings {
+            auto_check: true,
+            auto_install: false,
+            last_check_ms: 0,
+            skip_version: String::new(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// A skipped version is a release tag's version: short, printable.
+const MAX_SKIP_VERSION_LEN: usize = 64;
+
+fn skip_version_ok(v: &str) -> bool {
+    v.len() <= MAX_SKIP_VERSION_LEN && !v.chars().any(char::is_control)
+}
+
 /// Where the settings in use came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -273,6 +310,9 @@ fn sanitised(mut s: Settings) -> Settings {
         s.save_folder = DEFAULT_SAVE_FOLDER.into();
     }
     s.previous_folders.retain(|f| folder::plausible(f));
+    if !skip_version_ok(&s.updates.skip_version) {
+        s.updates.skip_version.clear();
+    }
     for role in Role::ALL {
         let rs = s.role_mut(role);
         if rs.provider.is_some_and(|p| !role.providers().contains(&p)) {
@@ -380,6 +420,14 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
             .as_str()
             .ok_or_else(|| err("mic", "mic must be a string"))?;
         MicChoice::try_from(m.to_owned()).map_err(|e| err("mic", e))?;
+    }
+    if let Some(v) = patch
+        .get("updates")
+        .and_then(|u| u.get("skipVersion"))
+        .filter(|v| !v.is_null())
+        && !v.as_str().is_some_and(skip_version_ok)
+    {
+        return Err(err("updates.skipVersion", "invalid version"));
     }
     let mut v = serde_json::to_value(current).map_err(|e| SettingsError {
         field: None,
