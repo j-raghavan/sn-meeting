@@ -5,10 +5,10 @@
 
 The mark: a desk calendar block with depth and a studio mic in front of it, in inkread's Inkwell
 language: a few bold ink shapes, details cut in paper, separations in the background colour. It is
-drawn on a 432 x 432 canvas, and FIT centres its ink box (about 290 x 280 px) on the canvas. The
-Supernote's app list shows the adaptive icon as a 70 px square tile with no circular mask, cropping
-the canvas to about its centre 307 px, so the mark fills the tile the way Kindle's picture fills its
-own. Like inkread's, the corners of the ink box reach past the 66 dp safe circle.
+drawn on a 432 x 432 canvas, and FIT centres it at 93%, an ink box of about 276 x 268 px. The
+Supernote's app list and the home-screen logo show the adaptive icon's centre 72 dp (288 px) as a
+square tile with no circular mask, so the mark fills the tile, as Kindle's picture fills its own,
+with a thin margin. Like inkread's, the corners of the ink box reach past the 66 dp safe circle.
 
 Outputs:
   meetings-fg-light.svg  launcher foreground (transparent) and the README's light icon
@@ -20,9 +20,9 @@ Outputs:
 import os
 
 BG = "#F2ECDE"  # = res/values/ic_launcher_background.xml, as inkread
-FIT = "translate(4 3)"
-# The legacy icons rescale the fitted mark (ink box about 290 px wide) to inkread's measured
-# proportions: 72% of the width on the square (x 1.07), 66% inside the circle (x 0.98).
+FIT = "translate(216 216) scale(0.93) translate(-207.5 -213)"
+# The legacy icons rescale the fitted mark (ink box about 276 px wide) to inkread's measured
+# proportions: 72% of the width on the square (x 1.127), 66% inside the circle (x 1.03).
 def legacy_scale(k):
     return f"translate(216 216) scale({k}) translate(-216 -216)"
 
@@ -80,5 +80,5 @@ def write(name, text):
 
 write("meetings-fg-light.svg", fg(BG, "#111111", "#FFFFFF"))   # launcher + README light
 write("meetings-fg-dark.svg", fg("#111111", BG, "#111111"))    # README dark mode
-write("legacy-square.svg", legacy(f'<rect width="432" height="432" rx="86" fill="{BG}"/>', 1.07))
-write("legacy-round.svg", legacy(f'<circle cx="216" cy="216" r="216" fill="{BG}"/>', 0.98))
+write("legacy-square.svg", legacy(f'<rect width="432" height="432" rx="86" fill="{BG}"/>', 1.127))
+write("legacy-round.svg", legacy(f'<circle cx="216" cy="216" r="216" fill="{BG}"/>', 1.03))
