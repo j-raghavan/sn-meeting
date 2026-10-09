@@ -51,6 +51,11 @@ class MeetingActivity : Activity() {
     private lateinit var cards: MeetingCards
     private var transcriptPage = 0
     private var progress: TextView? = null
+    /** F19-FR3: a search hit's moment to cue playback to, and the part to scroll to, once. */
+    private var cueAt: Long? = null
+    private var focus: String? = null
+    private var mark: Pair<Int, Int>? = null
+    private val anchors = HashMap<String, View>()
 
     /** F7-FR2: while this meeting's job runs, the sidecar is re-read once a second for progress. */
     private val poll = object : Runnable {
@@ -91,6 +96,8 @@ class MeetingActivity : Activity() {
         scope = ScreenScope(this)
         cards = MeetingCards(this, ui)
         id = intent.getStringExtra(EXTRA_ID) ?: run { finish(); return }
+        cueAt = intent.getLongExtra(EXTRA_AT_MS, -1).takeIf { it >= 0 }
+        focus = intent.getStringExtra(EXTRA_FOCUS)
         CoreJobs.init(filesDir.absolutePath)
         setContentView(ui.page(ui.column().apply { addView(ui.header("All meetings")) }))
     }
@@ -132,13 +139,30 @@ class MeetingActivity : Activity() {
         scope.core({ NativeBridge.nativeGetMeeting(id) }) { json ->
             when (val r = CoreJson.obj(json, MeetingView::from)) {
                 is CoreResult.Ok -> {
-                    view = r.value; preparePlayback(r.value); render()
+                    view = r.value; preparePlayback(r.value); cueOnce(r.value); render(); scrollToFocus()
                     handler.removeCallbacks(poll)
                     if (LongJobs.lane.isRunning(id)) handler.postDelayed(poll, 1000)
                 }
                 is CoreResult.Err -> showGone(r.message)
             }
         }
+    }
+
+    /** F19-FR3: opened from a search hit at a moment: playback waits there, the paragraph spoken
+     *  then is on the transcript page shown and outlined. Only on the first load. */
+    private fun cueOnce(v: MeetingView) {
+        val at = cueAt ?: return
+        cueAt = null
+        playback?.cue(at)
+        TranscriptPages.locate(v.meeting.segments, at)?.let { mark = it; transcriptPage = it.first }
+    }
+
+    /** F19-FR3: scrolled to the minutes, to-dos or transcript a hit came from, once. */
+    private fun scrollToFocus() {
+        val f = focus ?: return
+        focus = null
+        val target = anchors[f] ?: return
+        page?.post { page?.scrollTo(0, target.top) }
     }
 
     /** Deleted on the desktop, or unreadable: say so rather than show stale details. */
@@ -345,24 +369,25 @@ class MeetingActivity : Activity() {
             addView(actionsRow(actions!!))
 
             val m = v.meeting
+            anchors.clear()
             SummaryCard.of(m)?.let { c ->
                 addView(ui.spacer(ui.dim(36)))
-                addView(ui.eyebrowItalic("Summary"))
+                addView(ui.eyebrowItalic("Summary").also { anchors["summary"] = it })
                 addView(ui.spacer(ui.dim(14)))
                 addView(cards.summary(c))
             }
             if (m.todos.isNotEmpty() || m.status == Status.DONE) {
                 addView(ui.spacer(ui.dim(36)))
-                addView(ui.eyebrowItalic("To-dos from this meeting"))
+                addView(ui.eyebrowItalic("To-dos from this meeting").also { anchors["todos"] = it })
                 addView(ui.spacer(ui.dim(14)))
                 addView(cards.todos(m.todos, ::setDone))
             }
             val pages = TranscriptPages.pages(TranscriptPages.paragraphs(m.segments))
             if (pages.isNotEmpty()) {
                 addView(ui.spacer(ui.dim(36)))
-                addView(ui.eyebrowItalic("Transcript"))
+                addView(ui.eyebrowItalic("Transcript").also { anchors["transcript"] = it })
                 addView(ui.spacer(ui.dim(14)))
-                addView(cards.transcript(pages, transcriptPage) { transcriptPage = it })
+                addView(cards.transcript(pages, transcriptPage, mark) { transcriptPage = it })
             }
 
             addView(ui.spacerWeighted(ui.phi))
@@ -415,5 +440,9 @@ class MeetingActivity : Activity() {
 
     companion object {
         const val EXTRA_ID = "meeting_id"
+        /** F19-FR3: recording-clock ms to cue playback to (a search hit's time). */
+        const val EXTRA_AT_MS = "at_ms"
+        /** F19-FR3: summary, todos or transcript: the part to scroll to. */
+        const val EXTRA_FOCUS = "focus"
     }
 }

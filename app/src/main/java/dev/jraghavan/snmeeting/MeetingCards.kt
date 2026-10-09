@@ -75,7 +75,8 @@ class MeetingCards(private val a: Activity, private val ui: Inkwell) {
      * The transcript in whole pages, no scrolling inside the text (e-ink): ‹ Previous and
      * Next › turn a page in place. [page] is the page to open on; [onTurn] remembers it.
      */
-    fun transcript(pages: List<List<TranscriptPages.Para>>, page: Int, onTurn: (Int) -> Unit): View = ui.card(padV = ui.dim(22)).apply {
+    /** [mark]: (page, paragraph) to outline, the one a search hit opened at (F19-FR3). */
+    fun transcript(pages: List<List<TranscriptPages.Para>>, page: Int, mark: Pair<Int, Int>? = null, onTurn: (Int) -> Unit): View = ui.card(padV = ui.dim(22)).apply {
         val body = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
         val label: TextView = ui.eyebrow("").apply { gravity = Gravity.CENTER }
         var current = page.coerceIn(0, pages.size - 1)
@@ -85,7 +86,10 @@ class MeetingCards(private val a: Activity, private val ui: Inkwell) {
                 if (p.marker != null) {
                     body.addView(ui.eyebrow("[${p.marker}]"), ui.wrap().apply { topMargin = if (i > 0) ui.dim(18) else 0 })
                 }
-                body.addView(ui.body(p.text, 17f).apply { setLineSpacing(0f, 1.35f) }, ui.fullWidth().apply { topMargin = ui.dim(8) })
+                body.addView(ui.body(p.text, 17f).apply {
+                    setLineSpacing(0f, 1.35f)
+                    if (mark == current to i) { background = ui.outline(ui.dim(4)); setPadding(ui.dim(10), ui.dim(8), ui.dim(10), ui.dim(8)) }
+                }, ui.fullWidth().apply { topMargin = ui.dim(8) })
             }
             label.text = "PAGE ${current + 1} OF ${pages.size}"
         }

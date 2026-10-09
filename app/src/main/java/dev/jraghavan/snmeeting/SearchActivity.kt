@@ -171,7 +171,7 @@ class SearchActivity : Activity() {
         addView(ui.card(padV = ui.dim(6)).apply {
             g.hits.forEachIndexed { i, h ->
                 if (i > 0) addView(ui.hairline())
-                addView(hit(h), ui.fullWidth())
+                addView(hit(h).apply { isClickable = true; setOnClickListener { open(SearchModel.open(g, h)) } }, ui.fullWidth())
             }
             SearchModel.more(g)?.let { addView(ui.note(it, 13f, ui.textMuted).apply { setPadding(0, ui.dim(4), 0, ui.dim(8)) }) }
         }, ui.fullWidth().apply { topMargin = ui.dim(10) })
@@ -185,6 +185,21 @@ class SearchActivity : Activity() {
         addView(ui.body(snippet(h), 16f).apply {
             maxLines = 2; ellipsize = TextUtils.TruncateAt.END; setLineSpacing(0f, 1.25f)
         }, ui.fullWidth().apply { topMargin = ui.dim(6) })
+    }
+
+    /** F19-FR3: a meeting hit opens the meeting at its moment or part; an event its details. */
+    private fun open(o: SearchModel.Open) {
+        when (o) {
+            is SearchModel.Open.Meeting -> {
+                val i = android.content.Intent(this, MeetingActivity::class.java).putExtra(MeetingActivity.EXTRA_ID, o.id)
+                o.atMs?.let { i.putExtra(MeetingActivity.EXTRA_AT_MS, it) }
+                o.focus?.let { i.putExtra(MeetingActivity.EXTRA_FOCUS, it) }
+                startActivity(i)
+                overridePendingTransition(0, 0)
+            }
+            // M13 hook: the event sheet (F18-FR8). Until the calendar arrives, its title and time.
+            is SearchModel.Open.Event -> InkDialog.info(this, o.title, SearchModel.stamp(o.startMs))
+        }
     }
 
     private fun snippet(h: SearchHit): CharSequence = SpannableStringBuilder().apply {

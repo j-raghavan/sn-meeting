@@ -61,4 +61,33 @@ class SearchTest {
         assertNull(SearchModel.indexing(null))
         assertTrue(CoreJson.obj("""{"done":1}""", IndexStatus::from) is CoreResult.Err)
     }
+
+    /** F19-FR3: where each kind of hit opens. */
+    @Test fun hitsOpenAtTheirPlace() {
+        val r = (CoreJson.obj(json, SearchResults::from) as CoreResult.Ok).value
+        val (m, e) = r.groups
+        fun hit(kind: String, at: Long?) = m.hits[0].copy(kind = kind, atMs = at)
+        val id = "meeting-20261009-100000"
+        assertEquals(SearchModel.Open.Meeting(id, 759_000, "transcript"), SearchModel.open(m, hit("notes", 761_000)))
+        assertEquals(SearchModel.Open.Meeting(id, 0, "transcript"), SearchModel.open(m, hit("notes", 500)))
+        assertEquals(SearchModel.Open.Meeting(id, null, "transcript"), SearchModel.open(m, hit("notes", null)))
+        assertEquals(SearchModel.Open.Meeting(id, 761_000, "transcript"), SearchModel.open(m, hit("transcript", 761_000)))
+        assertEquals(SearchModel.Open.Meeting(id, null, "summary"), SearchModel.open(m, hit("minutes", null)))
+        assertEquals(SearchModel.Open.Meeting(id, null, "todos"), SearchModel.open(m, hit("todo", null)))
+        assertEquals(SearchModel.Open.Event("l1:u:-", "Budget sync", 1791820800000), SearchModel.open(e, e.hits[0]))
+    }
+
+    /** F19-FR3: the paragraph spoken at a moment, and its transcript page. */
+    @Test fun aMomentFindsItsParagraph() {
+        val segs = listOf(
+            Segment("a", 0, 900_000, "one\n\ntwo", null),
+            Segment("b", 900_000, 900_000, null, null),
+            Segment("c", 1_800_000, 900_000, "x".repeat(2000), null),
+        )
+        assertEquals(0 to 0, TranscriptPages.locate(segs, 5_000))
+        assertEquals(0 to 0, TranscriptPages.locate(segs, 1_000_000))
+        assertEquals(1 to 0, TranscriptPages.locate(segs, 1_900_000))
+        assertNull(TranscriptPages.locate(listOf(Segment("a", 10, 1, "t", null)), 5))
+        assertNull(TranscriptPages.locate(emptyList(), 5))
+    }
 }

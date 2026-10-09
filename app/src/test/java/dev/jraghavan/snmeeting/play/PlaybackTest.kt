@@ -114,4 +114,21 @@ class PlaybackTest {
         pb.play()
         assertEquals(1_860_000, pb.totalMs())
     }
+
+    /** F19-FR3: a hit's moment, across segments; ▶ starts there. */
+    @Test fun cuesToAMomentWithoutPlaying() {
+        p.cue(900_000 + 61_000)
+        assertFalse(p.playing)
+        assertEquals(961_000, p.positionMs())
+        p.play()
+        assertEquals(listOf("open b", "seek 61000", "start"), log)
+        p.cue(5_000) // while playing: stops, and waits at the new place
+        assertFalse(p.playing)
+        assertEquals(5_000, p.positionMs())
+        p.cue(99_999_999)
+        assertTrue("past the end waits in the last segment", p.positionMs() >= 1_800_000)
+        val empty = Playback(SegmentPlaylist(emptyList()), port) { changes++ }
+        empty.cue(10)
+        assertEquals(0, empty.positionMs())
+    }
 }

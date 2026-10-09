@@ -50,6 +50,30 @@ object SearchModel {
         if (h.changed) append("  ·  (notes changed since recognised)")
     }
 
+    /** Where a hit opens (F19-FR3). */
+    sealed class Open {
+        /** The meeting, cued to [atMs] when given, scrolled to [focus] (summary, todos, transcript). */
+        data class Meeting(val id: String, val atMs: Long?, val focus: String?) : Open()
+        /** An event with no meeting: its sheet (F18-FR8). */
+        data class Event(val key: String, val title: String, val startMs: Long) : Open()
+    }
+
+    /** ▶ on a notes hit plays from this long before the line was written (F19-FR3). */
+    const val NOTES_LEAD_MS = 2_000L
+
+    /**
+     * F19-FR3. Transcript: the meeting at that moment. Minutes or to-do: the meeting at its
+     * minutes or to-dos. Notes: the meeting cued 2 s before the line was written; M12 hook: the
+     * Notes tab centred on the line, its strokes outlined. Event: M13 hook, the event sheet.
+     */
+    fun open(g: SearchGroup, h: SearchHit): Open = when {
+        g.kind == "event" -> Open.Event(g.id, title(g), g.startMs)
+        h.kind == "notes" -> Open.Meeting(g.id, h.atMs?.let { (it - NOTES_LEAD_MS).coerceAtLeast(0) }, "transcript")
+        h.kind == "transcript" -> Open.Meeting(g.id, h.atMs, "transcript")
+        h.kind == "todo" -> Open.Meeting(g.id, null, "todos")
+        else -> Open.Meeting(g.id, null, "summary")
+    }
+
     /** "+ 12 more in this meeting" under a group whose hits were capped. */
     fun more(g: SearchGroup): String? = (g.hitCount - g.hits.size).takeIf { it > 0 }?.let { "+ $it more in this ${if (g.kind == "event") "event" else "meeting"}" }
 }

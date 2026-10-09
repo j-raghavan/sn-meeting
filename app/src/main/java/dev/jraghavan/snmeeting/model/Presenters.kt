@@ -213,6 +213,26 @@ object TranscriptPages {
             .mapIndexed { i, t -> Para(if (i == 0) Format.duration(s.startOffsetMs) else null, t) }
     }
 
+    /**
+     * F19-FR3: the paragraph spoken at [ms] (the last segment starting at or before it, its first
+     * paragraph), as (page, index on that page) of [pages] built from [segments]; null when none.
+     */
+    fun locate(segments: List<Segment>, ms: Long, budget: Int = PAGE_CHARS): Pair<Int, Int>? {
+        var flat = 0
+        var found: Int? = null
+        for (s in segments.filter { !it.text.isNullOrBlank() }) {
+            if (s.startOffsetMs <= ms) found = flat
+            flat += paragraphs(listOf(s)).size
+        }
+        val target = found ?: return null
+        var seen = 0
+        pages(paragraphs(segments), budget).forEachIndexed { pi, page ->
+            if (target < seen + page.size) return pi to (target - seen)
+            seen += page.size
+        }
+        return null
+    }
+
     /** Greedy by characters, so pages are even in height; a long paragraph gets a page to itself. */
     fun pages(paras: List<Para>, budget: Int = PAGE_CHARS): List<List<Para>> {
         val out = mutableListOf<MutableList<Para>>()
