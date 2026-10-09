@@ -463,3 +463,20 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRebuildIn
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// The local index only (F19-FR10); call it on the search thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSearch<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    query: JString<'local>,
+    filter: JString<'local>,
+    limit: jint,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let query: String = query.try_to_string(env)?;
+        let filter: String = filter.try_to_string(env)?;
+        env.new_string(crate::api::search(&query, &filter, limit))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

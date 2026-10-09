@@ -132,6 +132,13 @@ object NativeBridge {
 
     // Search (F19). The index is a cache in app-private storage, rebuilt from the files.
 
+    /** Searches the local index only (never a provider, F19-FR10). `filter` is all, notes,
+     *  transcript, minutes, todos or events; `limit` the most groups (0 = 50). `{query, filter,
+     *  groups: [{kind, id, title, start, startMs, hitCount, hits: [{kind, label, unitId, atMs,
+     *  time, snippet: [{text, bold}], region, bbox, strokeIds, changed}]}], more, totalGroups,
+     *  indexing}`. */
+    external fun nativeSearch(query: String, filter: String, limit: Int): String
+
     /** `{state: ready|indexing|missing, done, total}`; "Indexing 120/340" while it runs. */
     external fun nativeIndexStatus(): String
 

@@ -295,6 +295,11 @@ pub fn set_rates(json: &str) -> String {
     with_app(|app| app.set_rates_json(json))
 }
 
+/// `nativeSearch(query, filter, limit)` (F19-FR2): the local index only.
+pub fn search(query: &str, filter: &str, limit: i32) -> String {
+    with_app(|app| app.search_json(query, filter, limit))
+}
+
 /// `nativeIndexStatus()` (F19-FR5): `{state, done, total}`.
 pub fn index_status() -> String {
     with_app(App::index_status_json)

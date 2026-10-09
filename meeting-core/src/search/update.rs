@@ -223,6 +223,17 @@ impl Searcher {
         }
     }
 
+    /// The index can't be read: close it and remove its files, so the next update rebuilds it
+    /// (EC29). Not while an update runs; that one finishes on what it opened.
+    pub fn reset(&self) {
+        if self.busy.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut g = lock(&self.ix);
+        *g = None;
+        self.delete_files();
+    }
+
     /// Whether an update or rebuild is running now ("Still indexing…").
     pub fn indexing(&self) -> bool {
         self.busy.load(Ordering::SeqCst) || lock(&self.progress).empty
