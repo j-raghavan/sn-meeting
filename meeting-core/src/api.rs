@@ -274,6 +274,13 @@ pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))
 }
 
+/// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
+/// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
+/// capture thread can ask at any time.
+pub fn chunk_plan(id: &str, rms_json: &str) -> String {
+    guarded(|| crate::chunk::plan_json(id, rms_json))
+}
+
 /// `nativeSpend(fromMonth, toMonth)` (F16-FR5): spend per month, `YYYY-MM` inclusive.
 pub fn spend(from: &str, to: &str) -> String {
     with_app(|app| app.spend_json(from, to))
@@ -372,6 +379,12 @@ mod tests {
     fn a_panic_becomes_the_error_envelope() {
         assert_eq!(guarded(|| panic!("boom")), r#"{"error":"internal error"}"#);
         assert_eq!(guarded(|| "fine".to_owned()), "fine");
+    }
+
+    #[test]
+    fn chunk_plan_needs_no_init() {
+        let r = chunk_plan("meeting-20261009-100000", r#"{"rms":[],"limitMs":0}"#);
+        assert_eq!(r, r#"{"cutAtMs":0,"overlapMs":0,"speechMs":0}"#);
     }
 
     #[test]

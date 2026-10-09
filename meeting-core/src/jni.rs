@@ -588,3 +588,19 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeLinkEvent
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// Pure (F15-FR4): called from the recorder's capture thread about twice a minute.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeChunkPlan<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    rms_json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let rms: String = rms_json.try_to_string(env)?;
+        env.new_string(crate::api::chunk_plan(&id, &rms))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

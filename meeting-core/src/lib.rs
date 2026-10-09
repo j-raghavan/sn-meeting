@@ -3,6 +3,7 @@ pub mod api;
 pub mod app;
 pub mod atomic;
 pub mod calendar;
+pub mod chunk;
 pub mod jobs;
 pub mod keyfile;
 pub mod library;

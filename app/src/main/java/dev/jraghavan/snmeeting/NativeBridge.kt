@@ -110,6 +110,13 @@ object NativeBridge {
     /** Renders the layout against the sample meeting: `{markdown}` or `{error, line, field}`. */
     external fun nativePreviewTemplate(json: String): String
 
+    // Near-live transcript (F15).
+
+    /** F15-FR4: where the chunk being written ends, from its RMS per 100 ms block
+     *  (`{"rms": [..], "limitMs": n|null}`): `{cutAtMs|null, overlapMs, speechMs}`. Pure and
+     *  quick; it needs no [nativeInit], so the recorder's capture thread calls it directly. */
+    external fun nativeChunkPlan(id: String, rmsJson: String): String
+
     // Spend (F16). Rates are plain numbers, never secrets.
 
     /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,

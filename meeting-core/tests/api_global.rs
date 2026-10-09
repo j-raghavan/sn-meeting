@@ -134,8 +134,8 @@ fn init_then_the_app_exports() {
     );
 }
 
-/// Every Kotlin external but nativeVersion, nativeInit and nativeUpdateDecide (F14-FR5: a pure
-/// comparison) needs the app, so each must be in `app_exports` (checked before and after init
+/// Every Kotlin external but nativeVersion, nativeInit, nativeUpdateDecide (F14-FR5: a pure
+/// comparison) and nativeChunkPlan (F15-FR4: a pure plan) needs the app, so each must be in `app_exports` (checked before and after init
 /// above).
 #[test]
 fn app_exports_cover_the_bridge() {
@@ -153,7 +153,9 @@ fn app_exports_cover_the_bridge() {
             let first = c.next().unwrap().to_ascii_lowercase();
             std::iter::once(first).chain(c).collect()
         })
-        .filter(|n: &String| !["version", "init", "updateDecide"].contains(&n.as_str()))
+        .filter(|n: &String| {
+            !["version", "init", "updateDecide", "chunkPlan"].contains(&n.as_str())
+        })
         .collect();
     bridge.sort();
     // Names only: calling app_exports here before init is harmless (they all refuse).
