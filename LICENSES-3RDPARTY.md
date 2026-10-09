@@ -135,6 +135,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | rustls-webpki | 0.103.15 | ISC |
 | schemars | 1.2.2 | MIT |
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 |
+| semver | 1.0.28 | MIT OR Apache-2.0 |
 | serde | 1.0.229 | MIT OR Apache-2.0 |
 | serde_core | 1.0.229 | MIT OR Apache-2.0 |
 | serde_json | 1.0.151 | MIT OR Apache-2.0 |

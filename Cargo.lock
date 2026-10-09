@@ -940,6 +940,7 @@ dependencies = [
  "minijinja",
  "rig-core",
  "rig-reqwest",
+ "semver",
  "serde",
  "serde_json",
  "tempfile",

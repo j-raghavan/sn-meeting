@@ -16,6 +16,7 @@ pub mod status;
 pub mod summarise;
 pub mod templates;
 pub mod tz;
+pub mod update;
 
 #[cfg(feature = "jni-bridge")]
 mod jni;

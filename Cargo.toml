@@ -35,6 +35,8 @@ minijinja = { version = "=2.24.0", default-features = false, features = ["builti
 uuid = { version = "1", default-features = false, features = ["v4"] }
 # NFC for the to-do merge key (F5-FR5), so composed and decomposed accents match.
 unicode-normalization = "0.1.25"
+# F14-FR3: the updater compares the release tag with the installed version (as inkread-update).
+semver = "1"
 jni = "0.22.4"
 wiremock = "0.6"
 tempfile = "3"
