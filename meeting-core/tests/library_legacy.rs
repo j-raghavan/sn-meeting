@@ -4,9 +4,10 @@ mod libcommon;
 
 use libcommon::*;
 use meeting::library::Source;
-use meeting::status::Status;
+use meeting::status::{FailedAt, Status};
 use serde_json::json;
 use std::fs;
+use std::path::PathBuf;
 
 const SPIKE_A: &str = "meeting-20261007-211359";
 const SPIKE_B: &str = "meeting-20261007-211706";
@@ -202,4 +203,86 @@ fn recovery_lists_legacy_audio_for_measuring_and_the_durations_stick() {
     );
     // Idempotent: nothing is left to measure.
     assert_eq!(parse(&app.recover_json(false))["measure"], json!([]));
+}
+
+/// Legacy audio whose first sidecar a Transcribe tap wrote (`status` = `phase`), so its one
+/// segment never got a duration and the meeting lasts 0 ms.
+fn materialised(e: &Env, id: &str, status: Status, failed_at: Option<FailedAt>) -> PathBuf {
+    let dir = e.folder("EXPORT/sn-meeting");
+    fs::write(dir.join(format!("{id}.m4a")), b"aac").unwrap();
+    let z = tz(PDT);
+    library(&[&dir], &z)
+        .update(id, |sc, _| {
+            sc.status = status;
+            sc.failed_at = failed_at;
+            Ok(())
+        })
+        .unwrap();
+    let sc = read_sidecar(&dir, id);
+    assert_eq!((sc.duration_ms, sc.segments[0].duration_ms), (0, None));
+    dir
+}
+
+#[test]
+fn a_materialised_meeting_past_recorded_is_still_measured() {
+    // D3 follow-up: the spike meeting a Transcribe tap materialised kept 0:00:00 for ever,
+    // whatever its status, because only `recorded` meetings were measured.
+    const SPIKE_C: &str = "meeting-20261007-211827";
+    for (id, status, failed_at) in [
+        (SPIKE_C, Status::Failed, Some(FailedAt::Transcribing)),
+        (SPIKE_A, Status::Done, None),
+        (SPIKE_B, Status::Transcribed, None),
+    ] {
+        let e = Env::new();
+        let dir = materialised(&e, id, status, failed_at);
+        let app = e.app();
+        let path = dir.join(format!("{id}.m4a")).to_string_lossy().into_owned();
+        assert_eq!(
+            parse(&app.recover_json(false))["measure"],
+            json!([{"id": id, "index": 0, "path": path}]),
+            "{status:?}"
+        );
+        assert_eq!(
+            parse(&app.close_segment_json(id, 0, 754_000)),
+            json!({"ok": true})
+        );
+        let sc = read_sidecar(&dir, id);
+        assert_eq!(sc.segments[0].duration_ms, Some(754_000));
+        assert_eq!(
+            sc.duration_ms, 754_000,
+            "the meeting lasts to its segment's end"
+        );
+        assert_eq!(
+            (sc.status, sc.failed_at),
+            (status, failed_at),
+            "status unchanged"
+        );
+        assert_eq!(sc.segments[0].flag, None);
+        assert_eq!(parse(&app.list_recent_json(1))[0]["durationMs"], 754_000);
+        // Idempotent: nothing is left to measure, and a second close is refused.
+        assert_eq!(parse(&app.recover_json(false))["measure"], json!([]));
+        assert_eq!(
+            parse(&app.close_segment_json(id, 0, 1)),
+            json!({"error": "segment 0 is not open"})
+        );
+    }
+}
+
+#[test]
+fn a_stuck_transcribing_meeting_is_failed_then_measured_never_flagged() {
+    // A transcribing meeting with no job is failed by recovery and then measured; its file
+    // is never flagged (only a recorded meeting's are).
+    let e = Env::new();
+    let dir = materialised(&e, SPIKE_B, Status::Transcribing, None);
+    let app = e.app();
+    let r = parse(&app.recover_json(false));
+    assert_eq!(r["recovered"], json!([SPIKE_B]));
+    assert_eq!(r["measure"][0]["id"], SPIKE_B);
+    assert_eq!(r["flagged"], json!([]));
+    fs::write(dir.join(format!("{SPIKE_B}.m4a")), b"").unwrap();
+    assert_eq!(
+        parse(&app.recover_json(false)),
+        json!({"recovered": [], "measure": [], "flagged": []}),
+        "an empty file past recorded is neither measured nor flagged"
+    );
 }

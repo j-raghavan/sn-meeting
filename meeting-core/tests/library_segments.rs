@@ -132,15 +132,18 @@ fn close_segment_rules() {
         json!({"ok": true})
     );
     assert_eq!(read_sidecar(&dir, ID0).segments[1].duration_ms, Some(95));
-    // Not once the meeting has moved on.
+    // And once the meeting has moved on (D3), leaving its status alone.
     let mut sc = read_sidecar(&dir, ID0);
     sc.status = Status::Transcribing;
     sc.segments[1].duration_ms = None;
     meeting::sidecar::write(&dir, &sc).unwrap();
     assert_eq!(
         parse(&app.close_segment_json(ID0, 1, 95)),
-        json!({"error": "meeting is past recording"})
+        json!({"ok": true})
     );
+    let sc = read_sidecar(&dir, ID0);
+    assert_eq!(sc.status, Status::Transcribing);
+    assert_eq!(sc.duration_ms, 100, "never shortened");
 }
 
 #[test]

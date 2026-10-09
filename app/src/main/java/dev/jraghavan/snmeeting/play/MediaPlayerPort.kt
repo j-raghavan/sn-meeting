@@ -25,6 +25,7 @@ class MediaPlayerPort : PlayerPort {
     override fun start() { mp?.start() }
     override fun pause() { mp?.pause() }
     override fun positionMs(): Long = mp?.currentPosition?.toLong() ?: 0
+    override fun durationMs(): Long = mp?.duration?.toLong()?.coerceAtLeast(0) ?: 0 // -1: unknown
     override fun seekTo(ms: Long) { mp?.seekTo(ms.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()) }
 
     override fun release() {

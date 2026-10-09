@@ -31,6 +31,13 @@ class RecovererTest {
         assertEquals(listOf("meeting-20261007-211706/0=0", "meeting-20261007-211706/1=61234"), closed)
     }
 
+    @Test fun aMeetingPastRecordedIsMeasuredToo() { // D3: a Transcribe tap gave it a sidecar first
+        val reply = """{"recovered":[],"measure":[{"id":"meeting-20261007-211827","index":0,"path":"/p/meeting-20261007-211827-02.m4a"}],"flagged":[]}"""
+        val r = recoverer(reply).run(serviceAlive = true)!!
+        assertEquals(listOf("meeting-20261007-211827/0=61234"), closed)
+        assertEquals(emptyList<String>(), r.recovered)
+    }
+
     @Test fun anErrorClosesNothing() {
         assertNull(recoverer("""{"error":"nativeInit has not run"}""").run(serviceAlive = true))
         assertEquals(true, alive)

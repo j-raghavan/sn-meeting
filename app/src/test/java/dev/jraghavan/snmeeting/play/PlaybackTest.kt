@@ -12,14 +12,17 @@ class PlaybackTest {
     private var done: (() -> Unit)? = null
     private var pos = 0L
     private val unplayable = mutableSetOf<String>()
+    private val lengths = mutableMapOf<String, Long>()
+    private var current: String? = null
     private val port = object : PlayerPort {
         override fun open(path: String, onDone: () -> Unit): Boolean {
             if (path in unplayable) { log += "bad $path"; return false }
-            log += "open $path"; done = onDone; return true
+            log += "open $path"; done = onDone; current = path; return true
         }
         override fun start() { log += "start" }
         override fun pause() { log += "pause" }
         override fun positionMs() = pos
+        override fun durationMs() = lengths[current] ?: 0
         override fun seekTo(ms: Long) { log += "seek $ms"; pos = ms }
         override fun release() { log += "release" }
     }
@@ -28,7 +31,7 @@ class PlaybackTest {
     private val p = Playback(list, port) { changes++ }
 
     @Test fun crossesSegmentBoundariesWithoutAnAction() { // F7-AC1
-        assertEquals(1_860_000, list.totalMs)
+        assertEquals(1_860_000, p.totalMs())
         p.play()
         pos = 1_000; done!!()
         assertEquals(900_000 + 1_000, p.positionMs())
@@ -89,5 +92,26 @@ class PlaybackTest {
             "segmentPaths":["/d/m-01.m4a","/d/m-02.m4a","/d/m-03.m4a"]}"""
         val v = CoreJson.obj(json, MeetingView::from).getOrNull()!!
         assertEquals(listOf(SegmentPlaylist.Item("/d/m-01.m4a", 1000), SegmentPlaylist.Item("/d/m-03.m4a", 0)), SegmentPlaylist.of(v).items)
+    }
+
+    @Test fun aSegmentWithNoKnownLengthPlaysAndTakesThePlayersOwn() { // D3: measured late, or never
+        val unknown = SegmentPlaylist(listOf(SegmentPlaylist.Item("x", 0), SegmentPlaylist.Item("y", 60_000)))
+        lengths += mapOf("x" to 754_000L, "y" to 60_000L)
+        val pb = Playback(unknown, port) {}
+        assertTrue(pb.canPlay)
+        assertEquals(60_000, pb.totalMs()) // not known until it is opened
+        pb.play()
+        assertTrue(pb.playing)
+        assertEquals(listOf("open x", "start"), log)
+        assertEquals(754_000 + 60_000, pb.totalMs())
+        pos = 1_000; done!!() // into y: it starts where x really ended
+        assertEquals(754_000 + 1_000, pb.positionMs())
+        assertEquals(listOf("open x", "start", "release", "open y", "start"), log)
+    }
+
+    @Test fun aStoredLengthIsKeptWhenThePlayerKnowsNone() {
+        val pb = Playback(list, port) {} // the fake reports 0 for every file
+        pb.play()
+        assertEquals(1_860_000, pb.totalMs())
     }
 }

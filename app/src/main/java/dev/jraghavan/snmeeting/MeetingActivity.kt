@@ -201,7 +201,7 @@ class MeetingActivity : Activity() {
 
     private fun showPosition() {
         val pb = playback ?: return
-        position?.text = "${Format.duration(pb.positionMs())}  /  ${Format.duration(playlist?.totalMs ?: 0)}"
+        position?.text = "${Format.duration(pb.positionMs())}  /  ${Format.duration(pb.totalMs())}"
     }
 
     /** F11-FR6 / F7-FR2: the template the next Transcribe or Summarise again uses, with an inline picker. */

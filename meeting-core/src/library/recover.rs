@@ -44,8 +44,9 @@ impl Library<'_> {
     /// F3-FR5. `recording` with no live recording becomes `recorded`; `transcribing` with no
     /// job in flight becomes failed(transcribing), keeping every segment's text so a retry
     /// resumes. Recorded meetings' segments are then checked: a missing or empty file is
-    /// flagged, an open one is listed for the shell to measure. The live meeting and running
-    /// jobs are left alone. Unreadable sidecars are not touched; legacy audio (no sidecar) is
+    /// flagged, an open one is listed for the shell to measure. A meeting past recorded only
+    /// has its open, non-empty segments listed (D3: legacy audio a Transcribe tap gave a
+    /// sidecar before it was measured). The live meeting and running jobs keep their status. Unreadable sidecars are not touched; legacy audio (no sidecar) is
     /// only listed for measuring.
     pub fn recover(&self, live: &Liveness) -> Recovery {
         let mut r = Recovery::default();
@@ -88,14 +89,14 @@ impl Library<'_> {
             if empty {
                 sc.error = Some(crate::pipeline::NO_AUDIO.into());
             }
-            let (flagged, measure) = if sc.status == Status::Recorded {
-                check_segments(&id, &f.dir, &mut sc)
-            } else {
-                (Vec::new(), Vec::new())
+            let (flagged, measure) = match sc.status {
+                Status::Recorded => check_segments(&id, &f.dir, &mut sc),
+                Status::Recording => (Vec::new(), Vec::new()), // the live recording's own
+                _ => (Vec::new(), unmeasured(&id, &f.dir, &sc)),
             };
             // S13: a crash leaves durationMs 0; it lasts at least to its last closed segment.
             let before = sc.duration_ms;
-            if sc.status == Status::Recorded {
+            if sc.status != Status::Recording {
                 super::extend_duration(&mut sc);
             }
             let longer = sc.duration_ms != before;
@@ -123,6 +124,25 @@ fn legacy_measures(id: &str, f: &super::Found) -> Vec<Measure> {
         .enumerate()
         .filter_map(|(index, (_, name))| {
             let path = f.dir.join(name);
+            let len = std::fs::metadata(&path).map_or(0, |m| m.len());
+            (len > 0).then(|| Measure {
+                id: id.to_owned(),
+                index,
+                path: path.to_string_lossy().into_owned(),
+            })
+        })
+        .collect()
+}
+
+/// The open segments of a meeting past recorded whose file has audio, for measuring; nothing
+/// is flagged here (its segments were checked when it was recorded).
+fn unmeasured(id: &str, dir: &Path, sc: &Sidecar) -> Vec<Measure> {
+    sc.segments
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.duration_ms.is_none())
+        .filter_map(|(index, s)| {
+            let path = dir.join(&s.file);
             let len = std::fs::metadata(&path).map_or(0, |m| m.len());
             (len > 0).then(|| Measure {
                 id: id.to_owned(),

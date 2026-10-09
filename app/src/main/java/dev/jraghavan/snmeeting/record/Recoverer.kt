@@ -5,9 +5,10 @@ import dev.jraghavan.snmeeting.model.Recovery
 
 /**
  * F3-FR5, the shell's half of crash recovery: nativeRecover moves stuck meetings on and lists
- * the segments that were never closed (legacy audio with no sidecar included, D3); each is
- * measured from its file and closed, at 0 ms if it can't be read (the core then flags it). Runs on the core's worker thread, so the
- * measure-then-close pairs stay in order with every other library call.
+ * the segments that were never closed (legacy audio, with or without a sidecar, in any status
+ * included, D3); each is measured from its file and closed, at 0 ms if it can't be read (the
+ * core then flags it). Runs on the core's worker thread, so the measure-then-close pairs stay in
+ * order with every other library call.
  */
 class Recoverer(
     private val recover: (serviceAlive: Boolean) -> String,

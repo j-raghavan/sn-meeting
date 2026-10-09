@@ -2,14 +2,12 @@ package dev.jraghavan.snmeeting.play
 
 import dev.jraghavan.snmeeting.model.MeetingView
 
-/** F7-FR1: a meeting's segments as one continuous recording. */
+/**
+ * F7-FR1: a meeting's segments as one continuous recording. A segment's stored length may be 0
+ * (not measured yet, D3); it still plays, and [Playback] takes the player's own length for it.
+ */
 class SegmentPlaylist(val items: List<Item>) {
     data class Item(val path: String, val durationMs: Long)
-
-    val totalMs: Long = items.sumOf { it.durationMs }
-
-    /** Where segment [index] starts in the whole recording. */
-    fun offsetOf(index: Int): Long = items.take(index).sumOf { it.durationMs }
 
     companion object {
         /**
@@ -31,6 +29,8 @@ interface PlayerPort {
     fun start()
     fun pause()
     fun positionMs(): Long
+    /** The open file's length, 0 when the player doesn't know it. */
+    fun durationMs(): Long
     fun seekTo(ms: Long)
     fun release()
 }
@@ -46,6 +46,8 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
     private var opened = false
     /** Where in segment [index] to carry on after [release] (N10: leaving the screen). */
     private var resumeAt = 0L
+    /** Each segment's length: the stored one, or the player's once opened if none was stored. */
+    private val lengths = LongArray(list.items.size) { list.items[it].durationMs }
 
     val canPlay get() = list.items.isNotEmpty()
 
@@ -69,7 +71,12 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
     }
 
     /** Elapsed time in the whole recording. */
-    fun positionMs(): Long = list.offsetOf(index) + if (opened) port.positionMs() else resumeAt
+    fun positionMs(): Long = offsetOf(index) + if (opened) port.positionMs() else resumeAt
+
+    /** The whole recording's length, as far as it is known. */
+    fun totalMs(): Long = lengths.sum()
+
+    private fun offsetOf(i: Int): Long = (0 until i).sumOf { lengths[it] }
 
     /** Leaving the screen: the place is kept, and the next play carries on from it. */
     fun release() {
@@ -83,6 +90,7 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
             if (opened) { port.release(); opened = false }
             if (port.open(list.items[i].path) { next() }) {
                 index = i; opened = true; resumeAt = 0
+                if (lengths[i] <= 0) lengths[i] = port.durationMs().coerceAtLeast(0)
                 return true
             }
         }

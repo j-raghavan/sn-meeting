@@ -270,13 +270,11 @@ impl Library<'_> {
     }
 
     /// F3-FR2 / F3-FR5: store a finalised segment's measured duration. `index` is 0-based and
-    /// must be open. Allowed while recording and, for recovery's measurements, once recorded.
-    /// 0 ms flags the segment `empty`.
+    /// must be open. Allowed while recording and, for recovery's measurements, in any later
+    /// status (D3: legacy audio may get its sidecar from a Transcribe tap before it is
+    /// measured); the status never changes. 0 ms flags the segment `empty`.
     pub fn close_segment(&self, id: &str, index: usize, duration_ms: i64) -> Result<(), LibError> {
         let (dir, mut sc) = self.load_for_write(id)?;
-        if !matches!(sc.status, Status::Recording | Status::Recorded) {
-            return Err(invalid("meeting is past recording"));
-        }
         let d = u64::try_from(duration_ms).map_err(|_| invalid("durationMs must be >= 0"))?;
         let Some(seg) = sc
             .segments
@@ -289,7 +287,7 @@ impl Library<'_> {
         if d == 0 && seg.flag.is_none() {
             seg.flag = Some(SegmentFlag::Empty);
         }
-        if sc.status == Status::Recorded {
+        if sc.status != Status::Recording {
             measured(&mut sc, index);
         }
         sidecar::write(&dir, &sc)?;
@@ -316,7 +314,7 @@ impl Library<'_> {
     }
 }
 
-/// A segment of a recorded meeting was measured (recovery, D3): a legacy segment inferred at
+/// A segment of a meeting past recording was measured (recovery, D3): a legacy segment inferred at
 /// offset 0 follows the one before it, and the meeting lasts at least to the end of its last
 /// measured segment (S13).
 fn measured(sc: &mut Sidecar, index: usize) {
