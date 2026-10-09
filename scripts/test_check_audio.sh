@@ -4,10 +4,23 @@ set -euo pipefail
 # (bursts with pauses, a few clipped samples) pass, a heavily clipped one passes with a
 # warning, and silence and full-scale noise fail. afconvert can't synthesise, so each WAV is
 # written by python and then encoded to AAC .m4a with afconvert, as the recorder's files are.
-# Usage: scripts/test_check_audio.sh  (run by scripts/gates.sh; macOS only)
+# Where afconvert is absent (Linux CI), or with CHECK_AUDIO_DECODER=ffmpeg, ffmpeg does both
+# the encoding here and the decoding in check-audio.sh. ffmpeg's AAC encoder smooths clipping
+# (the clipped fixture lands under 1%) and pads the ends, so its fixtures are ALAC .m4a, which
+# keeps the samples exact; one extra AAC speech file then checks ffmpeg decodes AAC.
+# Usage: scripts/test_check_audio.sh  (run by scripts/gates.sh and CI)
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-command -v afconvert >/dev/null || { echo "afconvert (macOS) is needed" >&2; exit 1; }
+codec="${CHECK_AUDIO_DECODER:-}"
+if [[ -z "$codec" ]]; then
+    if command -v afconvert >/dev/null; then codec=afconvert; else codec=ffmpeg; fi
+fi
+command -v "$codec" >/dev/null || { echo "$codec is needed (afconvert on macOS, else ffmpeg)" >&2; exit 1; }
+export CHECK_AUDIO_DECODER="$codec"
+encode() { # wav, m4a
+    if [[ "$codec" == afconvert ]]; then afconvert -f m4af -d aac "$1" "$2"
+    else ffmpeg -nostdin -hide_banner -loglevel error -i "$1" -c:a alac -f mp4 "$2"; fi
+}
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -40,7 +53,7 @@ PY
 
 failures=0
 for kind in tone silence noise speech clipped; do
-    afconvert -f m4af -d aac "$tmp/$kind.wav" "$tmp/$kind.m4a"
+    encode "$tmp/$kind.wav" "$tmp/$kind.m4a"
     set +e
     out="$("$ROOT/scripts/check-audio.sh" "$tmp/$kind.m4a" 2>&1)"
     code=$?
@@ -51,5 +64,11 @@ for kind in tone silence noise speech clipped; do
     if [[ $code -eq $want && $warned == "$want_warn" && "$out" == *"duration 2."* && "$out" == *"clipped"* ]]; then printf '  ok   %s: %s\n' "$kind" "${out//$'\n'/ | }" >&2
     else printf '  FAIL %s (exit %s, want %s; warning %s, want %s): %s\n' "$kind" "$code" "$want" "$warned" "$want_warn" "$out" >&2; failures=$((failures + 1)); fi
 done
+if [[ "$codec" == ffmpeg ]]; then
+    ffmpeg -nostdin -hide_banner -loglevel error -i "$tmp/speech.wav" -c:a aac -f mp4 "$tmp/speech-aac.m4a"
+    if out="$("$ROOT/scripts/check-audio.sh" "$tmp/speech-aac.m4a" 2>&1)" && [[ "$out" == *"looks like real audio"* ]]; then
+        printf '  ok   speech (AAC): %s\n' "${out//$'\n'/ | }" >&2
+    else printf '  FAIL speech (AAC): %s\n' "$out" >&2; failures=$((failures + 1)); fi
+fi
 "$ROOT/scripts/check-audio.sh" >/dev/null 2>&1 && { echo "  FAIL no argument accepted" >&2; failures=$((failures + 1)); }
 [[ $failures -eq 0 ]] || exit 1

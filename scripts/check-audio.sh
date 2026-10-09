@@ -1,7 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 # F8-FR3: is a pulled recording real audio, noise or silence? Converts it with macOS
-# afconvert to 16-bit WAV in a temp dir and prints its duration, peak, RMS (16-bit units), the
+# afconvert (ffmpeg where afconvert is absent, as on Linux CI; CHECK_AUDIO_DECODER=ffmpeg picks
+# it on macOS too) to 16-bit WAV in a temp dir and prints its duration, peak, RMS (16-bit units), the
 # share of clipped samples (|x| >= 32000) and of quiet 100 ms windows (window RMS < 300), and
 # the median window RMS. Exits 1 for silence (peak < 100) or noise: a continuous loud signal
 # with no pauses (under 5% quiet windows and median window RMS > 1500). Loud speech may peak at
@@ -12,10 +13,21 @@ if [[ $# -ne 1 || ! -f "$1" ]]; then
     echo "usage: $0 <file.m4a>" >&2
     exit 2
 fi
-command -v afconvert >/dev/null || { echo "afconvert (macOS) is needed" >&2; exit 2; }
+decoder="${CHECK_AUDIO_DECODER:-}"
+if [[ -z "$decoder" ]]; then
+    if command -v afconvert >/dev/null; then decoder=afconvert; else decoder=ffmpeg; fi
+fi
+case "$decoder" in
+    afconvert|ffmpeg) command -v "$decoder" >/dev/null || { echo "$decoder is needed (afconvert on macOS, else ffmpeg)" >&2; exit 2; } ;;
+    *) echo "CHECK_AUDIO_DECODER must be afconvert or ffmpeg" >&2; exit 2 ;;
+esac
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-afconvert -f WAVE -d LEI16 "$1" "$tmp/audio.wav"
+if [[ "$decoder" == afconvert ]]; then
+    afconvert -f WAVE -d LEI16 "$1" "$tmp/audio.wav"
+else
+    ffmpeg -nostdin -hide_banner -loglevel error -i "$1" -map 0:a:0 -c:a pcm_s16le -f wav "$tmp/audio.wav"
+fi
 python3 -I - "$tmp/audio.wav" <<'PY'
 import array, math, sys, wave
 with wave.open(sys.argv[1]) as w:
