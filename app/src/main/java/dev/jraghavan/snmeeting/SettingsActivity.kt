@@ -12,6 +12,8 @@ import android.widget.ScrollView
 import android.widget.TextView
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.IndexStatus
+import dev.jraghavan.snmeeting.model.SearchModel
 import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
@@ -67,6 +69,21 @@ class SettingsActivity : Activity() {
     private val modelViews = mutableMapOf<String, TextView>()
 
     /** settings.debug.segmentMs; the rows show once set, or after a long-press on the version. */
+    /** F19-FR5: the Rebuild search index line ("Indexing 120/340", then the result). */
+    private var indexLine: String? = null
+    private var indexView: TextView? = null
+    private var rebuilding = false
+    private val indexPoll = object : Runnable {
+        override fun run() {
+            if (!rebuilding) return
+            SearchJobs.query({ NativeBridge.nativeIndexStatus() }) { json ->
+                if (isDestroyed || !rebuilding) return@query
+                val line = CoreJson.obj(json, IndexStatus::from).getOrNull()?.let(SearchModel::indexing) ?: return@query
+                if (line != indexLine) { indexLine = line; indexView?.text = line } // the line only, no redraw
+            }
+            handler.postDelayed(this, 1000)
+        }
+    }
     private var segmentMs: Long? = null
     private var showSegmentLength = false
 
@@ -79,6 +96,7 @@ class SettingsActivity : Activity() {
         ui = Inkwell(this)
         scope = ScreenScope(this)
         CoreJobs.init(filesDir.absolutePath)
+        SearchJobs.init(filesDir.absolutePath)
         render()
     }
 
@@ -88,9 +106,11 @@ class SettingsActivity : Activity() {
         bt = BluetoothState(this, handler) { render() }.also { it.open() }
         // F14-FR8: a check or download finishing redraws About with its result.
         unobserveUpdates = UpdateGate.observe { render() }
+        if (rebuilding) handler.postDelayed(indexPoll, 1000)
     }
 
     override fun onStop() {
+        handler.removeCallbacks(indexPoll) // the rebuild carries on; onStart polls again
         unobserveUpdates?.invoke(); unobserveUpdates = null
         bt?.close(); bt = null
         super.onStop()
@@ -405,12 +425,43 @@ class SettingsActivity : Activity() {
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
             updates(this)
+            searchIndex(this)
             if (showSegmentLength || segmentMs != null) segmentLength(this)
         }
 
         column.addView(ui.spacer(ui.dim(36)))
         column.addView(ui.closingMark())
         show(column)
+    }
+
+    /**
+     * F19-FR5: "Rebuild search index" in About. The index is a cache of the meeting files, so
+     * this loses nothing; while it runs the line reads "Indexing 120/340", and Search answers
+     * from what is indexed so far.
+     */
+    private fun searchIndex(card: LinearLayout) {
+        card.addView(ui.hairline())
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, ui.dim(12), 0, ui.dim(12))
+            addView(ui.pill("Rebuild search index", size = 15f) { rebuildIndex() }, ui.wrap())
+            val note = ui.note(indexLine ?: "Search reads a copy of your meetings kept on this device; rebuilding it loses nothing.", 13f)
+            indexView = note
+            addView(note, ui.wrap().apply { topMargin = ui.dim(8) })
+        })
+    }
+
+    private fun rebuildIndex() {
+        if (rebuilding) return
+        rebuilding = true
+        indexLine = "Still indexing…"; indexView?.text = indexLine
+        handler.postDelayed(indexPoll, 1000)
+        SearchJobs.index({ NativeBridge.nativeRebuildIndex() }) { json ->
+            rebuilding = false
+            handler.removeCallbacks(indexPoll)
+            if (isDestroyed) return@index
+            indexLine = SearchModel.rebuilt(json); indexView?.text = indexLine
+        }
     }
 
     /**

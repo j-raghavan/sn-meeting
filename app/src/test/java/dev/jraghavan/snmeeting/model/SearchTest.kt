@@ -90,4 +90,11 @@ class SearchTest {
         assertNull(TranscriptPages.locate(listOf(Segment("a", 10, 1, "t", null)), 5))
         assertNull(TranscriptPages.locate(emptyList(), 5))
     }
+
+    @Test fun rebuildReplies() {
+        assertEquals("Search index rebuilt  ·  12 meetings and events", SearchModel.rebuilt("""{"indexed":12,"removed":0,"rebuilt":true}"""))
+        assertEquals("Search index rebuilt  ·  1 meeting or event", SearchModel.rebuilt("""{"indexed":1}"""))
+        assertEquals("The search index is already being updated", SearchModel.rebuilt("""{"busy":true}"""))
+        assertEquals("Couldn't rebuild the search index: nativeInit has not run", SearchModel.rebuilt("""{"error":"nativeInit has not run"}"""))
+    }
 }

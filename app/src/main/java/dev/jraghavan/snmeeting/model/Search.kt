@@ -35,6 +35,13 @@ object SearchModel {
         else -> null
     }
 
+    /** Settings → About after "Rebuild search index" (F19-FR5): what the core answered. */
+    fun rebuilt(json: String): String = when (val r = CoreJson.obj(json) { o -> o }) {
+        is CoreResult.Err -> "Couldn't rebuild the search index: ${r.message}"
+        is CoreResult.Ok -> if (r.value.bool("busy") == true) "The search index is already being updated"
+        else "Search index rebuilt  ·  " + Format.plural(r.value.int("indexed") ?: 0, "meeting or event", "meetings and events")
+    }
+
     /** The group header's date and time (mono): "Fri 9 Oct 2026 · 10:00". */
     fun stamp(startMs: Long, zone: ZoneId = ZoneId.systemDefault()): String =
         Instant.ofEpochMilli(startMs).atZone(zone).format(DateTimeFormatter.ofPattern("EEE d MMM yyyy  ·  HH:mm", Locale.UK))
