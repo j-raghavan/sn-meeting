@@ -94,6 +94,21 @@ class PresentersTest {
         }
     }
 
+    @Test fun aRunningJobShowsHowLongItHasTakenIn10sSteps() { // F7-FR2 (device finding 2026-10-09)
+        fun run(st: Status, ms: Long?) = Actions.of(sc(st, texts = listOf("a", null)), true, found, found, ms)
+        assertEquals("Summarising…", run(Status.TRANSCRIBED, null).progress)
+        assertEquals("Summarising…", run(Status.TRANSCRIBED, 9_999).progress)
+        assertEquals("Summarising… 0:10", run(Status.TRANSCRIBED, 10_000).progress)
+        assertEquals("Summarising… 0:40", run(Status.TRANSCRIBED, 49_999).progress)
+        assertEquals("Summarising… 1:20", run(Status.TRANSCRIBED, 80_500).progress)
+        assertEquals("You can leave this screen; it carries on.", run(Status.TRANSCRIBED, 19_999).note)
+        assertEquals("Reasoning models can take a minute or two. You can leave this screen; it carries on.",
+            run(Status.TRANSCRIBED, 20_000).note)
+        assertEquals("Transcribing 2/2 0:30", run(Status.TRANSCRIBING, 35_000).progress)
+        assertEquals("no reasoning hint while transcribing", "You can leave this screen; it carries on.",
+            run(Status.TRANSCRIBING, 90_000).note)
+    }
+
     @Test fun theActionFollowsTheStatus() { // F7-FR2
         fun job(st: Status, f: FailedAt? = null) = Actions.of(sc(st, f), false, found, found).primary
         assertEquals(Actions.Job.TRANSCRIBE, job(Status.RECORDED))

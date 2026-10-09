@@ -147,7 +147,24 @@ data class Actions(
             return "Transcribing $n/$total"
         }
 
-        fun of(m: Sidecar, jobRunning: Boolean, transcribeKey: KeyStatus?, summariseKey: KeyStatus?): Actions {
+        /** Shown under a job that has run [SLOW_MS]: a reasoning model can take a while. */
+        const val SLOW = "Reasoning models can take a minute or two."
+        const val SLOW_MS = 20_000L
+        private const val LEAVE = "You can leave this screen; it carries on."
+
+        /**
+         * F7-FR2's progress label with the job's elapsed time, in 10 s steps so the label
+         * redraws at most every 10 s: "Summarising… 0:40". Nothing is added before 10 s.
+         */
+        fun withElapsed(label: String, elapsedMs: Long?): String {
+            val s = (elapsedMs ?: 0) / 10_000 * 10
+            return if (s <= 0) label else "%s %d:%02d".format(java.util.Locale.ROOT, label, s / 60, s % 60)
+        }
+
+        private fun note(elapsedMs: Long?, summarising: Boolean) =
+            if (summarising && (elapsedMs ?: 0) >= SLOW_MS) "$SLOW $LEAVE" else LEAVE
+
+        fun of(m: Sidecar, jobRunning: Boolean, transcribeKey: KeyStatus?, summariseKey: KeyStatus?, elapsedMs: Long? = null): Actions {
             fun problem(k: KeyStatus?) = when (k) {
                 null -> "Checking the key…"
                 is KeyStatus.Problem -> k.detail
@@ -160,10 +177,10 @@ data class Actions(
             return when {
                 m.status == Status.RECORDING -> Actions(null, false, "Recording…", false, null, false)
                 m.status == Status.TRANSCRIBING && jobRunning ->
-                    Actions(null, false, transcribing(m), true, "You can leave this screen; it carries on.", false)
+                    Actions(null, false, withElapsed(transcribing(m), elapsedMs), true, note(elapsedMs, summarising = false), false)
                 // No job here (a screen restored after the process died): resume it (INV8).
                 m.status == Status.TRANSCRIBING -> offer(Job.TRANSCRIBE, transcribeKey, "Transcription was interrupted.")
-                jobRunning -> Actions(null, false, "Summarising…", true, "You can leave this screen; it carries on.", false)
+                jobRunning -> Actions(null, false, withElapsed("Summarising…", elapsedMs), true, note(elapsedMs, summarising = true), false)
                 m.status == Status.RECORDED || (m.status == Status.FAILED && m.failedAt != FailedAt.SUMMARISING) ->
                     offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.")
                 m.status == Status.TRANSCRIBED || m.status == Status.DONE -> {

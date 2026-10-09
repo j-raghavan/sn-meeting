@@ -76,17 +76,24 @@ object CoreJobs {
  * running, so a screen rebuilt mid-job still shows its progress, and tells listeners when a job
  * ends (Home refreshes, F6-FR4).
  */
-class JobLane(private val jobs: Jobs) {
+class JobLane(private val jobs: Jobs, private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 }) {
     /** One per queued or running job; a cancelled one that hasn't started never runs (N9). */
     private class Ticket {
         var started = false
         var cancelled = false
+        /** When it began to run ([nowMs]), for the progress line's elapsed time (F7-FR2). */
+        var startedAtMs = 0L
     }
 
     private val tickets = HashMap<String, Ticket>()
     private val listeners = LinkedHashSet<(String) -> Unit>()
 
     fun isRunning(key: String) = synchronized(tickets) { key in tickets }
+
+    /** How long [key]'s job has been running; null when it is queued or not on the lane. */
+    fun elapsedMs(key: String): Long? = synchronized(tickets) {
+        tickets[key]?.takeIf { it.started }?.let { nowMs() - it.startedAtMs }
+    }
 
     /** A transcribe or summarise job is queued or running: any key but Test connection's
      *  `test:<role>`. The updater waits for these (F14-FR8). Any thread. */
@@ -100,7 +107,10 @@ class JobLane(private val jobs: Jobs) {
             tickets[key] = t
         }
         jobs.run({
-            val go = synchronized(tickets) { if (!t.cancelled) t.started = true; t.started }
+            val go = synchronized(tickets) {
+                if (!t.cancelled) { t.started = true; t.startedAtMs = nowMs() }
+                t.started
+            }
             if (go) work() else CANCELLED
         }) { r ->
             if (t.cancelled) return@run // already off the lane, listeners told

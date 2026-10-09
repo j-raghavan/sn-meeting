@@ -304,7 +304,8 @@ class MeetingActivity : Activity() {
     private fun actionsFor(m: Sidecar): Actions {
         val s = settings
         return Actions.of(m, LongJobs.lane.isRunning(id),
-            s?.keys?.get(s.effectiveTranscribe.provider), s?.keys?.get(s.effectiveSummarise.provider))
+            s?.keys?.get(s.effectiveTranscribe.provider), s?.keys?.get(s.effectiveSummarise.provider),
+            LongJobs.lane.elapsedMs(id))
     }
 
     /** F7-FR2: the one action the status allows, or progress with Cancel while a job runs. */
