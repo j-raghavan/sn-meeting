@@ -17,6 +17,7 @@ class LiveTest { // F15-FR6 / FR7, F17-FR6
         assertEquals("Offline · 4 waiting", t.status)
         assertEquals("< $0.01", t.spent)
         assertEquals("Transcribing…", t.copy(state = LiveTranscript.TRANSCRIBING).status)
+        assertEquals("Retrying · 4 waiting", t.copy(state = LiveTranscript.RETRYING).status)
         assertEquals("Transcription paused: OpenAI rejected the key (401)",
             t.copy(state = LiveTranscript.PAUSED, reason = "Transcription paused: OpenAI rejected the key (401)").status)
         assertEquals("Transcription paused", t.copy(state = LiveTranscript.PAUSED, reason = null).status)

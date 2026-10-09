@@ -226,9 +226,15 @@ impl App {
     }
 }
 
+/// F15-FR7: whether a chunk's last failure was the connection (no network, DNS, a timeout)
+/// rather than the provider (429, 5xx), by `classify_transport`'s wording.
+fn connection_lost(detail: &str) -> bool {
+    detail.starts_with("No connection") || detail == "Timed out"
+}
+
 /// F15-FR6 / FR7: the live transcript's status: `off` (not near-live), `paused` (with the
-/// reason), `offline` (the next chunk failed and waits for the back-off), `transcribing`
-/// (chunks waiting) or `current`.
+/// reason), `offline` (the next chunk couldn't reach the provider and waits for the back-off),
+/// `retrying` (the provider was busy: 429, 5xx), `transcribing` (chunks waiting) or `current`.
 fn live_status(sc: &Sidecar) -> (&'static str, Option<String>) {
     if sc.live.is_none() && sc.chunks.is_empty() {
         return ("off", None);
@@ -241,7 +247,13 @@ fn live_status(sc: &Sidecar) -> (&'static str, Option<String>) {
     match sc.chunks.iter().find(|c| c.state == ChunkState::Pending) {
         None => ("current", None),
         Some(c) if c.attempts > 0 && c.last_error.as_deref() != Some(live::EMPTY_ONCE) => {
-            ("offline", c.last_error.clone())
+            let err = c.last_error.clone().unwrap_or_default();
+            let state = if connection_lost(&err) {
+                "offline"
+            } else {
+                "retrying"
+            };
+            (state, Some(err))
         }
         Some(_) => ("transcribing", None),
     }

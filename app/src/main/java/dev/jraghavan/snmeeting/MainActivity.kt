@@ -76,6 +76,9 @@ class MainActivity : Activity(), HomeLists.Actions {
     private var rec: RecState = RecState.Idle(null, null)
     private var unobserve: (() -> Unit)? = null
     private var unlisten: (() -> Unit)? = null
+    /** F15-FR7: the near-live lane's news for the recording line ("4 waiting to send"). */
+    private var unLive: (() -> Unit)? = null
+    private var liveNote: String? = null
     private var bt: BluetoothState? = null
     private var micChoice: MicChoice = MicChoice.Auto
     /** F15: Settings → Recorder; Standard until the settings are read. */
@@ -108,7 +111,7 @@ class MainActivity : Activity(), HomeLists.Actions {
             val r = rec as? RecState.Recording ?: return
             val t = elapsed(r.startElapsedMs)
             lists.timer?.text = "● $t"
-            micLine.text = "Recording · $t"
+            micLine.text = recordingLine(t)
             handler.postDelayed(this, 1000)
         }
     }
@@ -239,6 +242,7 @@ class MainActivity : Activity(), HomeLists.Actions {
         bt = BluetoothState(this, handler) { if (!rec.busy) render() }.also { it.open() }
         unobserve = RecordingService.hub.observe { next ->
             val changed = next.javaClass != rec.javaClass
+            if (changed) liveNote = null
             rec = next; render()
             if (next is RecState.Recording) applyPendingTemplate(next.id)
             if (changed) {
@@ -248,6 +252,9 @@ class MainActivity : Activity(), HomeLists.Actions {
             }
         }
         unlisten = LongJobs.lane.onFinished { gate.request(); SearchJobs.refresh() } // F19-FR5
+        unLive = LiveJobs.observe { id, r ->
+            if ((rec as? RecState.Recording)?.id == id) { liveNote = r.note; micLine.text = recordingLine(elapsed((rec as RecState.Recording).startElapsedMs)) }
+        }
         if (rec is RecState.Recording) { handler.removeCallbacks(tick); handler.post(tick) }
     }
 
@@ -257,6 +264,7 @@ class MainActivity : Activity(), HomeLists.Actions {
         handler.removeCallbacks(autoRefresh) // F18-FR4: only while Home is in the foreground
         unobserve?.invoke(); unobserve = null
         unlisten?.invoke(); unlisten = null
+        unLive?.invoke(); unLive = null
         gate.stop()
         bt?.close(); bt = null
         getSystemService(AudioManager::class.java).unregisterAudioDeviceCallback(deviceCallback)
@@ -488,7 +496,7 @@ class MainActivity : Activity(), HomeLists.Actions {
         val canSwitch = !r.busy && p.toggled() != null
         micLine.text = when (r) {
             is RecState.Starting -> "${r.mic} · connecting the microphone…"
-            is RecState.Recording -> "Recording · ${elapsed(r.startElapsedMs)}"
+            is RecState.Recording -> recordingLine(elapsed(r.startElapsedMs))
             RecState.Stopping -> "Saving…"
             is RecState.Idle -> r.message ?: listOfNotNull(
                 p.chosen?.label ?: p.reason,
@@ -496,6 +504,9 @@ class MainActivity : Activity(), HomeLists.Actions {
             ).joinToString("  ·  ")
         }
     }
+
+    /** "Recording · 0:12:41", and the near-live lane's news when it has any (F15-FR7). */
+    private fun recordingLine(t: String) = listOfNotNull("Recording · $t", liveNote).joinToString("  ·  ")
 
     private fun elapsed(startElapsedMs: Long): String {
         val s = (SystemClock.elapsedRealtime() - startElapsedMs) / 1000

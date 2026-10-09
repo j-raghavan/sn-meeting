@@ -71,6 +71,12 @@ class LiveLaneTest { // F15-FR5 / FR7
         assertFalse(lane.isBackingOff("m"))
     }
 
+    @Test fun homesRecordingLineSaysWhenChunksWait() { // F15-FR7
+        assertEquals("4 waiting to send", LiveReply("retry", 0, 4, 60_000, null).note)
+        assertEquals("transcription paused", LiveReply("paused", 0, 1, null, "x").note)
+        assertEquals(null, LiveReply("idle", 3, 0, null, null).note)
+    }
+
     @Test fun aBrokenCoreOrJunkIsAnErrorThatEndsThePass() {
         val l = LiveLane({ it() }, { _, _ -> Cancel {} }, { throw UnsatisfiedLinkError("no core") }, { _, r -> seen += r })
         l.kick("m")

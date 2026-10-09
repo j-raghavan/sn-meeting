@@ -15,6 +15,7 @@ data class LiveTranscript(
     /** The strip's right end: "Offline · 4 waiting", "Transcribing…", the pause's reason, or nothing. */
     val status: String get() = when (state) {
         OFFLINE -> "Offline · $waiting waiting"
+        RETRYING -> "Retrying · $waiting waiting"
         TRANSCRIBING -> "Transcribing…"
         PAUSED -> reason ?: "Transcription paused"
         else -> ""
@@ -27,6 +28,8 @@ data class LiveTranscript(
         const val OFF = "off"
         const val PAUSED = "paused"
         const val OFFLINE = "offline"
+        /** The provider was busy (429, 5xx); the lane backs off as when offline. */
+        const val RETRYING = "retrying"
         const val TRANSCRIBING = "transcribing"
         const val STRIP_LINES = 3
         /** Shown before the first line arrives. */

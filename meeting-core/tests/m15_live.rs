@@ -411,9 +411,10 @@ fn the_live_transcript_appends_whole_lines_and_says_when_it_is_waiting() {
     assert_eq!(lt(0)["state"], "transcribing");
     fx.drain(); // chunk 0 done, chunk 1 fails
     let v = lt(0);
+    // A busy provider (503) is retried, not "offline" (F15-FR7 keeps that for the network).
     assert_eq!(
         (v["state"].as_str(), v["waiting"].as_u64()),
-        (Some("offline"), Some(1))
+        (Some("retrying"), Some(1))
     );
     assert_eq!(
         v["lines"],
@@ -451,4 +452,98 @@ fn the_live_transcript_appends_whole_lines_and_says_when_it_is_waiting() {
         (Some("paused"), Some(meeting::app::LIVE_DECLINED))
     );
     assert!(parse(&fx.app.live_transcript_json("meeting-20991231-235959", 0))["error"].is_string());
+}
+
+#[test]
+fn chunks_queue_while_offline_and_catch_up_in_order_when_the_network_returns() {
+    // F15-FR7 / EC14 / F15-AC6 (host part): the provider can't be reached at all for a while.
+    // Recording carries on; the chunks wait; the lane catches up in order on its own schedule.
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port() // dropped: nothing listens there now
+    };
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let e = Env::new();
+    let key_dir = e.data.path().join("keys");
+    fs::create_dir_all(&key_dir).unwrap();
+    let body = format!(
+        "provider=openai\nkey={}\nmodel=gpt-4o-mini\n{WHISPER}",
+        common::OA
+    );
+    fs::write(key_dir.join("copilot-key-openai.txt"), body).unwrap();
+    let uri = format!("http://127.0.0.1:{port}");
+    let core = Core {
+        app_data_dir: e.data.path().into(),
+        key_dir,
+        endpoints: Endpoints {
+            openai: format!("{uri}/v1"),
+            gemini: uri.clone(),
+            anthropic: uri,
+        },
+        timeout: Duration::from_secs(5),
+        https_only: false,
+    };
+    let app = App::with_tz(core, e.root.path().into(), Arc::new(tz(PDT)));
+    begin(&app, T0);
+    app.start_live_json(ID0, true);
+    let dir = e.data.path().join("chunks").join(ID0);
+    fs::create_dir_all(&dir).unwrap();
+    let add = |i: u32| {
+        let p = dir.join(format!("c-{i:04}.m4a"));
+        fs::write(&p, b"\x00\x00\x00\x18ftypM4A chunk").unwrap();
+        let c = ChunkIn {
+            index: i as i32,
+            path: &p.to_string_lossy(),
+            start_offset_ms: i64::from(i) * 30_000,
+            duration_ms: 30_000,
+            speech_ms: 25_000,
+        };
+        parse(&app.chunk_ready_json(ID0, c));
+    };
+    for i in 0..4 {
+        add(i);
+        let v = parse(&app.live_drain_json(ID0));
+        assert_eq!(v["state"], "retry", "{v}");
+    }
+    let v = parse(&app.live_transcript_json(ID0, 0));
+    assert_eq!(
+        (v["state"].as_str(), v["waiting"].as_u64()),
+        (Some("offline"), Some(4))
+    );
+    assert_eq!(v["reason"], "No connection");
+    // Only the first chunk was tried, four times; the back-off grew to its cap.
+    let sc = read_sidecar(&e.export(), ID0);
+    assert_eq!(
+        sc.chunks.iter().map(|c| c.attempts).collect::<Vec<_>>(),
+        [4, 0, 0, 0]
+    );
+    assert!(sc.usage.is_empty(), "no reply, no cost (OQ16)");
+    // The network is back.
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).unwrap();
+    let s = rt.block_on(MockServer::builder().listener(listener).start());
+    rt.block_on(
+        Mock::given(method("POST"))
+            .and(path("/v1/audio/transcriptions"))
+            .respond_with(Script(
+                vec![(200, "a."), (200, "b."), (200, "c."), (200, "d.")],
+                AtomicUsize::new(0),
+            ))
+            .mount(&s),
+    );
+    let v = parse(&app.live_drain_json(ID0));
+    assert_eq!(
+        (
+            v["state"].as_str(),
+            v["done"].as_u64(),
+            v["waiting"].as_u64()
+        ),
+        (Some("idle"), Some(4), Some(0))
+    );
+    let texts: Vec<String> = read_sidecar(&e.export(), ID0)
+        .chunks
+        .iter()
+        .map(|c| c.text.clone().unwrap())
+        .collect();
+    assert_eq!(texts, ["a.", "b.", "c.", "d."]);
+    assert_eq!(parse(&app.live_transcript_json(ID0, 0))["state"], "current");
 }

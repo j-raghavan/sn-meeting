@@ -10,6 +10,14 @@ import java.util.concurrent.TimeUnit
 
 /** `nativeLiveDrain`'s reply (F15-FR5). */
 data class LiveReply(val state: String, val done: Int, val waiting: Int, val retryInMs: Long?, val reason: String?) {
+    /** F15-FR7 on Home's recording line: "4 waiting to send" while the lane backs off,
+     *  "transcription paused" once paused; null while it keeps up. */
+    val note: String? get() = when (state) {
+        "retry" -> "$waiting waiting to send"
+        "paused" -> "transcription paused"
+        else -> null
+    }
+
     companion object {
         fun of(json: String): LiveReply = try {
             val o = JSONObject(json)
