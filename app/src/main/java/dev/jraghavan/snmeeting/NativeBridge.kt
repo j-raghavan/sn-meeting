@@ -112,6 +112,11 @@ object NativeBridge {
 
     // Spend (F16). Rates are plain numbers, never secrets.
 
+    /** Spend per local month, `YYYY-MM` inclusive, over every listed sidecar: `{months: [{month,
+     *  usd, meetings, unpriced, label, byProvider: {openai: {transcribe, summarise}}}], unpriced}`.
+     *  `label` is Home's line ("October · $3.20 spent · 6 meetings"). */
+    external fun nativeSpend(fromMonth: String, toMonth: String): String
+
     /** The rates in force: `{asOf, entries: [{provider, model, unit, perMinute?, input?, …,
      *  validFrom?, asOf, source, note?, origin}], problems: [line]}`; origin is `default` or `user`. */
     external fun nativeGetRates(): String

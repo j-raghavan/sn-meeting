@@ -236,6 +236,195 @@ impl UsageRecord {
     }
 }
 
+/// A meeting's (or a month's) spend: the sum of the priced records, and whether any record
+/// could not be priced (shown as "+").
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Total {
+    pub usd: f64,
+    /// Records with `usd: null`.
+    pub unpriced: usize,
+    pub records: usize,
+    /// "≈ $0.41", "≈ $0.41+", "< $0.01", or "—" with no records (F16-FR5).
+    pub label: String,
+}
+
+impl Total {
+    pub fn of<'a>(records: impl IntoIterator<Item = &'a UsageRecord>) -> Total {
+        let mut t = Total::default();
+        for r in records {
+            t.records += 1;
+            match r.usd {
+                Some(u) if u.is_finite() => t.usd += u,
+                _ => t.unpriced += 1,
+            }
+        }
+        t.usd = round6(t.usd);
+        t.label = label(&t);
+        t
+    }
+}
+
+/// An amount rounded to cents: "$3.20", or "< $0.01" for less than a cent but more than none.
+pub fn money(usd: f64) -> String {
+    if usd > 0.0 && usd < 0.005 {
+        "< $0.01".to_owned()
+    } else {
+        format!("${usd:.2}")
+    }
+}
+
+/// F16-FR5's meeting label: "—" with no records, else "≈ $0.41", with "+" when a record has no
+/// price.
+pub fn label(t: &Total) -> String {
+    if t.records == 0 {
+        return "—".to_owned();
+    }
+    let plus = if t.unpriced > 0 { "+" } else { "" };
+    match money(t.usd) {
+        m if m.starts_with('<') => format!("{m}{plus}"),
+        m => format!("≈ {m}{plus}"),
+    }
+}
+
+/// A meeting's total over all its records.
+pub fn meeting_total(sc: &crate::sidecar::Sidecar) -> Total {
+    Total::of(&sc.usage)
+}
+
+/// One provider's spend in a month, by kind.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct ByKind {
+    pub transcribe: f64,
+    pub summarise: f64,
+}
+
+/// One month of `nativeSpend`.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Month {
+    /// `YYYY-MM`.
+    pub month: String,
+    pub usd: f64,
+    /// Meetings with at least one record this month.
+    pub meetings: usize,
+    pub unpriced: usize,
+    /// Home's line: "October · $3.20 spent · 6 meetings", or "October · nothing spent yet".
+    pub label: String,
+    pub by_provider: std::collections::BTreeMap<String, ByKind>,
+}
+
+/// `nativeSpend`'s reply.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Report {
+    pub months: Vec<Month>,
+    /// Records in these months with no price.
+    pub unpriced: usize,
+}
+
+/// The most months one report covers (ten years).
+pub const MAX_MONTHS: usize = 120;
+
+fn parse_month(s: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(&format!("{s}-01"), "%Y-%m-%d")
+        .ok()
+        .filter(|_| s.len() == 7)
+}
+
+/// The record's month in the device's time zone, `YYYY-MM`.
+fn month_of(r: &UsageRecord, tz: &dyn crate::tz::LocalTz) -> Option<String> {
+    let t = DateTime::parse_from_rfc3339(&r.at).ok()?;
+    let local = crate::tz::local_at(tz, t.timestamp_millis())?;
+    Some(local.format("%Y-%m").to_string())
+}
+
+fn home_label(first: NaiveDate, usd: f64, unpriced: usize, meetings: usize) -> String {
+    let name = first.format("%B");
+    if meetings == 0 {
+        return format!("{name} · nothing spent yet");
+    }
+    let plus = if unpriced > 0 { "+" } else { "" };
+    let n = if meetings == 1 { "meeting" } else { "meetings" };
+    format!("{name} · {}{plus} spent · {meetings} {n}", money(usd))
+}
+
+/// F16-FR5 / F16-FR7: spend per month from `from` to `to` (`YYYY-MM`, inclusive, every month
+/// listed), from the records of `meetings` (every sidecar this device lists), bucketed by the
+/// device's local month.
+pub fn report(
+    meetings: &[crate::sidecar::Sidecar],
+    tz: &dyn crate::tz::LocalTz,
+    from: &str,
+    to: &str,
+) -> Result<Report, String> {
+    let (Some(a), Some(b)) = (parse_month(from), parse_month(to)) else {
+        return Err("months must be YYYY-MM".into());
+    };
+    if a > b {
+        return Err("fromMonth is after toMonth".into());
+    }
+    let mut months = Vec::new();
+    let mut d = a;
+    while d <= b {
+        if months.len() == MAX_MONTHS {
+            return Err(format!("at most {MAX_MONTHS} months"));
+        }
+        months.push(d);
+        d = d
+            .checked_add_months(chrono::Months::new(1))
+            .ok_or("months out of range")?;
+    }
+    let mut out = Vec::new();
+    let mut unpriced_all = 0;
+    for first in months {
+        let key = first.format("%Y-%m").to_string();
+        let mut usd = 0.0;
+        let mut unpriced = 0;
+        let mut n = 0;
+        let mut by: std::collections::BTreeMap<String, ByKind> = Default::default();
+        for sc in meetings {
+            let mut any = false;
+            for r in sc
+                .usage
+                .iter()
+                .filter(|r| month_of(r, tz).as_deref() == Some(&key))
+            {
+                any = true;
+                let Some(u) = r.usd.filter(|u| u.is_finite()) else {
+                    unpriced += 1;
+                    continue;
+                };
+                usd += u;
+                let slot = by.entry(r.provider.id().to_owned()).or_default();
+                match r.kind {
+                    Kind::Transcribe => slot.transcribe += u,
+                    Kind::Summarise => slot.summarise += u,
+                }
+            }
+            n += usize::from(any);
+        }
+        for k in by.values_mut() {
+            k.transcribe = round6(k.transcribe);
+            k.summarise = round6(k.summarise);
+        }
+        let usd = round6(usd);
+        unpriced_all += unpriced;
+        out.push(Month {
+            label: home_label(first, usd, unpriced, n),
+            month: key,
+            usd,
+            meetings: n,
+            unpriced,
+            by_provider: by,
+        });
+    }
+    Ok(Report {
+        months: out,
+        unpriced: unpriced_all,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -418,5 +607,140 @@ mod tests {
         let r: UsageRecord = serde_json::from_value(v.clone()).unwrap();
         assert_eq!(serde_json::to_value(&r).unwrap(), v);
         assert_eq!(round6(0.123_456_789), 0.123_457);
+    }
+
+    fn rec(at: &str, p: Provider, kind: Kind, usd: Option<f64>) -> UsageRecord {
+        let mut r = UsageRecord::new(kind, &measured(p, "m"), at.into(), &table(vec![]));
+        r.usd = usd;
+        r
+    }
+
+    fn sc(id: &str, usage: Vec<UsageRecord>) -> crate::sidecar::Sidecar {
+        crate::sidecar::Sidecar {
+            usage,
+            ..crate::sidecar::blank(id)
+        }
+    }
+
+    /// F16-AC5 (the label): an unpriced record shows "+".
+    #[test]
+    fn meeting_labels() {
+        let at = AT;
+        let t = |v: Vec<Option<f64>>| {
+            let recs: Vec<_> = v
+                .into_iter()
+                .map(|u| rec(at, Provider::OpenAi, Kind::Transcribe, u))
+                .collect();
+            Total::of(&recs).label
+        };
+        assert_eq!(t(vec![]), "—");
+        assert_eq!(t(vec![Some(0.2), Some(0.21)]), "≈ $0.41");
+        assert_eq!(t(vec![Some(0.41), None]), "≈ $0.41+");
+        assert_eq!(t(vec![Some(0.004)]), "< $0.01");
+        assert_eq!(t(vec![Some(0.004), None]), "< $0.01+");
+        assert_eq!(t(vec![None]), "≈ $0.00+");
+        assert_eq!(t(vec![Some(0.076)]), "≈ $0.08");
+        let total = Total::of(&[rec(at, Provider::OpenAi, Kind::Transcribe, Some(0.1))]);
+        assert_eq!((total.usd, total.records, total.unpriced), (0.1, 1, 0));
+        assert_eq!(
+            meeting_total(&sc("meeting-20261009-100000", vec![])).label,
+            "—"
+        );
+    }
+
+    /// F16-AC6: records either side of midnight on 30 September, local time.
+    #[test]
+    fn months_split_at_local_midnight() {
+        let tz = crate::tz::FixedTz(chrono::FixedOffset::west_opt(7 * 3600).unwrap());
+        let a = rec(
+            "2026-09-30T23:50:00-07:00",
+            Provider::OpenAi,
+            Kind::Transcribe,
+            Some(0.5),
+        );
+        let b = rec(
+            "2026-10-01T00:10:00-07:00",
+            Provider::Gemini,
+            Kind::Summarise,
+            Some(0.25),
+        );
+        // Stored with another offset, but 23:50 local all the same.
+        let c = rec(
+            "2026-10-01T06:50:00Z",
+            Provider::OpenAi,
+            Kind::Summarise,
+            None,
+        );
+        let meetings = [
+            sc("meeting-20260930-235000", vec![a, c]),
+            sc("meeting-20261001-000500", vec![b]),
+            sc("meeting-20261002-000500", vec![]),
+        ];
+        let r = report(&meetings, &tz, "2026-09", "2026-10").unwrap();
+        let [sep, oct] = &r.months[..] else {
+            panic!("{r:?}")
+        };
+        assert_eq!(
+            (sep.month.as_str(), sep.usd, sep.meetings, sep.unpriced),
+            ("2026-09", 0.5, 1, 1)
+        );
+        assert_eq!(
+            (oct.month.as_str(), oct.usd, oct.meetings),
+            ("2026-10", 0.25, 1)
+        );
+        assert_eq!(oct.label, "October · $0.25 spent · 1 meeting");
+        assert_eq!(sep.label, "September · $0.50+ spent · 1 meeting");
+        assert_eq!(
+            sep.by_provider["openai"],
+            ByKind {
+                transcribe: 0.5,
+                summarise: 0.0
+            }
+        );
+        assert_eq!(
+            oct.by_provider["gemini"],
+            ByKind {
+                transcribe: 0.0,
+                summarise: 0.25
+            }
+        );
+        assert_eq!(r.unpriced, 1);
+        let r = report(&meetings, &tz, "2026-11", "2027-01").unwrap();
+        assert_eq!(r.months.len(), 3);
+        assert_eq!(r.months[0].label, "November · nothing spent yet");
+        let two = [
+            sc(
+                "meeting-20261001-000500",
+                vec![rec(
+                    "2026-10-02T00:00:00-07:00",
+                    Provider::OpenAi,
+                    Kind::Transcribe,
+                    Some(1.0),
+                )],
+            ),
+            sc(
+                "meeting-20261003-000500",
+                vec![rec(
+                    "2026-10-04T00:00:00-07:00",
+                    Provider::OpenAi,
+                    Kind::Transcribe,
+                    Some(2.2),
+                )],
+            ),
+        ];
+        let r = report(&two, &tz, "2026-10", "2026-10").unwrap();
+        assert_eq!(r.months[0].label, "October · $3.20 spent · 2 meetings");
+    }
+
+    #[test]
+    fn bad_month_ranges_are_refused() {
+        let tz = crate::tz::FixedTz(chrono::FixedOffset::east_opt(0).unwrap());
+        let r = |a, b| report(&[], &tz, a, b).unwrap_err();
+        assert_eq!(r("2026-13", "2026-12"), "months must be YYYY-MM");
+        assert_eq!(r("2026-1", "2026-12"), "months must be YYYY-MM");
+        assert_eq!(r("2026-12", "2026-01"), "fromMonth is after toMonth");
+        assert_eq!(r("2000-01", "2026-01"), "at most 120 months");
+        assert!(report(&[], &tz, "2026-01", "2035-12").is_ok());
+        assert_eq!(money(0.0), "$0.00");
     }
 }

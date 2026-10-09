@@ -400,3 +400,18 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSetRates<
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeSpend<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    from_month: JString<'local>,
+    to_month: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let from: String = from_month.try_to_string(env)?;
+        let to: String = to_month.try_to_string(env)?;
+        env.new_string(crate::api::spend(&from, &to))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

@@ -274,6 +274,11 @@ pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))
 }
 
+/// `nativeSpend(fromMonth, toMonth)` (F16-FR5): spend per month, `YYYY-MM` inclusive.
+pub fn spend(from: &str, to: &str) -> String {
+    with_app(|app| app.spend_json(from, to))
+}
+
 /// `nativeGetRates()` (F16-FR4): `{asOf, entries, problems}`.
 pub fn get_rates() -> String {
     with_app(App::get_rates_json)

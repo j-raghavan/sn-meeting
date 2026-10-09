@@ -41,7 +41,8 @@ fn the_five_newest_of_seven_newest_first() {
         *first,
         json!({"id": all[6], "startedAt": "2026-10-07T21:23:06-07:00", "startedAtMs": T0 + 6 * MIN,
                "durationMs": 30_000, "status": "recorded", "failedAt": null, "title": null,
-               "segmentCount": 1, "openTodoCount": 0, "source": "sidecar", "folder": e.export()})
+               "segmentCount": 1, "openTodoCount": 0, "source": "sidecar", "folder": e.export(),
+               "spend": {"usd": 0.0, "unpriced": 0, "records": 0, "label": "—"}})
     );
     assert_eq!(parse(&app.list_recent_json(0)), json!([]));
     assert_eq!(ids(&parse(&app.list_recent_json(100))).len(), 7);

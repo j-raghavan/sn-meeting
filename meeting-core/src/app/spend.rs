@@ -94,4 +94,14 @@ impl App {
             Err(e) => e,
         }
     }
+
+    /// `nativeSpend(fromMonth, toMonth)`: `{months: [{month, usd, meetings, unpriced, label,
+    /// byProvider: {openai: {transcribe, summarise}}}], unpriced}` over every listed sidecar.
+    pub fn spend_json(&self, from: &str, to: &str) -> String {
+        let meetings = self.library().sidecars();
+        match crate::spend::report(&meetings, self.tz.as_ref(), from, to) {
+            Ok(r) => json!(r).to_string(),
+            Err(e) => crate::api::error_json(&e),
+        }
+    }
 }
