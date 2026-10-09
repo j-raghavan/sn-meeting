@@ -508,6 +508,17 @@ fn the_recorder_is_standard_unless_near_live_is_chosen() {
         json!({"error": "recorder must be standard or near-live", "field": "recorder"})
     );
     assert_eq!(get(&app)["settings"]["recorder"], "near-live");
+    // F15-FR12: the near-live notice, once per provider.
+    assert_eq!(get(&app)["settings"]["liveNoticeShown"]["openai"], false);
+    let v = set(&app, json!({"liveNoticeShown": {"openai": true}}));
+    assert_eq!(
+        v["settings"]["liveNoticeShown"],
+        json!({"openai": true, "gemini": false, "anthropic": false})
+    );
+    assert_eq!(
+        v["settings"]["noticeShown"]["openai"], false,
+        "the job notice is separate"
+    );
     // A hand edit the app can't read is Standard.
     fs::write(
         e.data.path().join("settings.json"),

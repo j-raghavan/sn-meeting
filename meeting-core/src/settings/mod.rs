@@ -48,6 +48,9 @@ pub struct Settings {
     pub default_template: String,
     /// Security: the one-time "audio is sent to <provider>" notice, per provider.
     pub notice_shown: NoticeShown,
+    /// F15-FR12: the one-time near-live notice ("Audio is sent to OpenAI while you record"),
+    /// per provider, answered before the first near-live recording to it.
+    pub live_notice_shown: NoticeShown,
     pub debug: DebugSettings,
     /// F15 / D14: which recorder a new meeting uses. A bad value in the file reads as Standard.
     #[serde(deserialize_with = "lenient_recorder")]
@@ -75,6 +78,7 @@ impl Default for Settings {
             summarise: RoleSettings::default(),
             default_template: DEFAULT_TEMPLATE.into(),
             notice_shown: NoticeShown::default(),
+            live_notice_shown: NoticeShown::default(),
             debug: DebugSettings::default(),
             recorder: Recorder::Standard,
             updates: UpdateSettings::default(),

@@ -50,6 +50,8 @@ class RecordingService : Service() {
     @Volatile private var eventKey: String? = null
     /** F15 / D14: the starting recording uses the near-live recorder (Settings → Recorder). */
     @Volatile private var nearLive = false
+    /** F15-FR12: its chunks are sent while recording (the notice accepted). */
+    @Volatile private var liveSend = true
     /** The ongoing notification while a recording is under way; null once it ended. */
     @Volatile private var shown: Notification? = null
 
@@ -89,7 +91,8 @@ class RecordingService : Service() {
                 val choice = MicChoice.of(intent.getStringExtra(EXTRA_MIC))
                 val event = intent.getStringExtra(EXTRA_EVENT)
                 val live = intent.getBooleanExtra(EXTRA_NEAR_LIVE, false)
-                onRecorder("start") { if (session == null) { eventKey = event; nearLive = live }; begin(choice) }
+                val send = intent.getBooleanExtra(EXTRA_LIVE_SEND, true)
+                onRecorder("start") { if (session == null) { eventKey = event; nearLive = live; liveSend = send }; begin(choice) }
             }
             ACTION_STOP -> onRecorder("stop") { (session ?: RecordingSession(env).also { session = it }).stop() }
             else -> stopSelf(startId) // a restart with no intent can't resume a recording (F3-FR5)
@@ -110,7 +113,7 @@ class RecordingService : Service() {
         override fun openBluetooth(onChange: () -> Unit): BtPort =
             BluetoothState(this@RecordingService, h) { safely.run("bluetooth", onChange) }.also { it.open() }
         override fun newRecorder(listener: SegmentedRecorder.Listener) =
-            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration, safely, eventKey, live = if (nearLive) true else null),
+            SegmentedRecorder(CoreRecorderBridge(h, RetrieverDuration, safely, eventKey, live = if (nearLive) liveSend else null),
                 if (nearLive) PcmRecorderAdapter(this@RecordingService, h) else MediaRecorderAdapter(this@RecordingService, h),
                 FileStorage, AndroidClock, listener,
                 log = { what, t -> Log.w(TAG, "$what: ${t.javaClass.name}", t) })
@@ -159,7 +162,7 @@ class RecordingService : Service() {
         session = null; shown = null
         // F15-FR9: a near-live recording's remaining chunks are sent and the minutes filled.
         val id = end.lastId
-        if (id != null && nearLive) StopJob.start(id)
+        if (id != null && nearLive && liveSend) StopJob.start(id) // declined: the chunks wait for Transcribe
         if (destroyed) return // a late reply after onDestroy (S12): nothing left to stop
         stopForeground(STOP_FOREGROUND_REMOVE)
         // An ending nobody asked for (mic lost, storage full) stays in the shade (F2-FR3).
@@ -223,6 +226,7 @@ class RecordingService : Service() {
         const val EXTRA_MIC = "mic"
         const val EXTRA_EVENT = "event"
         const val EXTRA_NEAR_LIVE = "near_live"
+        const val EXTRA_LIVE_SEND = "live_send"
         private const val CHANNEL = "recording"
         private const val NOTE_ID = 1
         private const val END_NOTE_ID = 2
@@ -237,9 +241,10 @@ class RecordingService : Service() {
 
         /** [eventKey]: "● Record" on an event links the meeting to it (F18-FR8). */
         /** [nearLive]: Settings → Recorder is Near-live (F15); else the Standard recorder. */
-        fun start(c: Context, mic: MicChoice, eventKey: String? = null, nearLive: Boolean = false) =
+        /** [liveSend]: F15-FR12, false when the near-live notice was declined. */
+        fun start(c: Context, mic: MicChoice, eventKey: String? = null, nearLive: Boolean = false, liveSend: Boolean = true) =
             c.startForegroundService(Intent(c, RecordingService::class.java).setAction(ACTION_START).putExtra(EXTRA_MIC, mic.wire)
-                .putExtra(EXTRA_NEAR_LIVE, nearLive)
+                .putExtra(EXTRA_NEAR_LIVE, nearLive).putExtra(EXTRA_LIVE_SEND, liveSend)
                 .apply { if (eventKey != null) putExtra(EXTRA_EVENT, eventKey) })
 
         fun stop(c: Context) = c.startService(Intent(c, RecordingService::class.java).setAction(ACTION_STOP))

@@ -30,6 +30,7 @@ import dev.jraghavan.snmeeting.model.CalendarRefresh
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.HomeRows
+import dev.jraghavan.snmeeting.model.LiveNotice
 import dev.jraghavan.snmeeting.model.MeetingSummary
 import dev.jraghavan.snmeeting.model.MicChoice
 import dev.jraghavan.snmeeting.model.Permissions
@@ -83,6 +84,8 @@ class MainActivity : Activity(), HomeLists.Actions {
     private var micChoice: MicChoice = MicChoice.Auto
     /** F15: Settings → Recorder; Standard until the settings are read. */
     private var nearLive = false
+    /** The settings as last read (F15-FR12's notice needs the provider and what was answered). */
+    private var settingsView: SettingsView? = null
     private var saveFolder = "EXPORT/sn-meeting"
     private var prefs = CalendarPrefs()
 
@@ -286,7 +289,7 @@ class MainActivity : Activity(), HomeLists.Actions {
             SearchJobs.refresh() // F19-FR5: re-index what changed, off the core queue
         }
         CoreJobs.run({ NativeBridge.nativeGetSettings() }) { json ->
-            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; nearLive = it.nearLive; render() } }
+            CoreJson.obj(json, SettingsView::from).getOrNull()?.let { if (!isDestroyed) { micChoice = it.mic; saveFolder = it.saveFolder; nearLive = it.nearLive; settingsView = it; render() } }
             prefs = CoreJson.obj(json) { o -> CalendarPrefs.from(o.optJSONObject("settings")?.optJSONObject("calendar")) }.getOrNull() ?: prefs
             refreshCalendar(force = false) // the links file may have changed on the desktop (F18-FR1)
         }
@@ -483,7 +486,20 @@ class MainActivity : Activity(), HomeLists.Actions {
         val event = pendingEvent
         pendingEvent = null
         if (!p.canRecord) { pendingTemplate = null; return render() }
-        RecordingService.start(this, micChoice, event, nearLive)
+        // F15-FR12: before the first near-live recording to a provider, say audio goes to it.
+        val notice = settingsView?.takeIf { nearLive }?.let(LiveNotice::of)
+            ?: run { RecordingService.start(this, micChoice, event, nearLive); return }
+        val provider = settingsView?.effectiveTranscribe?.provider.orEmpty()
+        InkDialog.choose(this, LiveNotice.TITLE, notice, LiveNotice.SEND, LiveNotice.WITHOUT, "Cancel",
+            onYes = {
+                CoreJobs.run({ NativeBridge.nativeSetSettings(SettingsPatch.liveNoticeShown(provider)) }) { json ->
+                    CoreJson.obj(json, SettingsView::from).getOrNull()?.let { settingsView = it }
+                }
+                RecordingService.start(this, micChoice, event, nearLive, liveSend = true)
+            },
+            onNo = { RecordingService.start(this, micChoice, event, nearLive, liveSend = false); Unit },
+            onLater = { pendingTemplate = null },
+        )
     }
 
     private fun render() {
