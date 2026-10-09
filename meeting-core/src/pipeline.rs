@@ -4,9 +4,12 @@
 use crate::jobs::{self, Cancel};
 use crate::keyfile::ProviderKey;
 use crate::library::{self, LibError, Library};
-use crate::providers::{self, AudioIn, CallFail, Endpoints, Http};
+use crate::providers::{self, AudioIn, CallError, CallFail, Endpoints, Http, Replied};
+use crate::rates::RateTable;
 use crate::sidecar::{ProviderRun, SegmentFlag, Sidecar};
+use crate::spend::{Kind, UsageRecord};
 use crate::status::{self, Event, Phase};
+use crate::tz::{self, LocalTz};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -48,6 +51,62 @@ pub struct JobPlan {
     /// The effective templates at job start (F11-FR3).
     pub templates: Vec<crate::templates::Template>,
     pub budgets: jobs::Budgets,
+    /// The rates in force at job start, pricing each usage record once (F16-FR3).
+    pub rates: RateTable,
+}
+
+/// F16-FR2: the usage records of calls whose result is not yet written. Each call that got a
+/// reply adds one; the next sidecar write (the result's, or the failure's) takes them all, so a
+/// record lands in the same write as what its call produced.
+pub(crate) struct Spent<'a> {
+    tz: &'a dyn LocalTz,
+    rates: &'a RateTable,
+    records: Mutex<Vec<UsageRecord>>,
+}
+
+impl<'a> Spent<'a> {
+    pub(crate) fn new(tz: &'a dyn LocalTz, rates: &'a RateTable) -> Spent<'a> {
+        Spent {
+            tz,
+            rates,
+            records: Mutex::default(),
+        }
+    }
+
+    /// Record what `r`'s reply reported, if a reply arrived (OQ16: a failed request reports
+    /// nothing and costs nothing here). `segment` is the segment transcribed.
+    pub(crate) fn note(&self, kind: Kind, segment: Option<usize>, r: &Result<Replied, CallError>) {
+        let m = match r {
+            Ok(x) => &x.measured,
+            Err(e) => match &e.spent {
+                Some(m) => m.as_ref(),
+                None => return,
+            },
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        let at = tz::local_at(self.tz, now)
+            .map(|t| tz::rfc3339(&t))
+            .unwrap_or_default();
+        let mut rec = UsageRecord::new(kind, m, at, self.rates);
+        rec.segment = segment;
+        self.lock().push(rec);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<UsageRecord>> {
+        self.records.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Every record not yet written, oldest first.
+    pub(crate) fn take(&self) -> Vec<UsageRecord> {
+        std::mem::take(&mut *self.lock())
+    }
+
+    /// Records whose write failed, back in front of any noted since.
+    pub(crate) fn put_back(&self, mut recs: Vec<UsageRecord>) {
+        let mut g = self.lock();
+        recs.append(&mut g);
+        *g = recs;
+    }
 }
 
 /// Why a job stopped without a final status of its own.
@@ -146,7 +205,11 @@ async fn run_transcribe(
         })
     })
     .map_err(JobError::NotStarted)?;
-    let fail = |msg: String| finish(lib, lock, id, Event::TranscribeFailed, Some(msg));
+    let spent = Spent::new(lib.tz, &plan.rates);
+    let fail = |msg: String| {
+        let event = Event::TranscribeFailed;
+        finish_spent(lib, lock, id, event, Some(msg), &spent)
+    };
     if no_audio {
         return fail(NO_AUDIO.into());
     }
@@ -160,14 +223,15 @@ async fn run_transcribe(
         let bytes = match read_segment(&dir, &seg, key) {
             Ok(Audio::Send(b)) => b,
             Ok(Audio::Skip(text, flag)) => {
-                store(lib, lock, id, &seg, text.to_owned(), Some(flag))?;
+                store(lib, lock, id, &seg, text.to_owned(), Some(flag), &spent)?;
                 continue;
             }
             Err(msg) => return fail(msg),
         };
         let budget = plan.budgets.transcribe(seg.duration_ms);
+        let index = seg.index;
         let call = |m: String| {
-            let (bytes, vocabulary) = (&bytes, &vocabulary);
+            let (bytes, vocabulary, spent) = (&bytes, &vocabulary, &spent);
             let file = seg.file.clone();
             async move {
                 let f = || {
@@ -177,7 +241,12 @@ async fn run_transcribe(
                         prompt: vocabulary.clone(),
                         duration_ms: seg.duration_ms,
                     };
-                    providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio)
+                    let fut = providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio);
+                    async move {
+                        let r = fut.await;
+                        spent.note(Kind::Transcribe, Some(index), &r);
+                        r
+                    }
                 };
                 jobs::with_retry(cancel, budget, f).await
             }
@@ -196,7 +265,7 @@ async fn run_transcribe(
             Ok(t) => t.text,
             Err(e) => return fail(e.detail),
         };
-        store(lib, lock, id, &seg, text, None)?;
+        store(lib, lock, id, &seg, text, None, &spent)?;
     }
     let p = finish(lib, lock, id, Event::AllSegmentsText, None)?;
     // S4: the transcript file exists as soon as there is a transcript (summary empty); a
@@ -238,8 +307,9 @@ fn ran_with(
     .map_err(JobError::Storage)
 }
 
-/// Store `text` (and `flag`) on the segment. The sidecar is re-read: only the segment the job
-/// took is changed, and only if it is still the same file.
+/// Store `text` (and `flag`) on the segment, with the usage records of the calls that produced
+/// it (F16-FR2). The sidecar is re-read: only the segment the job took is changed, and only if
+/// it is still the same file.
 fn store(
     lib: &Library<'_>,
     lock: &Mutex<()>,
@@ -247,9 +317,12 @@ fn store(
     seg: &Pending,
     text: String,
     flag: Option<SegmentFlag>,
+    spent: &Spent<'_>,
 ) -> Result<(), JobError> {
-    locked(lock, || {
+    let recs = spent.take();
+    let r = locked(lock, || {
         lib.update(id, |sc, _| {
+            sc.usage.extend(recs.iter().cloned());
             if let Some(s) = sc
                 .segments
                 .get_mut(seg.index)
@@ -264,8 +337,11 @@ fn store(
             }
             Ok(())
         })
-    })
-    .map_err(JobError::Storage)
+    });
+    if r.is_err() {
+        spent.put_back(recs);
+    }
+    r.map_err(JobError::Storage)
 }
 
 /// F5-FR1: the meeting's template vocabulary as the transcription hint ("Priya, Supernote");
@@ -334,6 +410,19 @@ pub(crate) fn finish(
     locked(lock, || apply(lib, id, event, error)).map_err(JobError::Storage)
 }
 
+/// `finish`, writing the usage records `spent` holds in the same write (F16-FR2).
+pub(crate) fn finish_spent(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    event: Event,
+    error: Option<String>,
+    spent: &Spent<'_>,
+) -> Result<Phase, JobError> {
+    let recs = spent.take();
+    locked(lock, || apply_with(lib, id, event, error, recs)).map_err(JobError::Storage)
+}
+
 /// `finish` without taking the lock (the caller holds it).
 pub(crate) fn apply(
     lib: &Library<'_>,
@@ -341,10 +430,21 @@ pub(crate) fn apply(
     event: Event,
     error: Option<String>,
 ) -> Result<Phase, LibError> {
+    apply_with(lib, id, event, error, Vec::new())
+}
+
+fn apply_with(
+    lib: &Library<'_>,
+    id: &str,
+    event: Event,
+    error: Option<String>,
+    recs: Vec<UsageRecord>,
+) -> Result<Phase, LibError> {
     lib.update(id, |sc, _| {
         let p = status::next(library::phase(sc), event)?;
         library::set_phase(sc, p);
         sc.error = error;
+        sc.usage.extend(recs);
         Ok(p)
     })
 }

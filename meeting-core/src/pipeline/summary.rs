@@ -3,11 +3,12 @@
 //! written before the sidecar, and a render error writes neither (the old file stays). The
 //! layout renders outside the write lock (S16, `transcript.rs`).
 use super::transcript::{self, template_of};
-use super::{JobError, JobPlan, finish, joined, locked, paragraphs};
+use super::{JobError, JobPlan, Spent, finish_spent, joined, locked, paragraphs};
 use crate::jobs::{self, Cancel};
 use crate::library::{self, LibError, Library};
 use crate::providers::{self, CallFail, JsonAsk};
 use crate::sidecar::{self, MicKind, ProviderRun, Sidecar};
+use crate::spend::Kind;
 use crate::status::{self, Event, Phase};
 use crate::summarise;
 use crate::templates::{self, Context, CtxPara, CtxProviders, CtxSection, CtxTodo, Template};
@@ -38,7 +39,8 @@ pub async fn summarise(
         })
     })
     .map_err(JobError::NotStarted)?;
-    let fail = |msg: String| finish(lib, lock, id, Event::SummariseFailed, Some(msg));
+    let spent = Spent::new(lib.tz, &plan.rates);
+    let fail = |msg: String| finish_spent(lib, lock, id, Event::SummariseFailed, Some(msg), &spent);
     let tid = sc.template_id.clone().unwrap_or_default();
     let Some((tpl, note)) = template_of(&plan.templates, &tid) else {
         return fail("No template is available".into());
@@ -53,9 +55,16 @@ pub async fn summarise(
         max_tokens: summarise::MAX_OUTPUT_TOKENS,
     };
     let call = |m: String| {
-        let ask = &ask;
+        let (ask, spent) = (&ask, &spent);
         async move {
-            let f = || providers::complete_json(&plan.http, &plan.endpoints, key, &m, ask);
+            let f = || {
+                let fut = providers::complete_json(&plan.http, &plan.endpoints, key, &m, ask);
+                async move {
+                    let r = fut.await;
+                    spent.note(Kind::Summarise, None, &r);
+                    r
+                }
+            };
             jobs::with_retry(cancel, plan.budgets.summarise, f).await
         }
     };
@@ -143,7 +152,13 @@ pub async fn summarise(
             next.transcript_file = Some(name.clone());
             let p = status::next(library::phase(&next), Event::SummariseOk)?;
             library::set_phase(&mut next, p);
-            sidecar::write(&dir, &next)?;
+            // F16-FR2: the summary's usage goes in the write that stores it.
+            let recs = spent.take();
+            next.usage.extend(recs.iter().cloned());
+            if let Err(e) = sidecar::write(&dir, &next) {
+                spent.put_back(recs);
+                return Err(e.into());
+            }
             Ok(Some(p))
         });
         match r {

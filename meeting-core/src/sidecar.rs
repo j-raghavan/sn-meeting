@@ -55,6 +55,10 @@ pub struct Sidecar {
     pub note: Option<String>,
     #[serde(default)]
     pub todos: Vec<Todo>,
+    /// F16-FR2: one record per successful provider call, oldest first. Optional (schema 1):
+    /// absent means none, and an empty list is not written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub usage: Vec<crate::spend::UsageRecord>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -265,6 +269,7 @@ pub fn blank(id: &str) -> Sidecar {
         error: None,
         note: None,
         todos: Vec::new(),
+        usage: Vec::new(),
         extra: Extra::new(),
     }
 }

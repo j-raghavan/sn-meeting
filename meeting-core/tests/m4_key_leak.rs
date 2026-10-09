@@ -56,17 +56,20 @@ fn summarise_route(p: &str) -> MockBuilder {
     }
 }
 
+/// A reply naming a model that echoes the key, so usage records are covered too (F16).
 fn success(p: &str, text: &str) -> ResponseTemplate {
+    let echo = format!("m-{}", key_of(p));
     let body = match p {
         "openai" if text != SUMMARY => json!({"text": text}),
         "openai" => json!({
-            "id": "r", "object": "response", "created_at": 1, "status": "completed", "model": "m",
+            "id": "r", "object": "response", "created_at": 1, "status": "completed", "model": echo,
             "output": [{"type": "message", "id": "m", "status": "completed", "role": "assistant",
                 "content": [{"type": "output_text", "text": text, "annotations": []}]}],
             "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2}}),
         "gemini" => json!({"candidates": [{"content": {"parts": [{"text": text}], "role": "model"},
-            "finishReason": "STOP"}]}),
-        _ => json!({"id": "m", "type": "message", "role": "assistant", "model": "m",
+            "finishReason": "STOP"}], "modelVersion": echo,
+            "usageMetadata": {"promptTokenCount": 3, "candidatesTokenCount": 2}}),
+        _ => json!({"id": "m", "type": "message", "role": "assistant", "model": echo,
             "content": [{"type": "text", "text": text}], "stop_reason": "end_turn",
             "usage": {"input_tokens": 1, "output_tokens": 1}}),
     };
@@ -207,7 +210,11 @@ fn no_key_reaches_any_file_or_reply() {
                 .unwrap_or_default()
                 .to_owned();
             match r {
-                Reply::Ok => assert_eq!(status, "done", "{tp}"),
+                Reply::Ok => {
+                    assert_eq!(status, "done", "{tp}");
+                    let usage = m["meeting"]["usage"].as_array().map_or(0, Vec::len);
+                    assert!(usage >= 2, "{tp}: usage records were written and checked");
+                }
                 _ => assert_eq!(status, "failed", "{tp} {r:?}"),
             }
         }

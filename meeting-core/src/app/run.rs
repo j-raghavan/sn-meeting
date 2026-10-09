@@ -121,6 +121,7 @@ impl App {
             default_template: self.effective_default(&s),
             templates: self.templates.effective(),
             budgets: self.budgets,
+            rates: self.rates(),
         })
     }
 

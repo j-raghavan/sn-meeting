@@ -65,6 +65,7 @@ fn plan(uri: &str) -> JobPlan {
         default_template: "general".into(),
         templates: vec![],
         budgets: Default::default(),
+        rates: Default::default(),
     }
 }
 
