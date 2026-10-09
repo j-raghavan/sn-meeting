@@ -25,12 +25,24 @@ class ProxySlotsTest {
         assertNull(slots[1])
     }
 
-    @Test fun aReplacedProxyIsClosedAndADisconnectForgetsIt() {
+    @Test fun aReplacedOrDisconnectedProxyIsClosedOnce() { // F2-FR2: no leaked binding
         slots.connected(1, "a"); slots.connected(1, "b")
         slots.disconnected(1)
-        assertEquals(listOf("change", "close 1:a", "change", "change"), log)
+        assertEquals(listOf("change", "close 1:a", "change", "close 1:b", "change"), log)
         assertNull(slots[1])
+        slots.disconnected(1) // nothing held: nothing to close or report
         slots.close(); slots.close()
-        assertEquals(4, log.size) // nothing more to close
+        assertEquals(5, log.size) // nothing more to close
+    }
+
+    @Test fun everyProxyOpenedIsClosedExactlyOnceOnEveryPath() {
+        slots.connected(1, "headset")
+        slots.connected(2, "a2dp")
+        slots.disconnected(2)
+        slots.close()
+        slots.connected(2, "a2dp-late") // bound after the session ended
+        slots.disconnected(1)
+        val closes = log.filter { it.startsWith("close") }
+        assertEquals(listOf("close 2:a2dp", "close 1:headset", "close 2:a2dp-late"), closes)
     }
 }
