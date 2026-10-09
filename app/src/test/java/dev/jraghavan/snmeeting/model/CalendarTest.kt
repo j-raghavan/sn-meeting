@@ -71,7 +71,18 @@ class CalendarTest {
         assertFalse(CalendarFormat.canLink(rec.copy(meetingId = null), d.rows))
         val free = AgendaRow.from(JSONObject("""{"kind":"event","startMs":1,"transparent":true}"""))!!
         assertTrue(free.transparent)
-        assertEquals("0:38", CalendarFormat.meetingLine(rec.copy(durationMs = 38 * min)))
+        assertEquals("38:00", CalendarFormat.meetingLine(rec.copy(durationMs = 38 * min)))
+    }
+
+    @Test
+    fun a_recordings_length_is_m_ss_then_h_mm_ss() { // F18-FR7 (device finding 2026-10-09)
+        assertEquals("0:00", CalendarFormat.length(0L))
+        assertEquals("0:15", CalendarFormat.length(15_000L))
+        assertEquals("0:59", CalendarFormat.length(59_600L))
+        assertEquals("20:00", CalendarFormat.length(20 * min))
+        assertEquals("59:59", CalendarFormat.length(3_599_999L))
+        assertEquals("1:02:10", CalendarFormat.length(3_730_000L))
+        assertEquals("0:00", CalendarFormat.length(-5L))
     }
 
     @Test
@@ -89,10 +100,7 @@ class CalendarTest {
         assertNull(CalendarFormat.rowTitle(untitled))
         val titled = untitled.copy(title = "Budget", durationMs = 38 * 60_000L, cost = "≈ \$0.01")
         assertEquals("Budget", CalendarFormat.rowTitle(titled))
-        assertEquals("0:38 · \$0.01", CalendarFormat.meetingLine(titled))
-        assertEquals("1:05", CalendarFormat.length(65 * 60_000L))
-        assertEquals("0:01", CalendarFormat.length(5_000L))
-        assertEquals("0:00", CalendarFormat.length(0L))
+        assertEquals("38:00 · \$0.01", CalendarFormat.meetingLine(titled))
         assertEquals("(No title)", CalendarFormat.rowTitle(sync.copy(title = null)))
         assertEquals("", CalendarFormat.detail(sync.copy(location = null, people = "")))
     }

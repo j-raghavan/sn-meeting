@@ -184,10 +184,14 @@ object CalendarFormat {
     /** A row's main line: the event's title, or the meeting's (null for an untitled one). */
     fun rowTitle(r: AgendaRow): String? = if (r.isEvent) r.title?.ifBlank { null } ?: "(No title)" else r.title?.ifBlank { null }
 
-    /** "0:38", hours and minutes; a recording under a minute reads "0:01". */
+    /**
+     * A recording's length: m:ss under an hour ("0:15", "20:00"), h:mm:ss from an hour
+     * ("1:02:10"), whole seconds as the meeting screen's [h:mm:ss] and Search's times.
+     */
     fun length(ms: Long): String {
-        val min = ((ms + 59_999) / 60_000).coerceAtLeast(if (ms > 0) 1 else 0)
-        return "%d:%02d".format(Locale.ROOT, min / 60, min % 60)
+        val s = ms.coerceAtLeast(0) / 1000
+        return if (s < 3600) "%d:%02d".format(Locale.ROOT, s / 60, s % 60)
+        else "%d:%02d:%02d".format(Locale.ROOT, s / 3600, (s / 60) % 60, s % 60)
     }
 
     /** A recording's secondary line: "0:38 · $0.01", the cost left out when nothing is known. */
