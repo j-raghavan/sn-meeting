@@ -8,8 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// When the providers' pricing pages behind the defaults were read.
-pub const DEFAULTS_AS_OF: &str = "2026-10-08";
+pub const DEFAULTS_AS_OF: &str = "2026-10-09";
 const OPENAI_PRICING: &str = "https://developers.openai.com/api/docs/pricing";
+/// GPT-5's model pages (checked 2026-10-09; the page marks gpt-5 deprecated, still priced).
+const GPT5_PRICING: &str = "https://developers.openai.com/api/docs/models/gpt-5";
+const GPT5_MINI_PRICING: &str = "https://developers.openai.com/api/docs/models/gpt-5-mini";
 const GEMINI_PRICING: &str = "https://ai.google.dev/gemini-api/docs/pricing";
 const ANTHROPIC_PRICING: &str = "https://platform.claude.com/docs/en/about-claude/pricing";
 /// Where an edited entry says it came from.
@@ -222,6 +225,14 @@ pub fn defaults() -> Vec<Rate> {
             ..Rate::tokens(OpenAi, "gpt-4o-mini", 0.15, 0.60, OPENAI_PRICING)
         },
         Rate {
+            cached_input: Some(0.125),
+            ..Rate::tokens(OpenAi, "gpt-5", 1.25, 10.00, GPT5_PRICING)
+        },
+        Rate {
+            cached_input: Some(0.025),
+            ..Rate::tokens(OpenAi, "gpt-5-mini", 0.25, 2.00, GPT5_MINI_PRICING)
+        },
+        Rate {
             note: gemini_note.clone(),
             ..estimate(
                 Rate::tokens(Gemini, "gemini-3.8-flash", 0.75, 3.75, GEMINI_PRICING),
@@ -308,7 +319,9 @@ impl RateTable {
     }
 
     /// The entry pricing `model` on `provider` on `day`: the exact model id if listed, else the
-    /// longest listed prefix; of its entries, the latest `validFrom` on or before `day`.
+    /// id the provider returned without its `models/` prefix or dated-snapshot suffix
+    /// (`gpt-5-2025-08-07` → `gpt-5`, `claude-…-20250929`), else the longest listed prefix
+    /// ending at a `-`; of its entries, the latest `validFrom` on or before `day`.
     pub fn lookup(&self, provider: Provider, model: &str, day: NaiveDate) -> Option<&Rate> {
         let ours = || {
             self.entries
@@ -316,10 +329,22 @@ impl RateTable {
                 .map(|(r, _)| r)
                 .filter(|r| r.provider == provider)
         };
+        let base = base_model(model);
+        let at_boundary = |m: &str| {
+            [model, base]
+                .iter()
+                .any(|id| id.strip_prefix(m).is_some_and(|rest| rest.starts_with('-')))
+        };
         let name = ours()
             .map(|r| r.model.as_str())
-            .filter(|m| model == *m || model.starts_with(m))
-            .max_by_key(|m| m.len())?;
+            .find(|m| model == *m)
+            .or_else(|| ours().map(|r| r.model.as_str()).find(|m| base == *m))
+            .or_else(|| {
+                ours()
+                    .map(|r| r.model.as_str())
+                    .filter(|m| at_boundary(m))
+                    .max_by_key(|m| m.len())
+            })?;
         ours()
             .filter(|r| r.model == name)
             .filter(|r| {
@@ -330,6 +355,36 @@ impl RateTable {
             })
             .max_by_key(|r| r.valid_from.as_deref().and_then(date))
     }
+}
+
+/// A provider-returned model id as its base id: without Gemini's `models/` prefix and without
+/// a dated-snapshot suffix (`-2025-08-07`, `-20250929`, `@20250929`).
+pub fn base_model(id: &str) -> &str {
+    let id = id.strip_prefix("models/").unwrap_or(id);
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let dashed_date = |s: &str| {
+        let p: Vec<&str> = s.split('-').collect();
+        p.len() == 3
+            && digits(p[0])
+            && p[0].len() == 4
+            && p[1].len() == 2
+            && p[2].len() == 2
+            && digits(p[1])
+            && digits(p[2])
+    };
+    if id.len() > 11 {
+        let (head, tail) = id.split_at(id.len() - 11);
+        if tail.starts_with('-') && dashed_date(&tail[1..]) {
+            return head;
+        }
+    }
+    if let Some(i) = id.rfind(['-', '@']) {
+        let tail = &id[i + 1..];
+        if tail.len() == 8 && digits(tail) && i > 0 {
+            return &id[..i];
+        }
+    }
+    id
 }
 
 #[cfg(test)]
@@ -370,8 +425,57 @@ mod tests {
             m(Provider::OpenAi, "gpt-4o-mini-transcribe-2025-03"),
             Some("gpt-4o-mini-transcribe")
         );
-        assert_eq!(m(Provider::OpenAi, "gpt-5"), None);
+        assert_eq!(m(Provider::OpenAi, "gpt-5"), Some("gpt-5"));
+        assert_eq!(
+            m(Provider::OpenAi, "gpt-4o"),
+            None,
+            "no rate for it, and no prefix of it"
+        );
         assert_eq!(m(Provider::Gemini, "whisper-1"), None, "per provider");
+    }
+
+    /// Device finding 2026-10-09: OpenAI reported `gpt-5-2025-08-07` and the record went
+    /// unpriced. Dated snapshots and prefixed ids price as their base model.
+    #[test]
+    fn provider_returned_variants_price_as_their_base_model() {
+        let t = RateTable::default();
+        let d = day("2026-10-09");
+        let m = |p, id| t.lookup(p, id, d).map(|r| r.model.as_str());
+        assert_eq!(m(Provider::OpenAi, "gpt-5-2025-08-07"), Some("gpt-5"));
+        assert_eq!(
+            m(Provider::OpenAi, "gpt-4o-mini-2024-07-18"),
+            Some("gpt-4o-mini")
+        );
+        assert_eq!(
+            m(Provider::Anthropic, "claude-opus-5-5-20250929"),
+            Some("claude-opus-5-5")
+        );
+        assert_eq!(
+            m(Provider::Anthropic, "claude-opus-5-5@20250929"),
+            Some("claude-opus-5-5")
+        );
+        assert_eq!(
+            m(Provider::Gemini, "models/gemini-3.8-flash"),
+            Some("gemini-3.8-flash")
+        );
+        assert_eq!(
+            m(Provider::Gemini, "models/gemini-3.8-flash-001"),
+            Some("gemini-3.8-flash")
+        );
+        // A prefix counts only at a `-`: `gpt-5` prices `gpt-5-chat`, never `gpt-50`.
+        assert_eq!(m(Provider::OpenAi, "gpt-5-chat"), Some("gpt-5"));
+        assert_eq!(
+            m(Provider::OpenAi, "gpt-5-mini-2025-08-07"),
+            Some("gpt-5-mini")
+        );
+        assert_eq!(m(Provider::OpenAi, "gpt-50"), None);
+        assert_eq!(base_model("gpt-5-2025-08-07"), "gpt-5");
+        assert_eq!(base_model("x-2025-8-07"), "x-2025-8-07");
+        assert_eq!(base_model("x-abcd-08-07"), "x-abcd-08-07");
+        assert_eq!(base_model("model-1234567"), "model-1234567");
+        assert_eq!(base_model("-20250929"), "-20250929");
+        assert_eq!(base_model("whisper-1"), "whisper-1");
+        assert_eq!(base_model("models/x"), "x");
     }
 
     #[test]
