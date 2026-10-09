@@ -53,6 +53,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("calendarRefresh", api::calendar_refresh(false)),
         ("agenda", api::agenda("2026-10-09", "2026-10-09")),
         ("event", api::event("0123abcd:u:-")),
+        ("linkEvent", api::link_event("x", "")),
         (
             "beginMeetingForEvent",
             api::begin_meeting_for_event(0, "{}", "{}", ""),

@@ -82,6 +82,8 @@ data class Sidecar(
     val transcribeRun: ProviderRun?, val summariseRun: ProviderRun?,
     val summary: String?, val decisions: List<String>, val sections: List<Section>,
     val mic: MicRef?, val segments: List<Segment>, val error: String?, val note: String?, val todos: List<Todo>,
+    /** F18-FR12: the linked event's key and title; null when unscheduled. */
+    val eventKey: String? = null, val eventTitle: String? = null,
 ) {
     companion object {
         private fun run(o: JSONObject?): ProviderRun? =
@@ -107,6 +109,8 @@ data class Sidecar(
             todos = o.arr("todos").mapObj {
                 Todo(it.str("id") ?: return@mapObj null, it.strOr("text", ""), it.str("owner"), it.str("due"), it.bool("done") ?: false)
             },
+            eventKey = o.obj("event")?.str("eventKey"),
+            eventTitle = o.obj("event")?.str("title"),
         ) }
 
         /** nativeTranscribe / nativeSummarise: `{meeting: <sidecar>}` once a job ran. */

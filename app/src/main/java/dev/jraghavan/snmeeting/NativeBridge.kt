@@ -182,6 +182,10 @@ object NativeBridge {
      *  `{error}` once the event has left the calendar. */
     external fun nativeEvent(eventKey: String): String
 
+    /** "Link to event…" (`linkSource: user`, never replaced by the automatic rule), or "" to
+     *  unlink: the meeting is unscheduled. `{ok: true}`, or `{error}`. */
+    external fun nativeLinkEvent(id: String, eventKey: String): String
+
     /** As [nativeBeginMeeting], linked to the event (`linkSource: user`) when it is still in
      *  the calendar; recording never depends on that (an unknown key records unlinked). */
     external fun nativeBeginMeetingForEvent(startedAtMs: Long, micJson: String, audioJson: String, eventKey: String): String

@@ -360,6 +360,9 @@ class MeetingActivity : Activity() {
             // F16-FR5: what the meeting has cost so far, beside its length.
             addView(ui.eyebrow("${h.length}  ·  ${h.cost}").apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(4), 0, 0) }, ui.fullWidth())
             h.mic?.let { addView(ui.note(it).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(6), 0, 0) }, ui.fullWidth()) }
+            // F18-FR10: "Linked to … · change" or "Link to event…". M12 hook: in layout B this
+            // moves to the Minutes tab's header.
+            addView(linkLine(v.meeting), ui.fullWidth())
             h.note?.let { addView(ui.note(it, 13f, ui.textMuted).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(2), 0, 0) }, ui.fullWidth()) }
 
             addView(ui.spacer(ui.dim(32)))
@@ -425,6 +428,18 @@ class MeetingActivity : Activity() {
                     is CoreResult.Err -> InkDialog.error(this, "Couldn't delete it", r.message)
                 }
             }
+        }
+    }
+
+    private fun linkLine(m: Sidecar): View = ui.eyebrow(
+        if (m.eventKey != null) "Linked to ${m.eventTitle?.ifBlank { null } ?: "an event"}  ·  change" else "Link to event…",
+        ui.inkSoft,
+    ).apply {
+        gravity = Gravity.CENTER; setPadding(0, ui.dim(8), 0, ui.dim(4))
+        isClickable = true
+        setOnClickListener {
+            val start = try { java.time.OffsetDateTime.parse(m.startedAt).toInstant().toEpochMilli() } catch (e: Exception) { return@setOnClickListener }
+            EventLinkPicker.show(this@MeetingActivity, this@MeetingActivity.id, start, start + m.durationMs, m.eventKey) { load() }
         }
     }
 

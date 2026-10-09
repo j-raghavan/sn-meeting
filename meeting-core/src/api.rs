@@ -341,6 +341,11 @@ pub fn event(key: &str) -> String {
     with_app(|app| app.event_json(key))
 }
 
+/// `nativeLinkEvent(id, eventKey)` (F18-FR10); `""` unlinks.
+pub fn link_event(id: &str, key: &str) -> String {
+    with_app(|app| app.link_event_json(id, key))
+}
+
 /// `nativeBeginMeetingForEvent(startedAtMs, micJson, audioJson, eventKey)` (F18-FR8): as
 /// `nativeBeginMeeting`, linked to the event (`linkSource: user`).
 pub fn begin_meeting_for_event(

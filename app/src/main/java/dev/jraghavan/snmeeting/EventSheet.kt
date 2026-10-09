@@ -133,3 +133,33 @@ object EventSheetDialog {
         dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
     }
 }
+
+/**
+ * F18-FR10: "Link to event…": the events of the meeting's day, the ones overlapping the
+ * recording first, and "Unlink" when it is linked. [done] runs after the core answered.
+ */
+object EventLinkPicker {
+    fun show(a: Activity, meetingId: String, startMs: Long, endMs: Long, linkedKey: String?, done: () -> Unit) {
+        val day = java.time.Instant.ofEpochMilli(startMs).atZone(ZoneId.systemDefault()).toLocalDate().toString()
+        CoreJobs.run({ NativeBridge.nativeAgenda(day, day) }) { json ->
+            if (a.isFinishing || a.isDestroyed) return@run
+            val d = CoreJson.obj(json, dev.jraghavan.snmeeting.model.Agenda::from).getOrNull()?.days?.firstOrNull()
+            val events = CalendarFormat.pickerOrder(d?.rows.orEmpty() + d?.allDay.orEmpty(), startMs, endMs)
+            val zone = ZoneId.systemDefault()
+            val labels = events.map { e ->
+                val time = if (e.allDay) "All day" else CalendarFormat.range(e.startMs, e.endMs, zone)
+                (if (e.eventKey == linkedKey) "✓  " else "") + "${CalendarFormat.rowTitle(e)}  ·  $time"
+            } + listOfNotNull(if (linkedKey != null) "Unlink (unscheduled)" else null)
+            if (labels.isEmpty()) return@run InkDialog.info(a, "Link to event", "There are no calendar events on this day.")
+            AlertDialog.Builder(a, R.style.InkDialog).setTitle("Link to event")
+                .setItems(labels.toTypedArray()) { _, i ->
+                    val key = events.getOrNull(i)?.eventKey ?: ""
+                    CoreJobs.run({ NativeBridge.nativeLinkEvent(meetingId, key) }) { r ->
+                        (CoreJson.ok(r) as? CoreResult.Err)?.let { InkDialog.error(a, "Couldn't link it", it.message) }
+                        done()
+                    }
+                }
+                .setNegativeButton("CANCEL", null).show()
+        }
+    }
+}

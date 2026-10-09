@@ -395,6 +395,27 @@ impl App {
         .to_string()
     }
 
+    /// `nativeLinkEvent(id, eventKey)` (F18-FR10): link the meeting to the event (`linkSource:
+    /// user`, never replaced by the automatic rule), or unlink it with `""` (unscheduled).
+    pub fn link_event_json(&self, id: &str, key: &str) -> String {
+        let link = if key.is_empty() {
+            None
+        } else {
+            match self.user_link(key) {
+                Some(l) => Some(l),
+                None => return crate::api::error_json("This event is no longer in the calendar"),
+            }
+        };
+        let r = {
+            let _w = self.write_lock();
+            self.library().update(id, |sc, _| {
+                link::set_event(sc, link);
+                Ok(())
+            })
+        };
+        self.edited(id, r)
+    }
+
     /// Every cached event of the links in the file, with its link's name.
     pub fn cached_events(&self) -> Vec<(String, Event)> {
         self.link_states()

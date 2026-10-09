@@ -381,7 +381,11 @@ class MainActivity : Activity(), HomeLists.Actions {
         EventSheetDialog.open(this, ui, key, micLine.text.toString()) { k, t -> recordFor(k, t) }
     }
 
-    override fun onUnscheduled(r: AgendaRow) { r.meetingId?.let { openMeeting(it, null) } }
+    /** F18-FR10: an unscheduled recording asks which event it was. */
+    override fun onUnscheduled(r: AgendaRow) {
+        val id = r.meetingId ?: return
+        EventLinkPicker.show(this, id, r.startMs, r.endMs, null) { drawnAgenda = null; gate.request() }
+    }
 
     /** "● Record" in the current event's box. */
     override fun onRecordEvent(r: AgendaRow) { r.eventKey?.let { recordFor(it, null) } }
