@@ -320,6 +320,7 @@ class NotesPage(
     private fun moreMenu(): View {
         val ink = canvas.inkView
         val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus, tableCell = tableTargeted(),
+            canvases = true,
             hasContent = ink.bounds != null, canRestore = ink.canRestore))
         return panels.rows(entries.map { it.label }) { i -> more(entries[i]) }
     }
@@ -340,6 +341,8 @@ class NotesPage(
             MoreMenu.Entry.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
             MoreMenu.Entry.BACK -> edit("""{"op":"back"}""", keepSelection = true)
             MoreMenu.Entry.RESTORE -> edit("""{"op":"restoreCleared"}""")
+            MoreMenu.Entry.NEW_CANVAS -> newCanvas()
+            MoreMenu.Entry.CANVASES -> canvasList()
             else -> Unit
         }
         refreshBar()
@@ -495,6 +498,43 @@ class NotesPage(
                 images.retry()
                 fetch(InkBake.Event.EDIT)
                 scheduleSave()
+            }
+        }
+    }
+
+    /** F21-FR12: New canvas saves the one shown and shows a new, empty one (not an undo step). */
+    private fun newCanvas() {
+        clearSelection()
+        target = null
+        openWith({
+            val r = NativeBridge.nativeCanvasNew(id)
+            val n = CoreJson.obj(r) { it.optInt("n", 0) }.getOrNull()
+            if (n == null || n == 0) r else NativeBridge.nativeCanvasShow(id, n)
+        }, null, hintsIfEmpty = false)
+    }
+
+    /** F21-FR12: ⋮ → Canvases…: one row per canvas ("Canvas 2 · 12:41 · 34 strokes, 5 items");
+     *  a tap shows it. An empty canvas that isn't shown can be deleted. */
+    private fun canvasList() {
+        scope.core({ NativeBridge.nativeCanvasList(id) }) { json ->
+            val o = CoreJson.obj(json) { it }.getOrNull() ?: return@core
+            val rows = CanvasRows.of(o)
+            dialogs.explicit {
+                val labels = rows.map { it.label } + rows.filter { it.deletable }.map { "Delete empty Canvas ${it.n}" }
+                android.app.AlertDialog.Builder(a, dev.jraghavan.snmeeting.R.style.InkDialog).setTitle("Canvases")
+                    .setItems(labels.toTypedArray()) { _, i ->
+                        if (i < rows.size) {
+                            if (!rows[i].current) { clearSelection(); target = null; open(canvasN = rows[i].n) }
+                        } else {
+                            val n = rows.filter { it.deletable }[i - rows.size].n
+                            scope.core({ NativeBridge.nativeCanvasEdit(id, """{"op":"deleteCanvas","n":$n}""") }) { r ->
+                                reportError(r, "Couldn't delete that canvas")
+                            }
+                        }
+                    }
+                    .setNegativeButton("CLOSE", null)
+                    .setOnDismissListener { claim("focus"); canvas.bake(InkBake.Event.PANEL_CLOSED) }
+                    .show()
             }
         }
     }
@@ -691,8 +731,14 @@ class NotesPage(
 
     /** Opens the canvas at its last viewport, or fitted to its ink; or (F19-FR3) centred on
      *  [focus], a search hit's line, outlined with a 2 px dashed box. */
-    fun open(focus: WorldRect? = null) {
-        scope.core({ NativeBridge.nativeNotesOpen(id) }) { json ->
+    fun open(focus: WorldRect? = null, canvasN: Int? = null) {
+        // F21-FR12: a canvas other than the one shown is shown first (a search hit on it, ⋮).
+        val call = { if (canvasN != null) NativeBridge.nativeCanvasShow(id, canvasN) else NativeBridge.nativeNotesOpen(id) }
+        openWith(call, focus, hintsIfEmpty = canvasN == null)
+    }
+
+    private fun openWith(call: () -> String, focus: WorldRect?, hintsIfEmpty: Boolean) {
+        scope.core(call) { json ->
             when (val r = CoreJson.obj(json) { it }) {
                 is CoreResult.Ok -> {
                     opened = true
@@ -713,7 +759,7 @@ class NotesPage(
                         canvas.setViewport(next)
                         if (front) canvas.claimPen("open")
                         // F17-FR14: an empty canvas opens with the hints, one with ink without them.
-                        if (o.optInt("strokes", 0) == 0 && o.optInt("items", 0) == 0) hints.show()
+                        if (hintsIfEmpty && o.optInt("strokes", 0) == 0 && o.optInt("items", 0) == 0) hints.show()
                     }
                 }
                 is CoreResult.Err -> dialogs.show { InkDialog.error(a, "The notes can't be opened", r.message) }

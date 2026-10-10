@@ -83,6 +83,9 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("canvasForDraw", api::canvas_for_draw("x", [0.0; 4])),
         ("canvasEdit", api::canvas_edit("x", "{}")),
         ("canvasHit", api::canvas_hit("x", 0.0, 0.0, 1.0)),
+        ("canvasList", api::canvas_list("x")),
+        ("canvasNew", api::canvas_new("x")),
+        ("canvasShow", api::canvas_show("x", 1)),
         (
             "canvasImportImage",
             api::canvas_import_image("x", "/x.png", 1, 1, "{}"),

@@ -248,18 +248,107 @@ impl View {
 
 /// The last viewport, or `None` (never saved, or unreadable: the canvas then fits its ink).
 pub fn read_view(dir: &Path, id: &str) -> Option<View> {
-    let b = crate::atomic::read_capped(&folder(dir, id).join(VIEW), 4096).ok()?;
+    read_view_of(dir, id, 1)
+}
+
+/// Canvas `n`'s last viewport (F21-FR12: each canvas keeps its own).
+pub fn read_view_of(dir: &Path, id: &str, n: u32) -> Option<View> {
+    let b = crate::atomic::read_capped(&canvas_dir(dir, id, n).join(VIEW), 4096).ok()?;
     serde_json::from_slice::<View>(&b).ok()?.checked()
 }
 
 /// Keep the viewport for next time.
 pub fn write_view(dir: &Path, id: &str, v: View) -> std::io::Result<()> {
+    write_view_of(dir, id, 1, v)
+}
+
+/// Keep canvas `n`'s viewport.
+pub fn write_view_of(dir: &Path, id: &str, n: u32, v: View) -> std::io::Result<()> {
     let v = v.checked().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "viewport is not finite")
     })?;
-    std::fs::create_dir_all(folder(dir, id))?;
+    let at = canvas_dir(dir, id, n);
+    std::fs::create_dir_all(&at)?;
     let bytes = serde_json::to_vec(&v).map_err(std::io::Error::other)?;
-    crate::atomic::write_atomic(&folder(dir, id).join(VIEW), &bytes)
+    crate::atomic::write_atomic(&at.join(VIEW), &bytes)
+}
+
+/// F21-FR12 (OQ32): the meeting's canvases, `canvases.json`: `{version: 1, current,
+/// canvases: [{n, createdAt}]}`. Missing (or unreadable) means one canvas, canvas 1.
+pub const CANVASES: &str = "canvases.json";
+/// At most this many canvases a meeting lists.
+pub const MAX_CANVASES: u32 = 999;
+
+/// The canvases of a meeting and the one shown last.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Canvases {
+    pub current: u32,
+    /// `(n, createdAt)` in canvas order.
+    pub list: Vec<(u32, String)>,
+}
+
+impl Default for Canvases {
+    fn default() -> Self {
+        Canvases {
+            current: 1,
+            list: vec![(1, String::new())],
+        }
+    }
+}
+
+/// Read `canvases.json` (untrusted: numbers in range, no repeats, canvas 1 always there).
+pub fn read_canvases(dir: &Path, id: &str) -> Canvases {
+    let Ok(b) = crate::atomic::read_capped(&folder(dir, id).join(CANVASES), 256 * 1024) else {
+        return Canvases::default();
+    };
+    let Ok(v) = serde_json::from_slice::<Value>(&b) else {
+        return Canvases::default();
+    };
+    let mut list: Vec<(u32, String)> = v
+        .get("canvases")
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(|c| {
+                    let n = u32::try_from(c.get("n")?.as_u64()?)
+                        .ok()
+                        .filter(|n| (1..=MAX_CANVASES).contains(n))?;
+                    let at = c
+                        .get("createdAt")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .chars()
+                        .take(64)
+                        .collect();
+                    Some((n, at))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    list.sort_by_key(|c| c.0);
+    list.dedup_by_key(|c| c.0);
+    if list.first().map(|c| c.0) != Some(1) {
+        list.insert(0, (1, String::new()));
+    }
+    let current = v
+        .get("current")
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .filter(|n| list.iter().any(|c| c.0 == *n))
+        .unwrap_or(1);
+    Canvases { current, list }
+}
+
+/// Write `canvases.json`.
+pub fn write_canvases(dir: &Path, id: &str, c: &Canvases) -> std::io::Result<()> {
+    let list: Vec<Value> = c
+        .list
+        .iter()
+        .map(|(n, at)| json!({"n": n, "createdAt": at}))
+        .collect();
+    let v = json!({"version": 1, "current": c.current, "canvases": list});
+    std::fs::create_dir_all(folder(dir, id))?;
+    crate::atomic::write_atomic(&folder(dir, id).join(CANVASES), v.to_string().as_bytes())
 }
 
 /// The sidecar's `notes` object (Data Model): the folder, the format, the coordinate space,
@@ -427,6 +516,37 @@ mod tests {
             load_scene(d.path(), ID, 2).is_err(),
             "a folder in its place"
         );
+    }
+
+    /// F21-FR12: the canvas list; anything odd reads as one canvas, canvas 1 always there.
+    #[test]
+    fn canvases_are_listed_and_checked() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(read_canvases(d.path(), ID), Canvases::default());
+        let c = Canvases {
+            current: 3,
+            list: vec![(1, "a".into()), (3, "b".into())],
+        };
+        write_canvases(d.path(), ID, &c).unwrap();
+        assert_eq!(read_canvases(d.path(), ID), c);
+        let f = folder(d.path(), ID).join(CANVASES);
+        std::fs::write(
+            &f,
+            br#"{"current": 9, "canvases": [{"n": 2}, {"n": 2}, {"n": 0}, {"x": 1}]}"#,
+        )
+        .unwrap();
+        let odd = read_canvases(d.path(), ID);
+        assert_eq!((odd.current, odd.list.len()), (1, 2));
+        std::fs::write(&f, b"junk").unwrap();
+        assert_eq!(read_canvases(d.path(), ID), Canvases::default());
+        let v = View {
+            cx: 1.0,
+            cy: 2.0,
+            zoom: 1.0,
+        };
+        write_view_of(d.path(), ID, 2, v).unwrap();
+        assert_eq!(read_view_of(d.path(), ID, 2), Some(v));
+        assert_eq!(read_view(d.path(), ID), None);
     }
 
     #[test]

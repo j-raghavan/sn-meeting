@@ -130,14 +130,136 @@ fn edit_reply(scene: &Scene, dirty: Option<BBox>) -> Value {
 }
 
 impl App {
+    /// The meeting's folder (where its notes folder is).
+    fn meeting_dir(&self, id: &str) -> Result<std::path::PathBuf, String> {
+        if !crate::sidecar::is_valid_id(id) {
+            return Err("invalid meeting id".into());
+        }
+        self.library()
+            .find(id)
+            .map(|m| m.dir)
+            .map_err(|e| e.to_string())
+    }
+
+    /// `nativeCanvasList(id)` (F21-FR12): `{current, canvases: [{n, createdAt, strokes,
+    /// items}]}`, for ⋮ → Canvases….
+    pub fn canvas_list_json(&self, id: &str) -> String {
+        let dir = match self.meeting_dir(id) {
+            Ok(d) => d,
+            Err(e) => return error_json(&e),
+        };
+        let list = notes::read_canvases(&dir, id);
+        let open = self.ink.lock();
+        let rows: Vec<Value> = list
+            .list
+            .iter()
+            .map(|(n, at)| {
+                let counts = match open
+                    .layers
+                    .get(&(id.to_owned(), super::notes::Slot::Canvas(*n)))
+                {
+                    Some(o) => Some((o.scene.ink().strokes().len(), o.scene.doc().items.len())),
+                    None => notes::load_scene(&dir, id, *n)
+                        .ok()
+                        .map(|(s, _)| (s.ink().strokes().len(), s.doc().items.len())),
+                };
+                let (strokes, items) =
+                    counts.map_or((Value::Null, Value::Null), |(a, b)| (json!(a), json!(b)));
+                json!({"n": n, "createdAt": at, "strokes": strokes, "items": items})
+            })
+            .collect();
+        json!({"current": list.current, "canvases": rows}).to_string()
+    }
+
+    /// `nativeCanvasNew(id)` (F21-FR12): saves the canvas shown, then a new empty canvas
+    /// (`canvas-<n>/`) is shown; not an undo step. `{n}`.
+    pub fn canvas_new_json(&self, id: &str) -> String {
+        let dir = match self.meeting_dir(id) {
+            Ok(d) => d,
+            Err(e) => return error_json(&e),
+        };
+        if let (_, Some(e)) = self.flush_ink(Some(id)) {
+            return error_json(&e);
+        }
+        let mut list = notes::read_canvases(&dir, id);
+        let n = list.list.iter().map(|c| c.0).max().unwrap_or(1) + 1;
+        if n > notes::MAX_CANVASES {
+            return error_json("This meeting has as many canvases as it can hold");
+        }
+        list.list.push((n, now_local()));
+        list.current = n;
+        let made = std::fs::create_dir_all(notes::canvas_dir(&dir, id, n))
+            .and_then(|()| notes::write_canvases(&dir, id, &list));
+        if let Err(e) = made {
+            return error_json(&format!("A new canvas can't be made ({:?})", e.kind()));
+        }
+        self.ink.lock().current.insert(id.to_owned(), n);
+        json!({"n": n}).to_string()
+    }
+
+    /// `nativeCanvasShow(id, n)` (F21-FR12): save the canvas shown and show canvas `n`; later
+    /// ink and edit calls act on it, and the meeting reopens on it. Replies as
+    /// `nativeNotesOpen` does, with `n`.
+    pub fn canvas_show_json(&self, id: &str, n: i32) -> String {
+        let dir = match self.meeting_dir(id) {
+            Ok(d) => d,
+            Err(e) => return error_json(&e),
+        };
+        let mut list = notes::read_canvases(&dir, id);
+        let Some(n) = u32::try_from(n)
+            .ok()
+            .filter(|n| list.list.iter().any(|c| c.0 == *n))
+        else {
+            return error_json("There is no such canvas");
+        };
+        if let (_, Some(e)) = self.flush_ink(Some(id)) {
+            return error_json(&e);
+        }
+        if list.current != n {
+            list.current = n;
+            if let Err(e) = notes::write_canvases(&dir, id, &list) {
+                return error_json(&format!("The canvas can't be shown ({:?})", e.kind()));
+            }
+        }
+        self.ink.lock().current.insert(id.to_owned(), n);
+        let mut v: Value = serde_json::from_str(&self.notes_open_json(id)).unwrap_or(Value::Null);
+        if v.get("error").is_none() {
+            v["n"] = json!(n);
+            v["defaultStyle"] = self.default_style().to_value();
+        }
+        v.to_string()
+    }
+
+    /// F21-FR12: delete canvas `n` from Canvases… while it is still empty (never canvas 1,
+    /// nor the one shown).
+    fn delete_canvas(&self, id: &str, n: u32) -> Result<(), String> {
+        let dir = self.meeting_dir(id)?;
+        let mut list = notes::read_canvases(&dir, id);
+        if n == 1 || n == list.current || !list.list.iter().any(|c| c.0 == n) {
+            return Err("That canvas can't be deleted".into());
+        }
+        let (scene, _) = notes::load_scene(&dir, id, n)?;
+        if !scene.is_empty() {
+            return Err("Only an empty canvas can be deleted".into());
+        }
+        list.list.retain(|c| c.0 != n);
+        notes::write_canvases(&dir, id, &list).map_err(|e| format!("{:?}", e.kind()))?;
+        self.ink
+            .lock()
+            .layers
+            .remove(&(id.to_owned(), super::notes::Slot::Canvas(n)));
+        let _ = std::fs::remove_dir_all(notes::canvas_dir(&dir, id, n));
+        Ok(())
+    }
     /// `nativeCanvasForDraw(id, x0, y0, x1, y1)` (F21-FR1): the canvas's strokes and items
     /// meeting the world rectangle, in paint order, arrow ends resolved, with the history
     /// state, the selection and whether a cleared canvas can be restored (OQ34).
     pub fn canvas_for_draw_json(&self, id: &str, rect: [f32; 4]) -> String {
         let r = rect_of(rect);
         let out = self.with_ink(id, Layer::Canvas, |o| {
+            let shown = notes::read_canvases(&o.dir, id).current;
             let mut v = crate::canvas::draw::for_draw(&o.scene, r);
-            v["canRestore"] = json!(notes::cleared_canvas(&o.dir, id) == Some(1));
+            v["canRestore"] = json!(notes::cleared_canvas(&o.dir, id) == Some(shown));
             v
         });
         let out = out.map(|mut v| {
@@ -265,11 +387,29 @@ impl App {
 
     /// F21-FR11: when the page closes (and its undo history goes), image copies no canvas
     /// refers to are deleted. Nothing is deleted while any `items.json` can't be read.
-    pub(crate) fn clean_images(&self, id: &str, dir: &std::path::Path, scene: &Scene) {
-        if !scene.items_ok() {
-            return;
+    pub(crate) fn clean_images(
+        &self,
+        id: &str,
+        dir: &std::path::Path,
+        open: &super::notes::Opened,
+    ) {
+        let mut keep = std::collections::HashSet::new();
+        for (n, _) in notes::read_canvases(dir, id).list {
+            let scene = match open
+                .layers
+                .get(&(id.to_owned(), super::notes::Slot::Canvas(n)))
+            {
+                Some(o) => o.scene.clone(),
+                None => match notes::load_scene(dir, id, n) {
+                    Ok((s, _)) => s,
+                    Err(_) => return,
+                },
+            };
+            if !scene.items_ok() {
+                return;
+            }
+            keep.extend(scene.image_files());
         }
-        let keep = scene.image_files();
         let images = notes::folder(dir, id).join(notes::IMAGES);
         let Ok(list) = std::fs::read_dir(&images) else {
             return;
@@ -293,6 +433,17 @@ impl App {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_owned();
+        if name == "deleteCanvas" {
+            let n = op
+                .get("n")
+                .and_then(Value::as_u64)
+                .and_then(|n| u32::try_from(n).ok());
+            return match n.map(|n| self.delete_canvas(id, n)) {
+                Some(Ok(())) => json!({"deleted": n}).to_string(),
+                Some(Err(e)) => error_json(&e),
+                None => error_json("n must be a canvas number"),
+            };
+        }
         let default_style = self.default_style();
         let created = now_local();
         let out = self.with_ink(id, Layer::Canvas, |o| -> Result<Value, String> {
@@ -425,13 +576,15 @@ impl App {
                     if o.scene.is_empty() {
                         None
                     } else {
-                        notes::save_cleared(&o.dir, id, 1, &o.scene)
+                        let shown = notes::read_canvases(&o.dir, id).current;
+                        notes::save_cleared(&o.dir, id, shown, &o.scene)
                             .map_err(|e| format!("The canvas can't be cleared ({:?})", e.kind()))?;
                         o.scene.clear()
                     }
                 }
                 "restoreCleared" => {
-                    let b = notes::load_cleared(&o.dir, id, 1)
+                    let shown = notes::read_canvases(&o.dir, id).current;
+                    let b = notes::load_cleared(&o.dir, id, shown)
                         .ok_or("There is no cleared canvas to restore")?;
                     o.scene.absorb(&b)
                 }

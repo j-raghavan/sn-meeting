@@ -887,3 +887,87 @@ fn images_are_checked_copied_and_cleaned_up() {
     f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
     assert_eq!(image_files(&f), vec![format!("{item}.jpg")]);
 }
+
+/// F21-AC12 (storage): New canvas makes canvas-2/ and canvases.json; canvas 1 keeps its paths
+/// and bytes; strokes on canvas 2 carry rec_ms; the meeting reopens on the canvas shown last.
+#[test]
+fn new_canvases_live_beside_the_first() {
+    let f = fixture();
+    stroke(&f, 0.0, 0.0, 1_000.0);
+    edit(
+        &f,
+        json!({"op": "create", "type": "rectangle", "from": [0, 0], "to": [10, 10]}),
+    );
+    f.app.ink_save_json(&f.id);
+    let one = notes::path(&f.dir, &f.id, Layer::Canvas);
+    let one_bytes = std::fs::read(&one).unwrap();
+    let r = parse(&f.app.canvas_new_json(&f.id));
+    assert_eq!(r, json!({"n": 2}));
+    assert!(notes::folder(&f.dir, &f.id).join("canvas-2").is_dir());
+    assert!(notes::folder(&f.dir, &f.id).join(notes::CANVASES).is_file());
+    assert_eq!(stroke(&f, 500.0, 500.0, 761_000.0)["atMs"], 761_000);
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e4, -1e4, 1e4, 1e4]));
+    assert_eq!(
+        d["entries"].as_array().unwrap().len(),
+        1,
+        "canvas 2 holds only its own"
+    );
+    f.app.ink_save_json(&f.id);
+    assert_eq!(
+        std::fs::read(&one).unwrap(),
+        one_bytes,
+        "canvas 1 keeps its paths and bytes"
+    );
+    let two = notes::load_scene(&f.dir, &f.id, 2).unwrap().0;
+    assert_eq!(two.ink().strokes()[0].rec_ms, Some(761_000));
+    let list = parse(&f.app.canvas_list_json(&f.id));
+    assert_eq!(list["current"], 2);
+    assert_eq!(list["canvases"][0]["strokes"], 1);
+    assert_eq!(list["canvases"][0]["items"], 1);
+    assert_eq!(list["canvases"][1]["strokes"], 1);
+    // Reopened, the meeting shows canvas 2; showing 1 goes back, and 1 is kept for next time.
+    f.app.notes_close_json(&f.id, 5.0, 6.0, 2.0);
+    let open = parse(&f.app.notes_open_json(&f.id));
+    assert_eq!(
+        (open["canvas"].clone(), open["view"]["zoom"].clone()),
+        (json!(2), json!(2.0))
+    );
+    let s1 = parse(&f.app.canvas_show_json(&f.id, 1));
+    assert_eq!(
+        (s1["n"].clone(), s1["strokes"].clone(), s1["items"].clone()),
+        (json!(1), json!(1), json!(1))
+    );
+    assert!(s1["defaultStyle"].is_object());
+    assert!(parse(&f.app.canvas_show_json(&f.id, 9))["error"].is_string());
+    assert!(parse(&f.app.canvas_new_json("../x"))["error"].is_string());
+    assert!(parse(&f.app.canvas_list_json("../x"))["error"].is_string());
+    assert!(parse(&f.app.canvas_show_json("../x", 1))["error"].is_string());
+    // An empty canvas can be deleted from Canvases…; one with ink, canvas 1 or the shown one can't.
+    assert_eq!(parse(&f.app.canvas_new_json(&f.id)), json!({"n": 3}));
+    parse(&f.app.canvas_show_json(&f.id, 1));
+    assert_eq!(
+        edit(&f, json!({"op": "deleteCanvas", "n": 3})),
+        json!({"deleted": 3})
+    );
+    assert!(!notes::folder(&f.dir, &f.id).join("canvas-3").exists());
+    for n in [1, 2, 7] {
+        assert!(
+            edit(&f, json!({"op": "deleteCanvas", "n": n}))["error"].is_string(),
+            "{n}"
+        );
+    }
+    assert!(edit(&f, json!({"op": "deleteCanvas"}))["error"].is_string());
+    // Clear on canvas 2 keeps its own backup.
+    parse(&f.app.canvas_show_json(&f.id, 2));
+    edit(&f, json!({"op": "clear"}));
+    assert_eq!(notes::cleared_canvas(&f.dir, &f.id), Some(2));
+    assert_eq!(
+        parse(&f.app.canvas_for_draw_json(&f.id, [0.0; 4]))["canRestore"],
+        true
+    );
+    parse(&f.app.canvas_show_json(&f.id, 1));
+    assert_eq!(
+        parse(&f.app.canvas_for_draw_json(&f.id, [0.0; 4]))["canRestore"],
+        false
+    );
+}

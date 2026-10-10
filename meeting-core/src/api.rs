@@ -399,6 +399,21 @@ pub fn canvas_import_image(id: &str, src: &str, w: i32, h: i32, view: &str) -> S
     with_app(|app| app.canvas_import_image_json(id, src, w, h, view))
 }
 
+/// `nativeCanvasList(id)` (F21-FR12): the meeting's canvases.
+pub fn canvas_list(id: &str) -> String {
+    with_app(|app| app.canvas_list_json(id))
+}
+
+/// `nativeCanvasNew(id)` (F21-FR12): a new empty canvas, shown.
+pub fn canvas_new(id: &str) -> String {
+    with_app(|app| app.canvas_new_json(id))
+}
+
+/// `nativeCanvasShow(id, n)` (F21-FR12): show canvas `n`.
+pub fn canvas_show(id: &str, n: i32) -> String {
+    with_app(|app| app.canvas_show_json(id, n))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))

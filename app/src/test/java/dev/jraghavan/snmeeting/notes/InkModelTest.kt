@@ -55,3 +55,19 @@ class InkModelTest { // F17-FR1 / FR4: what the canvas draws, from nativeInkStro
         assertEquals(ListenHit(null, null, null, null), ListenHit.from(JSONObject("""{"strokeId":null}""")))
     }
 }
+
+class CanvasRowsTest { // F21-FR12: ⋮ → Canvases…
+    @Test fun rowsNameEachCanvasItsTimeAndWhatItHolds() {
+        val rows = CanvasRows.of(JSONObject("""{"current":2,"canvases":[
+            {"n":1,"createdAt":"","strokes":34,"items":5},
+            {"n":2,"createdAt":"2026-10-10T12:41:00-07:00","strokes":1,"items":1},
+            {"n":3,"createdAt":"2026-10-10T13:02:00-07:00","strokes":0,"items":0},
+            {"n":4,"createdAt":"x","strokes":null,"items":null},{"x":1}]}"""))
+        assertEquals(listOf(1, 2, 3, 4), rows.map { it.n })
+        assertEquals("Canvas 1 · 34 strokes, 5 items", rows[0].label)
+        assertEquals("Canvas 2 · 12:41 · 1 stroke, 1 item  ✓", rows[1].label)
+        assertEquals(listOf(false, true, false, false), rows.map { it.current })
+        assertEquals(listOf(false, false, true, false), rows.map { it.deletable })
+        assertEquals("Canvas 4 · can't be read", rows[3].label)
+    }
+}

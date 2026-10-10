@@ -168,3 +168,26 @@ object Emphasis {
     fun changed(strokes: List<DrawStroke>, before: Long?, after: Long?): Boolean =
         strokes.any { muted(it, before) != muted(it, after) }
 }
+
+/**
+ * F21-FR12: the rows of ⋮ → Canvases… from `nativeCanvasList`: "Canvas 2 · 12:41 · 34 strokes,
+ * 5 items", the one shown marked; an empty canvas that isn't the first or the one shown can be
+ * deleted.
+ */
+object CanvasRows {
+    data class Row(val n: Int, val label: String, val current: Boolean, val deletable: Boolean)
+
+    fun of(o: JSONObject): List<Row> {
+        val current = o.int("current") ?: 1
+        return o.arr("canvases").mapObj { c ->
+            val n = c.int("n") ?: return@mapObj null
+            val at = c.str("createdAt")?.takeIf { it.length >= 16 }?.substring(11, 16)
+            val strokes = c.int("strokes")
+            val items = c.int("items")
+            val counts = if (strokes == null || items == null) "can't be read" else
+                "$strokes stroke${if (strokes == 1) "" else "s"}, $items item${if (items == 1) "" else "s"}"
+            val label = listOfNotNull("Canvas $n", at, counts).joinToString(" · ") + if (n == current) "  ✓" else ""
+            Row(n, label, n == current, deletable = n != 1 && n != current && strokes == 0 && items == 0)
+        }
+    }
+}

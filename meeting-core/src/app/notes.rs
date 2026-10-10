@@ -22,12 +22,26 @@ pub(crate) struct Open {
     pub(crate) dirty: bool,
 }
 
-/// The ink layers open now, by meeting and layer.
+/// Which open layer: canvas `n` of a meeting (F21-FR12), or its Minutes ink.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Slot {
+    Canvas(u32),
+    Minutes,
+}
+
+/// The ink layers open now, by meeting and slot, and the canvas each meeting shows.
 #[derive(Debug, Default)]
-pub struct OpenInk(Mutex<HashMap<(String, Layer), Open>>);
+pub struct OpenInk(Mutex<Opened>);
+
+/// What [`OpenInk`] guards.
+#[derive(Debug, Default)]
+pub(crate) struct Opened {
+    pub(crate) layers: HashMap<(String, Slot), Open>,
+    pub(crate) current: HashMap<String, u32>,
+}
 
 impl OpenInk {
-    fn lock(&self) -> MutexGuard<'_, HashMap<(String, Layer), Open>> {
+    pub(crate) fn lock(&self) -> MutexGuard<'_, Opened> {
         self.0.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
@@ -93,14 +107,30 @@ impl App {
             return Err("invalid meeting id".into());
         }
         let mut open = self.ink.lock();
-        let key = (id.to_owned(), layer);
-        if !open.contains_key(&key) {
-            let dir = self.library().find(id).map_err(|e| e.to_string())?.dir;
-            let scene = match layer {
-                Layer::Canvas => notes::load_scene(&dir, id, 1)?.0,
-                Layer::Minutes => Scene::load(notes::load(&dir, id, layer)?, Ok(None)).0,
+        let mut dir = None;
+        let slot = match layer {
+            Layer::Minutes => Slot::Minutes,
+            Layer::Canvas => {
+                if !open.current.contains_key(id) {
+                    let d = self.library().find(id).map_err(|e| e.to_string())?.dir;
+                    open.current
+                        .insert(id.to_owned(), notes::read_canvases(&d, id).current);
+                    dir = Some(d);
+                }
+                Slot::Canvas(open.current[id])
+            }
+        };
+        let key = (id.to_owned(), slot);
+        if !open.layers.contains_key(&key) {
+            let dir = match dir {
+                Some(d) => d,
+                None => self.library().find(id).map_err(|e| e.to_string())?.dir,
             };
-            open.insert(
+            let scene = match slot {
+                Slot::Canvas(n) => notes::load_scene(&dir, id, n)?.0,
+                Slot::Minutes => Scene::load(notes::load(&dir, id, layer)?, Ok(None)).0,
+            };
+            open.layers.insert(
                 key.clone(),
                 Open {
                     dir,
@@ -109,7 +139,7 @@ impl App {
                 },
             );
         }
-        let o = open.get_mut(&key).expect("inserted above");
+        let o = open.layers.get_mut(&key).expect("inserted above");
         Ok(f(o))
     }
 
@@ -119,9 +149,19 @@ impl App {
     pub fn notes_open_json(&self, id: &str) -> String {
         let r = self.with_ink(id, Layer::Canvas, |o| {
             let images = notes::folder(&o.dir, id).join(notes::IMAGES);
-            json!({"view": notes::read_view(&o.dir, id), "clock": "recording-ms",
+            let n = notes::read_canvases(&o.dir, id).current;
+            (
+                n,
+                json!({"view": notes::read_view_of(&o.dir, id, n), "clock": "recording-ms",
                    "bounds": bbox_json(o.scene.bounds()), "strokes": o.scene.ink().strokes().len(),
-                   "items": o.scene.doc().items.len(), "imagesDir": images.to_string_lossy()})
+                   "items": o.scene.doc().items.len(), "imagesDir": images.to_string_lossy()}),
+            )
+        });
+        let r = r.map(|(n, mut v)| {
+            if n != 1 {
+                v["canvas"] = json!(n);
+            }
+            v
         });
         r.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
@@ -346,15 +386,15 @@ impl App {
         let mut open = self.ink.lock();
         let mut saved = 0;
         let mut error = None;
-        for ((mid, layer), o) in open.iter_mut() {
+        for ((mid, slot), o) in &mut open.layers {
             if !o.dirty || id.is_some_and(|i| i != mid) {
                 continue;
             }
-            let r = match layer {
-                Layer::Canvas => notes::save_scene(&o.dir, mid, 1, &mut o.scene),
-                Layer::Minutes => {
+            let r = match slot {
+                Slot::Canvas(n) => notes::save_scene(&o.dir, mid, *n, &mut o.scene),
+                Slot::Minutes => {
                     let ink = InkLayer::from_strokes(o.scene.ink().strokes().to_vec());
-                    notes::save(&o.dir, mid, *layer, &ink).map(|()| true)
+                    notes::save(&o.dir, mid, Layer::Minutes, &ink).map(|()| true)
                 }
             };
             match r {
@@ -401,16 +441,19 @@ impl App {
             return error_json(&e);
         }
         let mut open = self.ink.lock();
-        if let Some(o) = open.get(&(id.to_owned(), Layer::Canvas)) {
-            self.clean_images(id, &o.dir, &o.scene);
-        }
+        let shown = open.current.get(id).copied().unwrap_or(1);
         let dir = open
-            .get(&(id.to_owned(), Layer::Canvas))
+            .layers
+            .get(&(id.to_owned(), Slot::Canvas(shown)))
             .map(|o| o.dir.clone());
-        open.retain(|(mid, _), _| mid != id);
+        if let Some(dir) = &dir {
+            self.clean_images(id, dir, &open);
+        }
+        open.layers.retain(|(mid, _), _| mid != id);
+        open.current.remove(id);
         drop(open);
         if let Some(dir) = dir {
-            let _ = notes::write_view(&dir, id, View { cx, cy, zoom });
+            let _ = notes::write_view_of(&dir, id, shown, View { cx, cy, zoom });
         }
         json!({"saved": n}).to_string()
     }

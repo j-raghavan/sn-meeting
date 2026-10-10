@@ -1084,6 +1084,46 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasImp
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasList<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::canvas_list(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasNew<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::canvas_new(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasShow<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    n: jint,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::canvas_show(&id, n))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkSave<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,

@@ -180,6 +180,16 @@ object NativeBridge {
      *  step. `{itemId, dirty, selection, canUndo, canRedo}` or `{error}`. */
     external fun nativeCanvasImportImage(id: String, srcPath: String, pxW: Int, pxH: Int, viewJson: String): String
 
+    /** F21-FR12: the meeting's canvases: `{current, canvases: [{n, createdAt, strokes, items}]}`. */
+    external fun nativeCanvasList(id: String): String
+
+    /** F21-FR12: saves the canvas shown and shows a new, empty one (not an undo step): `{n}`. */
+    external fun nativeCanvasNew(id: String): String
+
+    /** F21-FR12: saves the canvas shown and shows canvas [n]; later ink and edit calls act on it.
+     *  As [nativeNotesOpen], with `n` and `defaultStyle`. */
+    external fun nativeCanvasShow(id: String, n: Int): String
+
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
      *  atMs: null}`; none `{strokeId: null}`. */
