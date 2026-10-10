@@ -45,9 +45,11 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
     /** F17-FR14: each control's view, by the hint id that points at it. */
     val anchors = HashMap<String, View>()
 
-    /** Widths of the bar, expanded and collapsed (the canvas starts beside it). */
-    val expandedPx get() = ui.dim(112)
-    val collapsedPx get() = ui.dim(76)
+    /** The bar's width, expanded or collapsed: one button and a small margin each side, in
+     *  plain dp (not the page's width-driven scale), so the canvas gets the rest (owner,
+     *  2026-10-09: the 130 dp bar was too wide). Collapsing folds the tools away, not the width. */
+    val expandedPx get() = ui.dp(BAR_DP)
+    val collapsedPx get() = ui.dp(BAR_DP)
 
     /** Rebuild only when the items differ (a tool change, collapse, Undo becoming available). */
     fun render(s: ToolBarModel.State) {
@@ -87,7 +89,13 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
 
     fun showTimer(text: String) { timer?.takeIf { it.text != text }?.text = text }
     fun showCost(text: String) { cost?.takeIf { it.text != text.uppercase() }?.text = text.uppercase() }
-    fun showMarked(label: String) { mark?.takeIf { it.text != label }?.let { ui.stylePill(it, label, filled = false) } }
+    fun showMarked(label: String) { mark?.takeIf { it.text != stacked(label) }?.let { ui.stylePill(it, stacked(label), filled = false) } }
+
+    /** A pill one button wide: its label stacked ("◆" over "Mark"), the touch minimum kept. */
+    private fun TextView.narrow() {
+        setPadding(ui.dp(2), ui.dp(8), ui.dp(2), ui.dp(8))
+        minHeight = ui.dp(TOUCH_DP)
+    }
 
     private fun hintId(i: Item): String? = when (i) {
         is Item.Tool -> i.tool.name.lowercase()
@@ -99,22 +107,29 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         else -> null
     }
 
+    /** Every control is one button wide; a label too long for it wraps onto a second line. */
     private fun params(i: Item) = if (i == Item.Gap) {
         LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
     } else {
-        LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = ui.dim(8); bottomMargin = ui.dim(8)
+        LinearLayout.LayoutParams(ui.dp(BUTTON_DP), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = ui.dp(5); bottomMargin = ui.dp(5)
         }
+    }
+
+    /** A text control: centred, wrapping, and never under the 48 dp touch minimum if tappable. */
+    private fun TextView.control(): TextView = apply {
+        gravity = Gravity.CENTER
+        if (isClickable) minHeight = ui.dp(TOUCH_DP)
     }
 
     private fun icon(res: Int, selected: Boolean, enabled: Boolean, onClick: () -> Unit): View = ImageView(a).apply {
         setImageResource(res)
-        val box = ui.dim(64)
+        val box = ui.dp(BUTTON_DP)
         layoutParams = LinearLayout.LayoutParams(box, box)
-        val pad = ui.dim(14)
+        val pad = ui.dp(8) // the glyph stays ~40 dp, as before
         setPadding(pad, pad, pad, pad)
         // inkread's palette: the active tool is a filled dark chip, the others plain line icons.
-        background = ui.outline(ui.dim(10), if (selected) ui.ink else Color.WHITE)
+        background = ui.outline(ui.dp(9), if (selected) ui.ink else Color.WHITE)
         setColorFilter(if (selected) Color.WHITE else if (enabled) ui.ink else ui.textMuted)
         isEnabled = enabled
         isClickable = enabled
@@ -131,39 +146,47 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
 
     private fun build(i: Item, s: ToolBarModel.State): View = when (i) {
         is Item.Handle -> ui.eyebrow(if (i.collapsed) "‹ ›" else "› ‹").apply {
-            gravity = Gravity.CENTER
-            setPadding(ui.dim(12), ui.dim(14), ui.dim(12), ui.dim(6))
+            setPadding(0, ui.dp(10), 0, ui.dp(4))
             isClickable = true
             setOnClickListener { host.onCollapse(!i.collapsed) }
-        }
+        }.control()
         is Item.Tool -> icon(iconOf(i.tool), i.selected, i.enabled) {
             if (s.collapsed) host.onCollapse(false) else host.onTool(i.tool)
         }
         is Item.Undo -> icon(R.drawable.ic_sel_undo, false, i.enabled) { host.onUndo() }
         is Item.Redo -> icon(R.drawable.ic_sel_redo, false, i.enabled) { host.onRedo() }
         is Item.Options -> ui.eyebrow(if (i.focus) "FOCUS ✓" else "· · ·").apply {
-            gravity = Gravity.CENTER
-            setPadding(ui.dim(8), ui.dim(10), ui.dim(8), ui.dim(10))
+            setPadding(0, ui.dp(6), 0, ui.dp(6))
             isClickable = true
             setOnClickListener { host.onOptions(this) }
-        }
-        is Item.Timer -> ui.eyebrow(i.text).apply { gravity = Gravity.CENTER; timer = this }
-        is Item.Cost -> ui.eyebrow(i.text.uppercase(), ui.inkSoft).apply { gravity = Gravity.CENTER; textSize = ui.fs(9f); cost = this }
-        is Item.Mark -> ui.pill(i.label, size = 14f) { host.onMark() }.apply {
-            setPadding(ui.dim(10), ui.dim(12), ui.dim(10), ui.dim(12)); mark = this
-        }
-        Item.Stop -> ui.pill("■  Stop", filled = true, size = 14f) { host.onStop() }.apply {
-            setPadding(ui.dim(10), ui.dim(12), ui.dim(10), ui.dim(12))
-        }
+        }.control()
+        // "0:12:41" on one line: a smaller mono with no letter spacing fits the button's width.
+        is Item.Timer -> ui.eyebrow(i.text).apply { textSize = TIMER_SP; letterSpacing = 0f; maxLines = 1; timer = this }.control()
+        is Item.Cost -> ui.eyebrow(i.text.uppercase(), ui.inkSoft).apply { textSize = 8f; letterSpacing = 0f; cost = this }.control()
+        is Item.Mark -> ui.pill(stacked(i.label), size = PILL_SP) { host.onMark() }.apply { narrow(); mark = this }
+        Item.Stop -> ui.pill(stacked("■  Stop"), filled = true, size = PILL_SP) { host.onStop() }.apply { narrow() }
         is Item.Play -> ui.pill(if (i.playing) "❚❚" else "▶", filled = i.playing, size = 16f) { if (i.enabled) host.onPlay() }.apply {
+            narrow()
             if (!i.enabled) { setTextColor(ui.textMuted); isClickable = false }
         }
         Item.Help -> ui.eyebrow("?").apply {
-            gravity = Gravity.CENTER
-            setPadding(ui.dim(14), ui.dim(10), ui.dim(14), ui.dim(10))
+            setPadding(0, ui.dp(6), 0, ui.dp(6))
             isClickable = true
             setOnClickListener { host.onHelp() }
-        }
+        }.control()
         Item.Gap -> View(a)
+    }
+
+    companion object {
+        /** A square tool button, and the bar: the button plus 4 dp each side (was ~130 dp). */
+        const val BUTTON_DP = 56
+        const val BAR_DP = 64
+        const val TOUCH_DP = 48
+        const val TIMER_SP = 11f
+        const val PILL_SP = 13f
+
+        /** "◆  Mark" → "◆\nMark", "Marked 0:12:41" → "Marked\n0:12:41": two short lines fit
+         *  the narrow bar where one long one doesn't. */
+        fun stacked(label: String): String = label.trim().replace(Regex("\\s+"), "\n")
     }
 }

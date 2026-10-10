@@ -44,4 +44,12 @@ class ToolBarModelTest { // F17-FR2, F17-AC1 / AC1b
         assertEquals("●  1:02:10", TopBar.right(3_730_000))
         assertEquals("", TopBar.right(null))
     }
+
+    @Test fun theBarIsOneButtonWideAndItsLabelsStack() { // owner, 2026-10-09: the bar was ~130 dp
+        assertTrue(DockedToolBar.BAR_DP <= 72 && DockedToolBar.BUTTON_DP in 52..56)
+        assertTrue(DockedToolBar.BUTTON_DP >= DockedToolBar.TOUCH_DP && DockedToolBar.BAR_DP > DockedToolBar.BUTTON_DP)
+        assertEquals("◆\nMark", DockedToolBar.stacked(ToolBarModel.MARK))
+        assertEquals("■\nStop", DockedToolBar.stacked("■  Stop"))
+        assertEquals("Marked\n0:12:41", DockedToolBar.stacked("Marked 0:12:41"))
+    }
 }
