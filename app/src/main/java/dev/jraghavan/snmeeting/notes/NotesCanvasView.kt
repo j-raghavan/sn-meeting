@@ -37,6 +37,8 @@ class NotesCanvasView(
     interface Host {
         /** The pen landed or lifted (F17-FR11: other redraws wait for the lift). */
         fun pen(down: Boolean) {}
+        /** Any touch on the canvas, pen or finger (F17-FR14: it dismisses the hints). */
+        fun touched() {}
         val tool: NoteTool
         val recording: Boolean
         /** The times for a stroke starting now (F17-FR4). */
@@ -262,6 +264,7 @@ class NotesCanvasView(
         if (pen && e.actionMasked == MotionEvent.ACTION_DOWN && minimapOpen) minimapOpen = false // the pen closes it
         if (!fixed && !pen && e.pointerCount == 1 && minimapTouch(e)) return true
         if (fixed && e.actionMasked == MotionEvent.ACTION_DOWN && !pen) return false // the page scrolls
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) host.touched()
         if (fixed) parent?.requestDisallowInterceptTouchEvent(true)
         if (!arbiter.isPenActive && !fixed) scale.onTouchEvent(e)
         val inputs: List<PointerInput> = when (e.actionMasked) {

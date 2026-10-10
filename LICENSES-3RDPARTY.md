@@ -12,6 +12,10 @@ index, is in the public domain. Code adapted from the owner's other projects is 
 | Font | Source | License | Styles |
 |------|--------|---------|--------|
 | Pinyon Script | github.com/SorkinType/Pinyon (Google Fonts) | SIL Open Font License 1.1 | Regular |
+| Virgil | Excalidraw's hand-drawn font, via sn-canvas `scripts/fonts` | SIL Open Font License 1.1 | Regular |
+
+Virgil is bundled at `app/src/main/assets/fonts/virgil.ttf` for the notes canvas's onboarding
+hints (F17-FR14), with its licence beside it (`virgil-OFL.txt`).
 
 Pinyon Script is bundled at `app/src/main/assets/fonts/pinyon_script.ttf` for the "Meetings"
 wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
@@ -39,6 +43,7 @@ Each adapted file names its origin in its header.
 | `app/.../notes/TouchArbiter.kt` (`PalmRule`), `app/.../notes/NoteTool.kt` (`forPen`) | inkread `PalmFilter.kt`, `ToolPalette.kt` (`Tool.forStylus`) | AGPL-3.0-only |
 | `app/.../notes/Viewport.kt` (pan, zoom, fit, minimap frame) | sn-canvas `CanvasCore.kt`, `ViewTransforms.kt`, `Minimap.kt` | MIT (notice below) |
 | `app/.../notes/SupernoteInk.kt` | inkread `eink/SupernoteInk.kt`, `eink/SupernoteEinkAdapter.kt` | AGPL-3.0-only |
+| `app/.../notes/Hints.kt` (hand-drawn arrow, caption placement) | sn-canvas `scripts/draw_hints.py`, `src/ui/HelpHints.tsx` | MIT (notice below) |
 | `app/.../notes/DockedToolBar.kt` | inkread `ToolPalette.kt` (vertical docked palette, Define removed, docked collapse) | AGPL-3.0-only |
 
 ## Rust crates linked into `libmeeting.so`

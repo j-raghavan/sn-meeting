@@ -76,6 +76,8 @@ class NotesPage(
         override val tool get() = this@NotesPage.tool
         override val recording get() = host.recordingSince() != null
         override val penWidthPx get() = PEN_WIDTH_PX
+        override fun touched() = hideHints()
+
         override fun pen(down: Boolean) {
             if (down) quiet.down() else quiet.up()
             dialogs.pen(down)
@@ -119,19 +121,22 @@ class NotesPage(
         override fun viewportChanged(v: Viewport) = fetch(InkBake.Event.VIEWPORT_SETTLED)
     })
 
+    /** F17-FR14: the zoom pill's controls the hints point at. */
+    private val pillAnchors = HashMap<String, View>()
+
     private val zoomPill = LinearLayout(a).apply {
         orientation = LinearLayout.HORIZONTAL
         background = ui.outline(ui.dim(30))
         setPadding(ui.dim(8), ui.dim(4), ui.dim(8), ui.dim(4))
         val item = { label: String, act: () -> Unit ->
-            addView(ui.eyebrow(label).apply {
+            ui.eyebrow(label).apply {
                 setPadding(ui.dim(12), ui.dim(10), ui.dim(12), ui.dim(10))
-                isClickable = true; setOnClickListener { act() }
-            })
+                isClickable = true; setOnClickListener { hideHints(); act() }
+            }.also { addView(it) }
         }
-        item("FIT") { canvas.fit() }
+        pillAnchors["zoom"] = item("FIT") { canvas.fit() }
         Viewport.PRESETS.forEach { p -> item("$p%") { canvas.zoomPercent(p) } }
-        item("MAP") { canvas.minimapOpen = !canvas.minimapOpen } // F17-FR13: on demand
+        pillAnchors["map"] = item("MAP") { canvas.minimapOpen = !canvas.minimapOpen } // F17-FR13: on demand
     }
 
     /** The canvas with the zoom pill over its top corner. */
@@ -184,7 +189,8 @@ class NotesPage(
 
     /** F17-FR2: the docked bar, on the canvas's right (or left) edge, never over it. */
     val bar = DockedToolBar(a, ui, object : DockedToolBar.Host {
-        override fun onTool(t: NoteTool) { tool = t; canvas.selection = null; canvas.toolChanged(t); refreshBar() }
+        override fun onTool(t: NoteTool) { hideHints(); tool = t; canvas.selection = null; canvas.toolChanged(t); refreshBar() }
+        override fun onHelp() = if (hints.showing) hints.hide() else hints.show()
         override fun onUndo() = changed(InkBake.Event.UNDO_REDO) { NativeBridge.nativeInkUndo(id, LAYER) }
         override fun onRedo() = changed(InkBake.Event.UNDO_REDO) { NativeBridge.nativeInkRedo(id, LAYER) }
         override fun onCollapse(collapsed: Boolean) {
@@ -201,22 +207,62 @@ class NotesPage(
     private var prefs = host.prefs()
 
     /** The tab's content: the bar beside the canvas column. */
-    val view = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+    private val row = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+
+    /** F17-FR14: the hand-drawn hints, over everything on the tab; they never take a touch. */
+    private val hints: HintsOverlay = HintsOverlay(a, ::hintTips, ::inkCovers) { prefs.dock == NotesPrefs.Dock.LEFT }
+
+    /** The tab's content: the bar beside the canvas column, the hints over both. */
+    val view = FrameLayout(a).apply {
+        addView(row, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        addView(hints, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    }
+
+    fun hideHints() = hints.hide()
+
+    /** Each control's arrow tip in the hints' pixels: the side of a bar control facing the
+     *  canvas, the bottom of a zoom-pill control, the top of the strip. */
+    private fun hintTips(): Map<String, Pair<Float, Float>> {
+        val origin = IntArray(2).also { hints.getLocationInWindow(it) }
+        fun box(v: View): FloatArray {
+            val p = IntArray(2).also { v.getLocationInWindow(it) }
+            return floatArrayOf((p[0] - origin[0]).toFloat(), (p[1] - origin[1]).toFloat(), v.width.toFloat(), v.height.toFloat())
+        }
+        val out = HashMap<String, Pair<Float, Float>>()
+        val left = prefs.dock == NotesPrefs.Dock.LEFT
+        bar.anchors.forEach { (k, v) -> val b = box(v); out[k] = (if (left) b[0] + b[2] else b[0]) to b[1] + b[3] / 2 }
+        pillAnchors.forEach { (k, v) -> val b = box(v); out[k] = b[0] + b[2] / 2 to b[1] + b[3] }
+        if (strip.view.visibility == View.VISIBLE) { val b = box(strip.view); out["strip"] = b[0] + b[2] / 2 to b[1] }
+        return out
+    }
+
+    /** Whether a box in the hints' pixels covers any ink on the canvas. */
+    private fun inkCovers(l: Float, t: Float, r: Float, b: Float): Boolean {
+        val o = IntArray(2).also { hints.getLocationInWindow(it) }
+        val c = IntArray(2).also { canvas.getLocationInWindow(it) }
+        val v = canvas.viewport
+        return canvas.inkView.strokes.any { s ->
+            val w = s.bounds
+            val sl = v.screenX(w.left) + c[0] - o[0]; val sr = v.screenX(w.right) + c[0] - o[0]
+            val st = v.screenY(w.top) + c[1] - o[1]; val sb = v.screenY(w.bottom) + c[1] - o[1]
+            sl < r && l < sr && st < b && t < sb
+        }
+    }
 
     init { layout() }
 
     /** Bar and column in dock order, the bar at its expanded or collapsed width: one redraw. */
     private fun layout() {
-        view.removeAllViews()
+        row.removeAllViews()
         val barParams = LinearLayout.LayoutParams(if (prefs.collapsed) bar.collapsedPx else bar.expandedPx,
             LinearLayout.LayoutParams.MATCH_PARENT)
         val colParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
         val rule = View(a).apply { setBackgroundColor(ui.ink) }
         val ruleParams = LinearLayout.LayoutParams(maxOf(1, ui.dp(1)), LinearLayout.LayoutParams.MATCH_PARENT)
         if (prefs.dock == NotesPrefs.Dock.LEFT) {
-            view.addView(bar.view, barParams); view.addView(rule, ruleParams); view.addView(column, colParams)
+            row.addView(bar.view, barParams); row.addView(rule, ruleParams); row.addView(column, colParams)
         } else {
-            view.addView(column, colParams); view.addView(rule, ruleParams); view.addView(bar.view, barParams)
+            row.addView(column, colParams); row.addView(rule, ruleParams); row.addView(bar.view, barParams)
         }
         canvas.barOnLeft = prefs.dock == NotesPrefs.Dock.LEFT
         refreshBar()
@@ -272,6 +318,8 @@ class NotesPage(
                         }
                         canvas.setViewport(next)
                         if (front) canvas.claimPen("open")
+                        // F17-FR14: an empty canvas opens with the hints, one with ink without them.
+                        if (o.optInt("strokes", 0) == 0) hints.show()
                     }
                 }
                 is CoreResult.Err -> dialogs.show { InkDialog.error(a, "The notes can't be opened", r.message) }

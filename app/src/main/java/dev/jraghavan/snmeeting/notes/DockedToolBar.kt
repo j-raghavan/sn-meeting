@@ -29,6 +29,8 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         fun onMark()
         fun onStop()
         fun onPlay()
+        /** F17-FR14: "?" toggles the hints. */
+        fun onHelp()
     }
 
     val view: LinearLayout = LinearLayout(a).apply {
@@ -40,6 +42,8 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
     private var mark: TextView? = null
     private var cost: TextView? = null
     private var shown: List<Item> = emptyList()
+    /** F17-FR14: each control's view, by the hint id that points at it. */
+    val anchors = HashMap<String, View>()
 
     /** Widths of the bar, expanded and collapsed (the canvas starts beside it). */
     val expandedPx get() = ui.dim(112)
@@ -55,8 +59,13 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         }
         shown = items
         view.removeAllViews()
+        anchors.clear()
         timer = null; mark = null; cost = null
-        items.forEach { view.addView(build(it, s), params(it)) }
+        items.forEach { i ->
+            val v = build(i, s)
+            hintId(i)?.let { anchors[it] = v }
+            view.addView(v, params(i))
+        }
     }
 
     /** Two items with the same key are drawn by the same view: their text may change in place. */
@@ -79,6 +88,16 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
     fun showTimer(text: String) { timer?.takeIf { it.text != text }?.text = text }
     fun showCost(text: String) { cost?.takeIf { it.text != text.uppercase() }?.text = text.uppercase() }
     fun showMarked(label: String) { mark?.takeIf { it.text != label }?.let { ui.stylePill(it, label, filled = false) } }
+
+    private fun hintId(i: Item): String? = when (i) {
+        is Item.Tool -> i.tool.name.lowercase()
+        is Item.Undo -> "undo"
+        is Item.Handle -> "handle"
+        is Item.Mark -> "mark"
+        Item.Stop -> "stop"
+        Item.Help -> "help"
+        else -> null
+    }
 
     private fun params(i: Item) = if (i == Item.Gap) {
         LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
@@ -138,6 +157,12 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         }
         is Item.Play -> ui.pill(if (i.playing) "❚❚" else "▶", filled = i.playing, size = 16f) { if (i.enabled) host.onPlay() }.apply {
             if (!i.enabled) { setTextColor(ui.textMuted); isClickable = false }
+        }
+        Item.Help -> ui.eyebrow("?").apply {
+            gravity = Gravity.CENTER
+            setPadding(ui.dim(14), ui.dim(10), ui.dim(14), ui.dim(10))
+            isClickable = true
+            setOnClickListener { host.onHelp() }
         }
         Item.Gap -> View(a)
     }

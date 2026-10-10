@@ -40,6 +40,8 @@ object ToolBarModel {
         data class Redo(val enabled: Boolean) : Item
         /** Thickness, Focus mode and a full refresh (F17-FR6, FR11). */
         data class Options(val focus: Boolean) : Item
+        /** F17-FR14: "?" shows the hints again. */
+        data object Help : Item
         /** Collapse (expanded) or expand (collapsed). */
         data class Handle(val collapsed: Boolean) : Item
         data class Timer(val text: String) : Item
@@ -64,6 +66,7 @@ object ToolBarModel {
             top += Item.Redo(s.canRedo)
             top += Item.Tool(NoteTool.LISTEN, s.tool == NoteTool.LISTEN, enabled = !s.recording)
             top += Item.Options(s.focus)
+            top += Item.Help
         }
         top += Item.Gap
         val bottom = if (s.recording) {
