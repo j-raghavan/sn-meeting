@@ -1,6 +1,8 @@
 //! F20: tags. Each meeting gets keyword tags from its Stop call (ADR D20); they are stored in
 //! the sidecar, searchable, editable and drawn as the Tag Graph.
 
+pub mod edit;
+
 use crate::sidecar::{Sidecar, Tag, TagSource};
 use std::collections::HashMap;
 

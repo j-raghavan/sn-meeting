@@ -18,12 +18,14 @@ mod notes;
 mod run;
 mod search;
 mod spend;
+mod tags;
 mod templates;
 pub use agenda::people as agenda_people;
 pub use calendar::LinkState;
 pub use live::DECLINED as LIVE_DECLINED;
 pub use run::Job;
 pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};
+pub use tags::RENAME_FILE;
 
 #[derive(Debug)]
 pub struct App {

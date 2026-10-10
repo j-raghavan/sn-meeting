@@ -522,6 +522,21 @@ pub fn begin_meeting_for_event(
     })
 }
 
+/// `nativeAddTag(id, name)` (F20-FR4): `{tags}`.
+pub fn add_tag(id: &str, name: &str) -> String {
+    with_app(|app| app.add_tag_json(id, name))
+}
+
+/// `nativeRemoveTag(id, name)` (F20-FR4): `{tags}`.
+pub fn remove_tag(id: &str, name: &str) -> String {
+    with_app(|app| app.remove_tag_json(id, name))
+}
+
+/// `nativeRenameTag(from, to)` (F20-FR4): every meeting, resumable. `{renamed, to}`.
+pub fn rename_tag(from: &str, to: &str) -> String {
+    with_app(|app| app.rename_tag_json(from, to))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

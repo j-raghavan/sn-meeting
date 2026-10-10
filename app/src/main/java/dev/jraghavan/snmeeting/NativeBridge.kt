@@ -162,6 +162,17 @@ object NativeBridge {
      *  becomes the user's and Summarise again keeps it. `{meeting}`. */
     external fun nativeEditMinutes(id: String, patchJson: String): String
 
+    /** F20-FR4: add the user's tag (normalised by the core) to meeting [id]. `{tags: [{name,
+     *  source}]}`, or `{error}`. */
+    external fun nativeAddTag(id: String, name: String): String
+
+    /** F20-FR4: remove a tag; a later summary won't add it back. `{tags}`. */
+    external fun nativeRemoveTag(id: String, name: String): String
+
+    /** F20-FR4: rename a tag in every meeting in the save folders, merging into [to] where it
+     *  exists; resumable. Rewrites sidecars: call it on the core thread. `{renamed, to}`. */
+    external fun nativeRenameTag(from: String, to: String): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 
