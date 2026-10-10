@@ -1,8 +1,15 @@
 //! F20: tags. Each meeting gets keyword tags from its Stop call (ADR D20); they are stored in
 //! the sidecar, searchable, editable and drawn as the Tag Graph.
 
+use crate::sidecar::{Sidecar, Tag, TagSource};
+use std::collections::HashMap;
+
 /// The longest tag, in characters (F20-FR2).
 pub const MAX_TAG_CHARS: usize = 32;
+/// F20-FR1: the summarise call asks for 3–7 tags; more than 7 are cut.
+pub const MAX_AI_TAGS: usize = 7;
+/// F20-FR1 / OQ29: the most used tags sent with the call, by name only.
+pub const VOCABULARY: usize = 200;
 
 /// F20-FR2: a tag's stored form, or `None` when nothing of it is left. Lowercase, without a
 /// leading `#`, words joined by `-`; ASCII letters, digits and `-`, plus the letters of other
@@ -48,9 +55,85 @@ pub fn normalise_all<'a>(names: impl IntoIterator<Item = &'a str>) -> Vec<String
     out
 }
 
+/// How many meetings use each tag.
+pub fn counts<'a>(sidecars: impl IntoIterator<Item = &'a Sidecar>) -> HashMap<String, usize> {
+    let mut out: HashMap<String, usize> = HashMap::new();
+    for sc in sidecars {
+        for t in &sc.tags {
+            *out.entry(t.name.clone()).or_default() += 1;
+        }
+    }
+    out
+}
+
+/// Tag names, most used first, then by name.
+pub fn by_use(counts: &HashMap<String, usize>) -> Vec<String> {
+    let mut v: Vec<(&String, &usize)> = counts.iter().collect();
+    v.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    v.into_iter().map(|(n, _)| n.clone()).collect()
+}
+
+/// F20-FR1 / OQ29: the device's tag vocabulary: the [`VOCABULARY`] most used tags.
+pub fn vocabulary<'a>(sidecars: impl IntoIterator<Item = &'a Sidecar>) -> Vec<String> {
+    let mut v = by_use(&counts(sidecars));
+    v.truncate(VOCABULARY);
+    v
+}
+
+/// F20-FR1: the summarise call's tags replace the AI's earlier ones. The user's own tags stay,
+/// a tag the user removed doesn't come back (F20-AC3), and a reply with no tags leaves the
+/// meeting's tags as they were.
+pub fn apply_ai(sc: &mut Sidecar, names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+    sc.tags.retain(|t| t.source == TagSource::User);
+    for n in names {
+        if !sc.tags_user_removed.contains(n) && sc.tags.iter().all(|t| &t.name != n) {
+            sc.tags.push(Tag::new(n, TagSource::Ai));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with(tags: &[(&str, TagSource)]) -> Sidecar {
+        let mut sc = crate::sidecar::blank("meeting-20261007-211706");
+        sc.tags = tags.iter().map(|(n, s)| Tag::new(n, *s)).collect();
+        sc
+    }
+
+    #[test]
+    fn ai_tags_replace_the_ai_s_and_keep_the_user_s() {
+        let mut sc = with(&[("old", TagSource::Ai), ("mine", TagSource::User)]);
+        sc.tags_user_removed = vec!["budget".into()];
+        let names: Vec<String> = ["gpu", "budget", "mine"].map(String::from).to_vec();
+        apply_ai(&mut sc, &names);
+        let got: Vec<(&str, TagSource)> = sc
+            .tags
+            .iter()
+            .map(|t| (t.name.as_str(), t.source))
+            .collect();
+        assert_eq!(got, [("mine", TagSource::User), ("gpu", TagSource::Ai)]);
+        apply_ai(&mut sc, &[]);
+        assert_eq!(sc.tags.len(), 2, "a reply without tags changes nothing");
+    }
+
+    #[test]
+    fn the_vocabulary_is_the_most_used_first() {
+        let a = with(&[("gpu", TagSource::Ai), ("vram", TagSource::Ai)]);
+        let b = with(&[("gpu", TagSource::User), ("budget", TagSource::Ai)]);
+        let c = with(&[("gpu", TagSource::Ai), ("vram", TagSource::User)]);
+        assert_eq!(vocabulary([&a, &b, &c]), ["gpu", "vram", "budget"]);
+        let many: Vec<Sidecar> = (0..250)
+            .map(|i| with(&[(&format!("t{i:03}"), TagSource::Ai)]))
+            .collect();
+        let v = vocabulary(&many);
+        assert_eq!(v.len(), VOCABULARY);
+        assert_eq!(v[0], "t000");
+    }
 
     #[test]
     fn tags_are_normalised() {

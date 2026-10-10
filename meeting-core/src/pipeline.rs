@@ -62,6 +62,8 @@ pub struct JobPlan {
     /// F15-FR9 / FR10: where a near-live meeting's chunk files are, and the lock its chunks are
     /// sent under; `None` sends segments only (F5's path).
     pub chunks: Option<ChunkCtx>,
+    /// F20-FR1: the device's most used tags, sent so the call reuses them.
+    pub tag_vocabulary: Vec<String>,
 }
 
 /// F15-FR9: what a job needs to send a near-live meeting's chunks.
