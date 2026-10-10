@@ -6,6 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -27,6 +28,7 @@ import dev.jraghavan.snmeeting.model.TemplateChoice
 import dev.jraghavan.snmeeting.model.TemplateRow
 import dev.jraghavan.snmeeting.model.Todo
 import dev.jraghavan.snmeeting.model.TranscriptPages
+import dev.jraghavan.snmeeting.notes.NotesPage
 import dev.jraghavan.snmeeting.play.MediaPlayerPort
 import dev.jraghavan.snmeeting.play.Playback
 import dev.jraghavan.snmeeting.play.SegmentPlaylist
@@ -36,9 +38,12 @@ import dev.jraghavan.snmeeting.record.RecState
 import dev.jraghavan.snmeeting.record.RecordingService
 
 /**
- * One meeting (spec F7) in the Inkwell style (F9), read from the core: the title (tap to
- * rename), when and how long, playback, the template, the one action its status allows, its
- * to-dos and the transcript paged for e-ink.
+ * One meeting in layout B, "Notebook with Strip" (F17-FR1), Inkwell style (F9). The top bar
+ * holds the Notes | Minutes tabs and, at the right, the recording timer (or the date and
+ * length). Notes is the infinite canvas ([NotesPage]); Minutes is F7's page, read from the
+ * core: the title (tap to rename), playback, the template, the action its status allows, the
+ * summary, to-dos and the transcript paged for e-ink. A recording opens on Notes, a past
+ * meeting on Minutes.
  */
 class MeetingActivity : Activity() {
 
@@ -48,7 +53,14 @@ class MeetingActivity : Activity() {
     private var view: MeetingView? = null
     /** F18-FR10: the meeting's day in the calendar, for whether "Link to event…" shows. */
     private var linkDay: dev.jraghavan.snmeeting.model.Agenda? = null
-    private var page: ScrollView? = null
+    private lateinit var page: ScrollView
+    private lateinit var notesHost: FrameLayout
+    private lateinit var tabNotes: TextView
+    private lateinit var tabMinutes: TextView
+    private lateinit var topTimer: TextView
+    /** F17-FR1: the tab shown; chosen once, from the meeting's status, on the first load. */
+    private var tab: String? = null
+    private var notes: NotesPage? = null
     private var settings: SettingsView? = null
     private var templates: List<TemplateRow> = emptyList()
     private var pickingTemplate = false
@@ -105,6 +117,14 @@ class MeetingActivity : Activity() {
     private var playPill: TextView? = null
     private var position: TextView? = null
 
+    /** F17-FR1 / FR11: the top bar's timer, once a second while recording, its own view only. */
+    private val clock = object : Runnable {
+        override fun run() {
+            showClock()
+            if (recordingHere() != null) handler.postDelayed(this, 1000)
+        }
+    }
+
     /** The position line, once a second while playing (NFR2). */
     private val tick = object : Runnable {
         override fun run() {
@@ -121,8 +141,91 @@ class MeetingActivity : Activity() {
         id = intent.getStringExtra(EXTRA_ID) ?: run { finish(); return }
         cueAt = intent.getLongExtra(EXTRA_AT_MS, -1).takeIf { it >= 0 }
         focus = intent.getStringExtra(EXTRA_FOCUS)
+        tab = intent.getStringExtra(EXTRA_TAB)
         CoreJobs.init(filesDir.absolutePath)
-        setContentView(ui.page(ui.column().apply { addView(ui.header("All meetings")) }))
+        setContentView(skeleton())
+    }
+
+    /** F17-FR1: the top bar (tabs at the left, timer at the right) over the two tabs' area. */
+    private fun skeleton(): View {
+        tabNotes = tabLabel("Notes", NOTES)
+        tabMinutes = tabLabel("Minutes", MINUTES)
+        topTimer = ui.eyebrow("").apply { gravity = Gravity.END }
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(ui.side, ui.dim(18), ui.side, ui.dim(14))
+            addView(LinearLayout(this@MeetingActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(ui.eyebrow("←").apply {
+                    isClickable = true; setOnClickListener { finish() }
+                    setPadding(0, ui.dim(8), ui.dim(18), ui.dim(8))
+                })
+                addView(tabNotes)
+                addView(ui.eyebrow("|", ui.textMuted).apply { setPadding(ui.dim(12), 0, ui.dim(12), 0) })
+                addView(tabMinutes)
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ui.wordmark("Meetings", 16f))
+            addView(topTimer, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        page = ui.page(ui.column())
+        notesHost = FrameLayout(this).apply { visibility = View.GONE }
+        val body = FrameLayout(this).apply {
+            addView(page, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+            addView(notesHost, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(android.graphics.Color.WHITE)
+            addView(bar, ui.fullWidth())
+            addView(ui.hairline())
+            addView(body, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+    }
+
+    private fun tabLabel(text: String, which: String): TextView = ui.body(text, 19f).apply {
+        isClickable = true
+        setOnClickListener { if (tab != which) { tab = which; showTab() } }
+        setPadding(0, ui.dim(8), 0, ui.dim(8))
+    }
+
+    /** F17-FR1: one tab or the other, as one redraw. The canvas is built the first time. */
+    private fun showTab() {
+        val onNotes = tab == NOTES
+        for ((label, mine) in listOf(tabNotes to NOTES, tabMinutes to MINUTES)) {
+            val on = tab == mine
+            label.typeface = if (on) ui.serifBold else ui.serif
+            label.setTextColor(if (on) ui.ink else ui.textMuted)
+            label.paintFlags = if (on) label.paintFlags or android.graphics.Paint.UNDERLINE_TEXT_FLAG
+            else label.paintFlags and android.graphics.Paint.UNDERLINE_TEXT_FLAG.inv()
+        }
+        page.visibility = if (onNotes) View.GONE else View.VISIBLE
+        notesHost.visibility = if (onNotes) View.VISIBLE else View.GONE
+        notes?.shown(onNotes)
+        if (onNotes && notes == null) {
+            notes = NotesPage(this, ui, scope, id, object : NotesPage.Host {
+                override fun recordingSince(): Long? = recordingHere()
+            }).also {
+                notesHost.addView(it.view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                it.open()
+            }
+        }
+    }
+
+    /** When this meeting's recording began (elapsed ms), while it is the one recording. */
+    private fun recordingHere(): Long? =
+        (RecordingService.hub.state as? RecState.Recording)?.takeIf { it.id == id }?.startElapsedMs
+
+    /** "● 0:12:41" while recording; else the meeting's date and length (F17-FR1). */
+    private fun showClock() {
+        val since = recordingHere()
+        val text = if (since != null) {
+            "●  " + Format.duration(LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), since))
+        } else {
+            view?.let { v -> MeetingHeader.of(v.meeting, v.cost).let { h -> listOf(h.stamp, h.length).filter { it.isNotEmpty() }.joinToString("  ·  ") } }.orEmpty()
+        }
+        if (topTimer.text.toString() != text) topTimer.text = text
     }
 
     override fun onResume() {
@@ -146,6 +249,7 @@ class MeetingActivity : Activity() {
 
     override fun onStart() {
         super.onStart()
+        notes?.open() // the canvas was let go in onStop
         // A chunk's lines arrived (the lane's pass ended): show them now, not at the next poll.
         unLive = LiveJobs.observe { mid, _ -> if (mid == id) fetchLive() }
         // Stopped (here, on Home or in the notification): the meeting moves on; read it again.
@@ -155,6 +259,8 @@ class MeetingActivity : Activity() {
     }
 
     override fun onStop() {
+        notes?.close() // F17-FR5: the ink saved and the viewport kept; the pen given back
+        handler.removeCallbacks(clock)
         unLive?.invoke(); unLive = null
         unHub?.invoke(); unHub = null
         handler.removeCallbacks(livePoll)
@@ -177,6 +283,10 @@ class MeetingActivity : Activity() {
                 is CoreResult.Ok -> {
                     view = r.value; preparePlayback(r.value); cueOnce(r.value); render(); scrollToFocus()
                     loadLinkDay(r.value.meeting)
+                    if (tab == null) tab = if (r.value.meeting.status == Status.RECORDING) NOTES else MINUTES
+                    showTab()
+                    handler.removeCallbacks(clock)
+                    handler.post(clock)
                     handler.removeCallbacks(poll)
                     if (LongJobs.lane.isRunning(id)) handler.postDelayed(poll, 1000)
                     handler.removeCallbacks(livePoll)
@@ -201,7 +311,7 @@ class MeetingActivity : Activity() {
         val f = focus ?: return
         focus = null
         val target = anchors[f] ?: return
-        page?.post { page?.scrollTo(0, target.top) }
+        page.post { page.scrollTo(0, target.top) }
     }
 
     /** Deleted on the desktop, or unreadable: say so rather than show stale details. */
@@ -222,13 +332,12 @@ class MeetingActivity : Activity() {
         playback = Playback(next, MediaPlayerPort()) { showPlayer() }
     }
 
-    /** Rebuilds the page, keeping the scroll position (one redraw). */
+    /** Rebuilds the Minutes tab, keeping its scroll position (one redraw). */
     private fun show(column: LinearLayout) {
-        val y = page?.scrollY ?: 0
-        val p = ui.page(column)
-        page = p
-        setContentView(p)
-        if (y > 0) p.post { p.scrollTo(0, y) }
+        val y = page.scrollY
+        page.removeAllViews()
+        page.addView(column)
+        if (y > 0) page.post { page.scrollTo(0, y) }
     }
 
     /** F7-FR1: play/pause through every segment as one recording, with position and total. */
@@ -391,8 +500,6 @@ class MeetingActivity : Activity() {
         actions = actionsFor(v.meeting)
         val h = MeetingHeader.of(v.meeting, v.cost)
         val column = ui.column().apply {
-            addView(ui.header("All meetings"))
-            addView(ui.spacer(ui.dim(36)))
             // F7-FR5: the title is the heading; tapping it renames the meeting.
             addView(ui.body(h.title, 30f, bold = !h.untitled).apply {
                 gravity = Gravity.CENTER
@@ -635,6 +742,10 @@ class MeetingActivity : Activity() {
         const val EXTRA_AT_MS = "at_ms"
         /** F19-FR3: summary, todos or transcript: the part to scroll to. */
         const val EXTRA_FOCUS = "focus"
+        /** F17-FR1 / F19-FR3: the tab to open on, [NOTES] or [MINUTES]; by status when absent. */
+        const val EXTRA_TAB = "tab"
+        const val NOTES = "notes"
+        const val MINUTES = "minutes"
         /** How often the live transcript is read while recording, besides the lane's own news. */
         const val LIVE_POLL_MS = 5_000L
         /** F17-FR3: how long Mark reads "Marked 0:12:41". */

@@ -34,6 +34,8 @@ Each adapted file names its origin in its header.
 | `meeting-core/src/ink/{mod,model,codec,select}.rs` | inkread `inkread-ink/src/{lib,model,codec,select}.rs` (world coordinates, recording-clock stroke times, `.inkbin` v2) | AGPL-3.0-only |
 | `app/.../notes/TouchArbiter.kt` (`TouchArbiter`, `Contact`, `PointerInput`) | sn-canvas `android/app/src/main/java/com/sncanvas/canvas/TouchArbiter.kt` | MIT (notice below) |
 | `app/.../notes/TouchArbiter.kt` (`PalmRule`), `app/.../notes/NoteTool.kt` (`forPen`) | inkread `PalmFilter.kt`, `ToolPalette.kt` (`Tool.forStylus`) | AGPL-3.0-only |
+| `app/.../notes/Viewport.kt` (pan, zoom, fit, minimap frame) | sn-canvas `CanvasCore.kt`, `ViewTransforms.kt`, `Minimap.kt` | MIT (notice below) |
+| `app/.../notes/SupernoteInk.kt` | inkread `eink/SupernoteInk.kt`, `eink/SupernoteEinkAdapter.kt` | AGPL-3.0-only |
 
 ## Rust crates linked into `libmeeting.so`
 
