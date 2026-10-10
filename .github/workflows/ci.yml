@@ -25,6 +25,13 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Every job that builds the tests links each integration-test binary against the whole
+  # crate graph. With full debug info the linker ran out of room on the runner
+  # (ld: signal 7, bus error), first in rust host, then in coverage. Line tables keep
+  # backtraces and coverage line mapping at a fraction of the size.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: '0'
   # Same exclusion as scripts/gates.sh: the JNI edge runs only on the device.
   COVERAGE_IGNORE: 'meeting-core/src/jni\.rs$'
 
@@ -33,12 +40,6 @@ jobs:
     name: rust host (fmt, clippy, build, test, INV5)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The test binaries each link the whole crate graph; with full debug info the
-    # linker ran out of room on the runner (ld: signal 7, bus error). Line tables keep
-    # backtraces readable at a fraction of the size.
-    env:
-      CARGO_PROFILE_DEV_DEBUG: line-tables-only
-      CARGO_INCREMENTAL: '0'
     steps:
       - uses: actions/checkout@v7
       - name: Install toolchain (from rust-toolchain.toml)
