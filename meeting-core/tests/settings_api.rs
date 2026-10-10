@@ -492,3 +492,74 @@ fn a_listing_with_no_transcription_model_shows_the_code_default() {
         json!({"provider": "openai", "model": "gpt-transcribe", "modelSource": "default"})
     );
 }
+
+#[test]
+fn the_recorder_is_standard_unless_near_live_is_chosen() {
+    // F15 / D14: the Standard (MediaRecorder) path stays the default.
+    let e = Env::new();
+    let app = e.app();
+    assert_eq!(get(&app)["settings"]["recorder"], "standard");
+    let v = set(&app, json!({"recorder": "near-live"}));
+    assert_eq!(v["settings"]["recorder"], "near-live");
+    assert!(e.saved().contains("\"recorder\": \"near-live\""));
+    let v = set(&app, json!({"recorder": "fast"}));
+    assert_eq!(
+        v,
+        json!({"error": "recorder must be standard or near-live", "field": "recorder"})
+    );
+    assert_eq!(get(&app)["settings"]["recorder"], "near-live");
+    // F15-FR12: the near-live notice, once per provider.
+    assert_eq!(get(&app)["settings"]["liveNoticeShown"]["openai"], false);
+    let v = set(&app, json!({"liveNoticeShown": {"openai": true}}));
+    assert_eq!(
+        v["settings"]["liveNoticeShown"],
+        json!({"openai": true, "gemini": false, "anthropic": false})
+    );
+    assert_eq!(
+        v["settings"]["noticeShown"]["openai"], false,
+        "the job notice is separate"
+    );
+    // A hand edit the app can't read is Standard.
+    fs::write(
+        e.data.path().join("settings.json"),
+        r#"{"schema": 1, "recorder": 3}"#,
+    )
+    .unwrap();
+    assert_eq!(get(&e.app())["settings"]["recorder"], "standard");
+}
+
+/// F17-FR2 (OQ13): the notes tool bar docks right or left, never top; it is expanded or
+/// collapsed, and the choice survives a restart. Notes go with the minutes by default (OQ20).
+#[test]
+fn the_notes_bar_docks_right_or_left_and_its_state_persists() {
+    let e = Env::new();
+    let app = e.app();
+    let s = get(&app);
+    assert_eq!(s["settings"]["notes"]["dock"], "right");
+    assert_eq!(s["settings"]["notes"]["sidebar"], "expanded");
+    assert_eq!(s["settings"]["notes"]["useForMinutes"], true);
+    let v = set(&app, json!({"notes": {"dock": "top"}}));
+    assert_eq!(
+        v,
+        json!({"error": "the tool bar docks right or left", "field": "notes.dock"})
+    );
+    let v = set(&app, json!({"notes": {"sidebar": "floating"}}));
+    assert_eq!(v["field"], "notes.sidebar");
+    set(
+        &app,
+        json!({"notes": {"dock": "left", "sidebar": "collapsed", "focus": true}}),
+    );
+    let back = get(&e.app());
+    assert_eq!(back["settings"]["notes"]["dock"], "left");
+    assert_eq!(back["settings"]["notes"]["sidebar"], "collapsed");
+    assert_eq!(back["settings"]["notes"]["focus"], true);
+    // A hand-edited "top" in the file reads as the default, right.
+    fs::write(
+        e.data.path().join("settings.json"),
+        r#"{"notes": {"dock": "top", "sidebar": 3}}"#,
+    )
+    .unwrap();
+    let hand = get(&e.app());
+    assert_eq!(hand["settings"]["notes"]["dock"], "right");
+    assert_eq!(hand["settings"]["notes"]["sidebar"], "expanded");
+}

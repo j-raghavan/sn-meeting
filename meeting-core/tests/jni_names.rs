@@ -15,6 +15,9 @@ fn jni_type(kotlin: &str) -> &'static str {
         "Int" => "jint",
         "Long" => "jlong",
         "Boolean" => "jboolean",
+        "ByteArray" => "JByteArray",
+        "Float" => "jfloat",
+        "FloatArray" => "JFloatArray",
         other => panic!("unmapped Kotlin type {other}"),
     }
 }

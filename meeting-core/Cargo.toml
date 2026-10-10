@@ -24,6 +24,11 @@ uuid = { workspace = true }
 minijinja = { workspace = true }
 unicode-normalization = { workspace = true }
 semver = { workspace = true }
+rusqlite = { workspace = true }
+calcard = { workspace = true }
+chrono-tz = { workspace = true }
+sha2 = { workspace = true }
+flate2 = { workspace = true }
 jni = { workspace = true, optional = true }
 
 [features]
@@ -33,5 +38,6 @@ jni-bridge = ["dep:jni"]
 
 [dev-dependencies]
 wiremock = { workspace = true }
+base64 = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "test-util"] }

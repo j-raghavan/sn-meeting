@@ -4,12 +4,17 @@
 use crate::jobs::{self, Cancel};
 use crate::keyfile::ProviderKey;
 use crate::library::{self, LibError, Library};
-use crate::providers::{self, AudioIn, CallFail, Endpoints, Http};
+use crate::providers::{self, AudioIn, CallError, CallFail, Endpoints, Http, Replied};
+use crate::rates::RateTable;
 use crate::sidecar::{ProviderRun, SegmentFlag, Sidecar};
+use crate::spend::{Kind, UsageEntry, UsageRecord};
 use crate::status::{self, Event, Phase};
+use crate::tz::{self, LocalTz};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
+pub mod live;
+mod notes;
 mod summary;
 mod transcript;
 pub use summary::{context, summarise};
@@ -48,6 +53,94 @@ pub struct JobPlan {
     /// The effective templates at job start (F11-FR3).
     pub templates: Vec<crate::templates::Template>,
     pub budgets: jobs::Budgets,
+    /// The rates in force at job start, pricing each usage record once (F16-FR3).
+    pub rates: RateTable,
+    /// Where the summarise step gets the note regions to recognise (F19-FR6).
+    pub notes: crate::notes_text::NotesSource,
+    /// F18-FR12 / OQ25: send a linked meeting's calendar event with the minutes call.
+    pub event_block: bool,
+    /// F15-FR9 / FR10: where a near-live meeting's chunk files are, and the lock its chunks are
+    /// sent under; `None` sends segments only (F5's path).
+    pub chunks: Option<ChunkCtx>,
+}
+
+/// F15-FR9: what a job needs to send a near-live meeting's chunks.
+#[derive(Clone, Debug)]
+pub struct ChunkCtx {
+    /// `<filesDir>/chunks`.
+    pub root: PathBuf,
+    /// Held while the chunks are sent: an in-flight near-live chunk finishes first (INV11).
+    pub lane: std::sync::Arc<tokio::sync::Mutex<()>>,
+}
+
+/// F16-FR2: the usage records of calls whose result is not yet written. Each call that got a
+/// reply adds one; the next sidecar write (the result's, or the failure's) takes them all, so a
+/// record lands in the same write as what its call produced.
+pub(crate) struct Spent<'a> {
+    tz: &'a dyn LocalTz,
+    rates: &'a RateTable,
+    records: Mutex<Vec<UsageRecord>>,
+}
+
+impl<'a> Spent<'a> {
+    pub(crate) fn new(tz: &'a dyn LocalTz, rates: &'a RateTable) -> Spent<'a> {
+        Spent {
+            tz,
+            rates,
+            records: Mutex::default(),
+        }
+    }
+
+    /// Record what `r`'s reply reported, if a reply arrived (OQ16: a failed request reports
+    /// nothing and costs nothing here). `segment` is the segment transcribed.
+    pub(crate) fn note(&self, kind: Kind, segment: Option<usize>, r: &Result<Replied, CallError>) {
+        self.note_at(kind, segment, None, r);
+    }
+
+    /// `note` for near-live chunk `chunk` (F15-FR5).
+    pub(crate) fn note_chunk(&self, kind: Kind, chunk: u32, r: &Result<Replied, CallError>) {
+        self.note_at(kind, None, Some(chunk), r);
+    }
+
+    fn note_at(
+        &self,
+        kind: Kind,
+        segment: Option<usize>,
+        chunk: Option<u32>,
+        r: &Result<Replied, CallError>,
+    ) {
+        let m = match r {
+            Ok(x) => &x.measured,
+            Err(e) => match &e.spent {
+                Some(m) => m.as_ref(),
+                None => return,
+            },
+        };
+        let now = chrono::Utc::now().timestamp_millis();
+        let at = tz::local_at(self.tz, now)
+            .map(|t| tz::rfc3339(&t))
+            .unwrap_or_default();
+        let mut rec = UsageRecord::new(kind, m, at, self.rates);
+        rec.segment = segment;
+        rec.chunk = chunk;
+        self.lock().push(rec);
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<UsageRecord>> {
+        self.records.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Every record not yet written, oldest first.
+    pub(crate) fn take(&self) -> Vec<UsageRecord> {
+        std::mem::take(&mut *self.lock())
+    }
+
+    /// Records whose write failed, back in front of any noted since.
+    pub(crate) fn put_back(&self, mut recs: Vec<UsageRecord>) {
+        let mut g = self.lock();
+        recs.append(&mut g);
+        *g = recs;
+    }
 }
 
 /// Why a job stopped without a final status of its own.
@@ -119,7 +212,7 @@ async fn run_transcribe(
             "no transcribe provider".into(),
         )));
     };
-    let (dir, pending, tid, no_audio) = locked(lock, || {
+    let (dir, pending, tid, no_audio, live) = locked(lock, || {
         lib.update(id, |sc, dir| {
             let event = if again {
                 Event::TranscribeAgain
@@ -132,6 +225,14 @@ async fn run_transcribe(
                 for s in &mut sc.segments {
                     s.text = None;
                 }
+                // F15-FR10: a near-live meeting is sent again chunk by chunk, over the ranges it
+                // was recorded in (re-cut from the segments), so line times and marks stay put.
+                for c in &mut sc.chunks {
+                    c.state = crate::sidecar::ChunkState::Pending;
+                    c.text = None;
+                    c.attempts = 0;
+                    c.last_error = None;
+                }
             }
             sc.error = None;
             sc.template_id
@@ -142,15 +243,50 @@ async fn run_transcribe(
                 extra: Default::default(),
             });
             let none = sc.segments.is_empty();
-            Ok((dir.to_path_buf(), pending(sc), sc.template_id.clone(), none))
+            // F15-FR9: a near-live meeting is sent as its chunks, with the model fixed at Record
+            // when its provider is still the one chosen (F5-FR10).
+            let live = (!sc.chunks.is_empty()).then(|| {
+                sc.live
+                    .as_ref()
+                    .filter(|l| l.provider == key.provider)
+                    .and_then(|l| l.model.clone())
+            });
+            Ok((
+                dir.to_path_buf(),
+                pending(sc),
+                sc.template_id.clone(),
+                none,
+                live,
+            ))
         })
     })
     .map_err(JobError::NotStarted)?;
-    let fail = |msg: String| finish(lib, lock, id, Event::TranscribeFailed, Some(msg));
+    let spent = Spent::new(lib.tz, &plan.rates);
+    let fail = |msg: String| {
+        let event = Event::TranscribeFailed;
+        finish_spent(lib, lock, id, event, Some(msg), &spent)
+    };
     if no_audio {
         return fail(NO_AUDIO.into());
     }
     let vocabulary = vocabulary(plan, tid.as_deref().unwrap_or_default());
+    if let (Some(fixed), Some(cx)) = (live, &plan.chunks) {
+        let model = fixed.unwrap_or_else(|| model.clone());
+        ran_with(lib, lock, id, key, &model)?;
+        let call = live::ChunkCall {
+            http: &plan.http,
+            endpoints: &plan.endpoints,
+            key,
+            model: &model,
+            budgets: plan.budgets,
+            rates: &plan.rates,
+            vocabulary,
+        };
+        if let Some(msg) = live::drain_job(lib, lock, id, cx, &call, cancel).await? {
+            return fail(msg);
+        }
+        return transcribed(lib, lock, id, plan, cancel).await;
+    }
     let mut model = model.clone();
     let mut fallback = plan.transcribe_fallback.clone().filter(|f| *f != model);
     for seg in pending {
@@ -160,14 +296,15 @@ async fn run_transcribe(
         let bytes = match read_segment(&dir, &seg, key) {
             Ok(Audio::Send(b)) => b,
             Ok(Audio::Skip(text, flag)) => {
-                store(lib, lock, id, &seg, text.to_owned(), Some(flag))?;
+                store(lib, lock, id, &seg, text.to_owned(), Some(flag), &spent)?;
                 continue;
             }
             Err(msg) => return fail(msg),
         };
         let budget = plan.budgets.transcribe(seg.duration_ms);
+        let index = seg.index;
         let call = |m: String| {
-            let (bytes, vocabulary) = (&bytes, &vocabulary);
+            let (bytes, vocabulary, spent) = (&bytes, &vocabulary, &spent);
             let file = seg.file.clone();
             async move {
                 let f = || {
@@ -176,8 +313,14 @@ async fn run_transcribe(
                         file_name: file.clone(),
                         prompt: vocabulary.clone(),
                         duration_ms: seg.duration_ms,
+                        empty_ok: false,
                     };
-                    providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio)
+                    let fut = providers::transcribe(&plan.http, &plan.endpoints, key, &m, audio);
+                    async move {
+                        let r = fut.await;
+                        spent.note(Kind::Transcribe, Some(index), &r);
+                        r
+                    }
                 };
                 jobs::with_retry(cancel, budget, f).await
             }
@@ -193,11 +336,23 @@ async fn run_transcribe(
             r = call(model.clone()).await;
         }
         let text = match r {
-            Ok(t) => t,
+            Ok(t) => t.text,
             Err(e) => return fail(e.detail),
         };
-        store(lib, lock, id, &seg, text, None)?;
+        store(lib, lock, id, &seg, text, None, &spent)?;
     }
+    transcribed(lib, lock, id, plan, cancel).await
+}
+
+/// Every segment (or chunk) has its text: `transcribed`, the transcript file, then the summary
+/// (F5-FR2/FR11; for a near-live meeting the one minutes call at Stop, D15).
+async fn transcribed(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    plan: &JobPlan,
+    cancel: &Cancel,
+) -> Result<Phase, JobError> {
     let p = finish(lib, lock, id, Event::AllSegmentsText, None)?;
     // S4: the transcript file exists as soon as there is a transcript (summary empty); a
     // summary re-renders it. A failure here is reported by the summary's own write.
@@ -238,8 +393,9 @@ fn ran_with(
     .map_err(JobError::Storage)
 }
 
-/// Store `text` (and `flag`) on the segment. The sidecar is re-read: only the segment the job
-/// took is changed, and only if it is still the same file.
+/// Store `text` (and `flag`) on the segment, with the usage records of the calls that produced
+/// it (F16-FR2). The sidecar is re-read: only the segment the job took is changed, and only if
+/// it is still the same file.
 fn store(
     lib: &Library<'_>,
     lock: &Mutex<()>,
@@ -247,9 +403,12 @@ fn store(
     seg: &Pending,
     text: String,
     flag: Option<SegmentFlag>,
+    spent: &Spent<'_>,
 ) -> Result<(), JobError> {
-    locked(lock, || {
+    let recs = spent.take();
+    let r = locked(lock, || {
         lib.update(id, |sc, _| {
+            sc.usage.extend(recs.iter().cloned().map(UsageEntry::from));
             if let Some(s) = sc
                 .segments
                 .get_mut(seg.index)
@@ -264,16 +423,24 @@ fn store(
             }
             Ok(())
         })
-    })
-    .map_err(JobError::Storage)
+    });
+    if r.is_err() {
+        spent.put_back(recs);
+    }
+    r.map_err(JobError::Storage)
 }
 
 /// F5-FR1: the meeting's template vocabulary as the transcription hint ("Priya, Supernote");
 /// General's when the template is gone, empty when there is none.
 fn vocabulary(plan: &JobPlan, template_id: &str) -> String {
-    let t = plan.templates.iter().find(|t| t.id == template_id);
+    vocabulary_of(&plan.templates, template_id)
+}
+
+/// The vocabulary hint of `template_id` among `templates` (General's when it is gone).
+pub fn vocabulary_of(templates: &[crate::templates::Template], template_id: &str) -> String {
+    let t = templates.iter().find(|t| t.id == template_id);
     let t = t.or_else(|| {
-        plan.templates
+        templates
             .iter()
             .find(|t| t.id == crate::templates::DEFAULT_ID)
     });
@@ -334,6 +501,19 @@ pub(crate) fn finish(
     locked(lock, || apply(lib, id, event, error)).map_err(JobError::Storage)
 }
 
+/// `finish`, writing the usage records `spent` holds in the same write (F16-FR2).
+pub(crate) fn finish_spent(
+    lib: &Library<'_>,
+    lock: &Mutex<()>,
+    id: &str,
+    event: Event,
+    error: Option<String>,
+    spent: &Spent<'_>,
+) -> Result<Phase, JobError> {
+    let recs = spent.take();
+    locked(lock, || apply_with(lib, id, event, error, recs)).map_err(JobError::Storage)
+}
+
 /// `finish` without taking the lock (the caller holds it).
 pub(crate) fn apply(
     lib: &Library<'_>,
@@ -341,10 +521,21 @@ pub(crate) fn apply(
     event: Event,
     error: Option<String>,
 ) -> Result<Phase, LibError> {
+    apply_with(lib, id, event, error, Vec::new())
+}
+
+fn apply_with(
+    lib: &Library<'_>,
+    id: &str,
+    event: Event,
+    error: Option<String>,
+    recs: Vec<UsageRecord>,
+) -> Result<Phase, LibError> {
     lib.update(id, |sc, _| {
         let p = status::next(library::phase(sc), event)?;
         library::set_phase(sc, p);
         sc.error = error;
+        sc.usage.extend(recs.into_iter().map(UsageEntry::from));
         Ok(p)
     })
 }
@@ -358,6 +549,13 @@ pub fn marker(ms: u64) -> String {
 /// F5-FR2: each segment as `(marker, text)`, in segment order. A segment with no text yet, or
 /// empty text, reads as `(no speech detected)` (EC6).
 pub fn paragraphs(sc: &Sidecar) -> Vec<(String, String)> {
+    // F15-FR6: a near-live meeting's transcript is its chunks', one paragraph each.
+    if !sc.chunks.is_empty() {
+        return crate::chunk::paragraphs(sc)
+            .into_iter()
+            .map(|p| (marker(p.at_ms), p.text))
+            .collect();
+    }
     sc.segments
         .iter()
         .map(|s| {

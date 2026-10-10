@@ -70,6 +70,24 @@ Your five most recent meetings and every open to-do sit side by side. Tick a to-
 - Recording continues with the screen off or another app open. A notification shows the elapsed time and a Stop button.
 - If the microphone is unplugged or the headset drops out, the recording stops, keeps what it captured, and notes "mic disconnected".
 
+### Writing notes
+I wanted to write while I listen, and later tap a line of my handwriting to hear what was being said as I wrote it. Supernote's own Notes app can't tell me when a stroke was written, so I write on the meeting's own page in Meetings. Every stroke I write while recording carries its time on the recording.
+
+- **Notes | Minutes.** The meeting page has two tabs. A meeting I'm recording opens on **Notes**; an earlier one opens on **Minutes**. While recording, the top right shows the timer.
+- **The canvas has no edges.** I write with the pen. A finger never draws: I drag with one finger to move around and pinch to zoom from 5% to 2000%. The pill at the top left has **Fit**, **100%**, **50%** and **25%**, and **MAP** opens the minimap, which shows all my ink and where I am; I tap it, or drag its rectangle, to go there. A resting palm leaves no mark.
+- **The tool bar** sits on the right edge (or the left, in Settings → Notes) and never covers the page:
+  - **Pen** writes, with Supernote's own pen engine, so it keeps up like native notes. Turning the pen over erases, whatever tool is chosen.
+  - **Highlighter** draws a light band, **Eraser** removes whole strokes it touches, and **Lasso** circles ink so I can drag it somewhere else.
+  - **Undo** and **Redo** step back and forward; an eraser sweep or a lasso move is one step.
+  - **Listen** (the speaker) is for afterwards: with it chosen, tapping my ink, with the pen or a finger, plays the recording from two seconds before I wrote it, and the transcript strip shows the line being said. It is off while recording.
+  - **· · ·** has Focus (hides the strip), Fit and a full refresh of the screen. **?** shows the hints again.
+  - **› ‹** folds the bar into a thin strip that keeps the timer, **Mark** and **Stop**; the choice sticks for every meeting.
+  - **Mark** stamps the moment and puts a small ◆ beside my last stroke; marks show in the transcript and go with the minutes. **Stop** ends the recording.
+- **The strip** along the bottom shows the last three lines of the transcript as they arrive, about twice a minute. Tapping it opens the whole transcript over the lower half; tapping again closes it.
+- **The Minutes tab** fills in once, when I stop: the summary, the decisions and the to-dos, from the transcript, my marks and (if I agree the first time) images of my notes. I can tap the summary, a decision or a section to correct it, and my corrections survive **Summarise again**. At the end there is space to write on the minutes themselves.
+- An empty page opens with hand-drawn hints pointing at each control; touching the page or choosing a tool puts them away.
+- My ink is saved beside the meeting in `<meeting>.notes/`, so Partner syncs it with everything else. Nothing the AI returns ever changes it.
+
 ### Transcripts, summaries and to-dos
 - **Transcribe** picks a transcription model your account can use, and stores each segment's text as it arrives. A cancelled or interrupted job resumes where it stopped.
 - **Summarise again** re-runs the summary with the current template. To-dos you have ticked stay ticked, even if the model rewords them. **Transcribe again** redoes the transcript.

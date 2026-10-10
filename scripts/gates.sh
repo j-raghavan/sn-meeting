@@ -26,6 +26,8 @@ step "cargo clippy (jni-bridge)";    cargo clippy --all-targets --features jni-b
 # --all-targets unifies dev-dependency features into the library; build it alone too, as
 # buildApk.sh does, so a feature only dev-dependencies enable can't hide.
 step "cargo build (library alone)";  cargo build -p meeting-core --lib --features jni-bridge
+# F15-FR1: the MP4 writer's files are checked with ffprobe/ffmpeg here (CI's Rust job has none).
+export MEETINGS_REQUIRE_FFMPEG=1
 step "cargo test";                   cargo test -p meeting-core
 step "cargo llvm-cov (>= 97% lines)"
 cargo llvm-cov -p meeting-core --fail-under-lines 97 --ignore-filename-regex 'meeting-core/src/jni\.rs$'

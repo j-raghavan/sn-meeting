@@ -29,6 +29,8 @@ data class MeetingSummary(
     val id: String, val startedAt: String, val startedAtMs: Long, val durationMs: Long?,
     val status: Status, val failedAt: FailedAt?, val title: String?, val segmentCount: Int,
     val openTodoCount: Int, val source: Source, val folder: String,
+    /** F16-FR5: "≈ $0.41", "≈ $0.41+" or "—", from the core. */
+    val cost: String = "—",
 ) {
     companion object {
         fun from(o: JSONObject): MeetingSummary? { return MeetingSummary(
@@ -43,6 +45,7 @@ data class MeetingSummary(
             openTodoCount = o.int("openTodoCount") ?: 0,
             source = Source.of(o.str("source")),
             folder = o.strOr("folder", ""),
+            cost = Spend.label(o.obj("spend")),
         ) }
     }
 }
@@ -79,6 +82,16 @@ data class Sidecar(
     val transcribeRun: ProviderRun?, val summariseRun: ProviderRun?,
     val summary: String?, val decisions: List<String>, val sections: List<Section>,
     val mic: MicRef?, val segments: List<Segment>, val error: String?, val note: String?, val todos: List<Todo>,
+    /** F18-FR12: the linked event's key and title; null when unscheduled. */
+    val eventKey: String? = null, val eventTitle: String? = null,
+    /** F15: recorded by the near-live recorder (it has `live`, or chunks). */
+    val nearLive: Boolean = false,
+    /** F15-FR9: its chunks, and how many have their text (or are missing). */
+    val chunkTotal: Int = 0, val chunksDone: Int = 0,
+    /** F15-FR11, by time. */
+    val marks: List<Mark> = emptyList(),
+    /** F17-FR5: the meeting has notes (its sidecar names the notes folder). */
+    val hasNotes: Boolean = false,
 ) {
     companion object {
         private fun run(o: JSONObject?): ProviderRun? =
@@ -104,6 +117,13 @@ data class Sidecar(
             todos = o.arr("todos").mapObj {
                 Todo(it.str("id") ?: return@mapObj null, it.strOr("text", ""), it.str("owner"), it.str("due"), it.bool("done") ?: false)
             },
+            eventKey = o.obj("event")?.str("eventKey"),
+            eventTitle = o.obj("event")?.str("title"),
+            nearLive = o.has("live") || (o.arr("chunks")?.length() ?: 0) > 0,
+            chunkTotal = o.arr("chunks")?.length() ?: 0,
+            chunksDone = o.arr("chunks").mapObj { c -> c.str("state")?.takeIf { it != "pending" } }.size,
+            marks = o.arr("marks").mapObj(Mark::from).sortedBy { it.atMs },
+            hasNotes = o.obj("notes") != null,
         ) }
 
         /** nativeTranscribe / nativeSummarise: `{meeting: <sidecar>}` once a job ran. */
@@ -112,7 +132,16 @@ data class Sidecar(
 }
 
 /** nativeGetMeeting. */
-data class MeetingView(val meeting: Sidecar, val source: Source, val dir: String, val segmentPaths: List<String>, val transcriptPath: String?) {
+data class MeetingView(
+    val meeting: Sidecar, val source: Source, val dir: String, val segmentPaths: List<String>, val transcriptPath: String?,
+    /** F16-FR5: the meeting's cost so far, from the core. */
+    val cost: String = "—",
+    /** F15-FR6: a near-live meeting's transcript, one paragraph per chunk, as segments to page. */
+    val paragraphs: List<Segment> = emptyList(),
+) {
+    /** What the transcript pages show: the chunks' paragraphs when there are any, else the segments. */
+    val transcript: List<Segment> get() = paragraphs.ifEmpty { meeting.segments }
+
     companion object {
         fun from(o: JSONObject): MeetingView? { return MeetingView(
             meeting = o.obj("meeting")?.let(Sidecar::from) ?: return null,
@@ -120,6 +149,8 @@ data class MeetingView(val meeting: Sidecar, val source: Source, val dir: String
             dir = o.strOr("dir", ""),
             segmentPaths = o.arr("segmentPaths").strings(),
             transcriptPath = o.str("transcriptPath"),
+            cost = Spend.label(o.obj("spend")),
+            paragraphs = o.arr("paragraphs").mapObj { Segment(null, it.long("atMs") ?: 0, null, it.str("text"), null) },
         ) }
     }
 }
@@ -143,16 +174,27 @@ data class SegmentAdded(val index: Int, val path: String) {
 }
 
 /** nativeRecover. `noAudio` is omitted by the core when empty. */
-data class Recovery(val recovered: List<String>, val measure: List<ToMeasure>, val flagged: List<Flagged>, val noAudio: List<String>) {
-    data class ToMeasure(val id: String, val index: Int, val path: String)
+/** [resume]: F15-FR9 / F15-AC8, near-live meetings whose catch-up the Stop job finishes. */
+data class Recovery(
+    val recovered: List<String>, val measure: List<ToMeasure>, val flagged: List<Flagged>, val noAudio: List<String>,
+    val resume: List<String> = emptyList(),
+) {
+    /** [chunks]: F15-FR8, the segment's finished chunk files, to rebuild it from if it can't be read. */
+    data class ToMeasure(val id: String, val index: Int, val path: String, val chunks: List<Piece> = emptyList())
+    /** A chunk file and how much of its start the previous chunk already holds. */
+    data class Piece(val path: String, val skipMs: Long)
     data class Flagged(val id: String, val index: Int, val flag: String)
 
     companion object {
         fun from(o: JSONObject): Recovery = Recovery(
             o.arr("recovered").strings(),
-            o.arr("measure").mapObj { ToMeasure(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.str("path") ?: return@mapObj null) },
+            o.arr("measure").mapObj {
+                ToMeasure(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.str("path") ?: return@mapObj null,
+                    it.arr("chunks").mapObj { p -> Piece(p.str("path") ?: return@mapObj null, p.long("skipMs") ?: 0) })
+            },
             o.arr("flagged").mapObj { Flagged(it.str("id") ?: return@mapObj null, it.int("index") ?: return@mapObj null, it.strOr("flag", "")) },
             o.arr("noAudio").strings(),
+            o.arr("resume").strings(),
         )
     }
 }

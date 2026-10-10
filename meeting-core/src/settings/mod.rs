@@ -48,9 +48,23 @@ pub struct Settings {
     pub default_template: String,
     /// Security: the one-time "audio is sent to <provider>" notice, per provider.
     pub notice_shown: NoticeShown,
+    /// F15-FR12: the one-time near-live notice ("Audio is sent to OpenAI while you record"),
+    /// per provider, answered before the first near-live recording to it.
+    pub live_notice_shown: NoticeShown,
     pub debug: DebugSettings,
+    /// F15 / D14: which recorder a new meeting uses. A bad value in the file reads as Standard.
+    #[serde(deserialize_with = "lenient_recorder")]
+    pub recorder: Recorder,
     /// F14-FR8: the in-app updater's choices (inkread keeps these in its AppSettings).
     pub updates: UpdateSettings,
+    /// F16-FR4: the user's rate entries, kept as written so a bad one is ignored on its own
+    /// (F16-FR8). Changed only through `nativeSetRates`, which validates them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub rates: Vec<Value>,
+    /// F18: the calendar's refresh interval and rules.
+    pub calendar: CalendarSettings,
+    /// F17: the notes tool bar's side and state, Focus, and whether notes go with the minutes.
+    pub notes: NotesSettings,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -66,11 +80,163 @@ impl Default for Settings {
             summarise: RoleSettings::default(),
             default_template: DEFAULT_TEMPLATE.into(),
             notice_shown: NoticeShown::default(),
+            live_notice_shown: NoticeShown::default(),
             debug: DebugSettings::default(),
+            recorder: Recorder::Standard,
             updates: UpdateSettings::default(),
+            rates: Vec::new(),
+            calendar: CalendarSettings::default(),
+            notes: NotesSettings::default(),
             extra: Extra::new(),
         }
     }
+}
+
+/// F15 / ADR D14: the recorder behind `RecorderPort`. **Standard** (the default) is today's
+/// `MediaRecorder` path, transcribed after Stop. **Near-live** is D14's `AudioRecord` → AAC →
+/// two MP4 writers pipeline (the core's, `mp4.rs`), which writes ~30 s chunks and transcribes them while recording. It
+/// stays opt-in until the owner's device spike accepts D14 (R13).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Recorder {
+    #[default]
+    #[serde(rename = "standard")]
+    Standard,
+    #[serde(rename = "near-live")]
+    NearLive,
+}
+
+fn lenient_recorder<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Recorder, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+
+/// F17-FR2: the side the notes tool bar docks to. There is no top (OQ13).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dock {
+    #[default]
+    Right,
+    Left,
+}
+
+/// F17-FR2: the tool bar expanded (every tool) or collapsed to an edge strip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sidebar {
+    #[default]
+    Expanded,
+    Collapsed,
+}
+
+fn lenient_enum<'de, D: serde::Deserializer<'de>, T: Default + serde::de::DeserializeOwned>(
+    d: D,
+) -> Result<T, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+
+/// F17's settings (`settings.json` → `notes`): the bar's side and state, Focus mode, whether
+/// the notes go with the minutes (F17-FR9, on by default; OQ20) and that one-time notice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NotesSettings {
+    #[serde(deserialize_with = "lenient_enum")]
+    pub dock: Dock,
+    #[serde(deserialize_with = "lenient_enum")]
+    pub sidebar: Sidebar,
+    pub focus: bool,
+    pub use_for_minutes: bool,
+    /// OQ20: "images of your notes go to <provider> at Stop", answered per provider.
+    pub notice_shown: NoticeShown,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for NotesSettings {
+    fn default() -> Self {
+        NotesSettings {
+            dock: Dock::Right,
+            sidebar: Sidebar::Expanded,
+            focus: false,
+            use_for_minutes: true,
+            notice_shown: NoticeShown::default(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// F18-FR4's refresh intervals, in minutes: 15 min / 30 min / 1 h / 4 h / manual only (0).
+pub const REFRESH_CHOICES: [u32; 5] = [15, 30, 60, 240, 0];
+pub const DEFAULT_REFRESH_MIN: u32 = 30;
+
+/// F18's settings (`settings.json` → `calendar`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CalendarSettings {
+    /// Minutes between automatic refreshes while Meetings is open; 0 = manual only (F18-FR4).
+    pub refresh_min: u32,
+    /// F18-FR9: a recording started during an event links to it (on by default).
+    pub link_by_time: bool,
+    /// OQ25: a linked meeting's event (title, time, attendees' names, agenda) goes with the
+    /// minutes call (on by default).
+    pub event_in_minutes: bool,
+    /// F18-FR8: the template an event's title picks, first match wins (case-insensitive).
+    pub template_rules: Vec<TemplateRule>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for CalendarSettings {
+    fn default() -> Self {
+        CalendarSettings {
+            refresh_min: DEFAULT_REFRESH_MIN,
+            link_by_time: true,
+            event_in_minutes: true,
+            template_rules: default_template_rules(),
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// One keyword rule: an event whose title contains `keyword` records with `template_id`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateRule {
+    pub keyword: String,
+    pub template_id: String,
+}
+
+/// The most rules Settings keeps, and the longest keyword.
+pub const MAX_TEMPLATE_RULES: usize = 50;
+pub const MAX_KEYWORD: usize = 64;
+
+/// F18-FR8's defaults.
+pub fn default_template_rules() -> Vec<TemplateRule> {
+    [
+        ("1:1", "one-on-one"),
+        ("1-1", "one-on-one"),
+        ("one on one", "one-on-one"),
+        ("stand-up", "standup"),
+        ("standup", "standup"),
+        ("daily", "standup"),
+        ("interview", "interview"),
+        ("lecture", "lecture"),
+        ("talk", "lecture"),
+    ]
+    .into_iter()
+    .map(|(k, t)| TemplateRule {
+        keyword: k.into(),
+        template_id: t.into(),
+    })
+    .collect()
+}
+
+fn rule_ok(r: &TemplateRule) -> bool {
+    let k = r.keyword.trim();
+    !k.is_empty()
+        && k.chars().count() <= MAX_KEYWORD
+        && !k.chars().any(char::is_control)
+        && is_template_id(&r.template_id)
 }
 
 /// The remembered mic: `"auto"` (USB first, then Bluetooth), `"usb:<device name>"` or
@@ -164,6 +330,17 @@ pub struct NoticeShown {
     pub anthropic: bool,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+impl NoticeShown {
+    /// Whether the notice was answered for `p`.
+    pub fn shown(&self, p: Provider) -> bool {
+        match p {
+            Provider::OpenAi => self.openai,
+            Provider::Gemini => self.gemini,
+            Provider::Anthropic => self.anthropic,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -313,6 +490,11 @@ fn sanitised(mut s: Settings) -> Settings {
     if !skip_version_ok(&s.updates.skip_version) {
         s.updates.skip_version.clear();
     }
+    if !REFRESH_CHOICES.contains(&s.calendar.refresh_min) {
+        s.calendar.refresh_min = DEFAULT_REFRESH_MIN;
+    }
+    s.calendar.template_rules.retain(rule_ok);
+    s.calendar.template_rules.truncate(MAX_TEMPLATE_RULES);
     for role in Role::ALL {
         let rs = s.role_mut(role);
         if rs.provider.is_some_and(|p| !role.providers().contains(&p)) {
@@ -399,7 +581,8 @@ pub struct Ctx<'a> {
 }
 
 /// Merge-patch `patch` onto `current` and validate. `schema` and `previousFolders` are
-/// core-owned: they are ignored in a patch.
+/// core-owned, and `rates` has its own validated call (`nativeSetRates`): they are ignored in a
+/// patch.
 pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Settings, SettingsError> {
     let Some(obj) = patch.as_object() else {
         return Err(SettingsError {
@@ -410,6 +593,7 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
     let mut patch = obj.clone();
     patch.remove("schema");
     patch.remove("previousFolders");
+    patch.remove("rates");
     if let Some(t) = patch.get("defaultTemplate").filter(|t| !t.is_null())
         && !t.as_str().is_some_and(is_template_id)
     {
@@ -421,6 +605,11 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
             .ok_or_else(|| err("mic", "mic must be a string"))?;
         MicChoice::try_from(m.to_owned()).map_err(|e| err("mic", e))?;
     }
+    if let Some(r) = patch.get("recorder").filter(|r| !r.is_null())
+        && serde_json::from_value::<Recorder>(r.clone()).is_err()
+    {
+        return Err(err("recorder", "recorder must be standard or near-live"));
+    }
     if let Some(v) = patch
         .get("updates")
         .and_then(|u| u.get("skipVersion"))
@@ -428,6 +617,38 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
         && !v.as_str().is_some_and(skip_version_ok)
     {
         return Err(err("updates.skipVersion", "invalid version"));
+    }
+    if let Some(m) = patch
+        .get("calendar")
+        .and_then(|c| c.get("refreshMin"))
+        .filter(|v| !v.is_null())
+        && !m
+            .as_u64()
+            .is_some_and(|m| REFRESH_CHOICES.iter().any(|c| u64::from(*c) == m))
+    {
+        return Err(err(
+            "calendar.refreshMin",
+            "refresh every 15, 30, 60 or 240 minutes, or 0 for manual only",
+        ));
+    }
+    if let Some(d) = patch
+        .get("notes")
+        .and_then(|n| n.get("dock"))
+        .filter(|v| !v.is_null())
+        && serde_json::from_value::<Dock>(d.clone()).is_err()
+    {
+        return Err(err("notes.dock", "the tool bar docks right or left"));
+    }
+    if let Some(d) = patch
+        .get("notes")
+        .and_then(|n| n.get("sidebar"))
+        .filter(|v| !v.is_null())
+        && serde_json::from_value::<Sidebar>(d.clone()).is_err()
+    {
+        return Err(err(
+            "notes.sidebar",
+            "the tool bar is expanded or collapsed",
+        ));
     }
     let mut v = serde_json::to_value(current).map_err(|e| SettingsError {
         field: None,
@@ -441,11 +662,40 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
     for role in Role::ALL {
         check_role(current, &mut next, role, ctx)?;
     }
+    if next.calendar.template_rules != current.calendar.template_rules {
+        check_rules(&mut next.calendar.template_rules, ctx)?;
+    }
     if next.save_folder != current.save_folder {
         next.save_folder = validate_save_folder(ctx.storage_root, &next.save_folder)?;
         next.previous_folders = folder::remember(current, &next.save_folder);
     }
     Ok(next)
+}
+
+/// F18-FR8 / FR13: keyword rules as edited in Settings → Calendar: trimmed, each a keyword and
+/// a template id, at most [`MAX_TEMPLATE_RULES`]; a link (or a cut of one) is never kept as a
+/// keyword (INV15).
+fn check_rules(rules: &mut [TemplateRule], ctx: &Ctx<'_>) -> Result<(), SettingsError> {
+    if rules.len() > MAX_TEMPLATE_RULES {
+        return Err(err("calendar.templateRules", "at most 50 rules"));
+    }
+    let secrets: Vec<&str> = ctx.secrets.iter().map(String::as_str).collect();
+    for r in rules.iter_mut() {
+        r.keyword = r.keyword.trim().to_owned();
+        if crate::scrub::contains_secret(&r.keyword, &secrets) {
+            return Err(err(
+                "calendar.templateRules",
+                "that is a link or a key, not a keyword",
+            ));
+        }
+        if !rule_ok(r) {
+            return Err(err(
+                "calendar.templateRules",
+                "each rule needs a keyword (up to 64 characters) and a template",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// F10-FR4: a role's provider must suit the role, and a newly chosen one must have a usable

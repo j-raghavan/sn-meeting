@@ -11,6 +11,7 @@ import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import dev.jraghavan.snmeeting.CoreJobs
+import dev.jraghavan.snmeeting.LiveJobs
 import dev.jraghavan.snmeeting.NativeBridge
 import dev.jraghavan.snmeeting.model.Begun
 import dev.jraghavan.snmeeting.model.CoreJson
@@ -190,20 +191,39 @@ object RetrieverDuration : DurationPort {
  * RecorderCore over NativeBridge on CoreJobs' thread; results back on the recording handler, or
  * on the worker itself once that handler's thread has quit (S12).
  */
-class CoreRecorderBridge(private val h: Handler, private val duration: DurationPort, private val guard: Safely? = null) : RecorderCore {
+class CoreRecorderBridge(
+    private val h: Handler, private val duration: DurationPort, private val guard: Safely? = null,
+    /** F18-FR8: the event "● Record" named; the meeting is linked to it. */
+    private val eventKey: String? = null,
+    /** F15: null for the Standard recorder; near-live: whether chunks are sent while recording (F15-FR12). */
+    private val live: Boolean? = null,
+) : RecorderCore {
     private fun <T> call(work: () -> T, done: (T) -> Unit) = CoreJobs.exec {
         val v = work()
         postOrRun(h::post) { if (guard != null) guard.run("core reply") { done(v) } else done(v) } // the recorder thread may have quit (S12)
     }
 
     override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) =
-        call({ CoreJson.obj(NativeBridge.nativeBeginMeeting(startedAtMs, micJson, audioJson), Begun::from) }, done)
+        call({
+            val reply = if (eventKey == null) NativeBridge.nativeBeginMeeting(startedAtMs, micJson, audioJson)
+                else NativeBridge.nativeBeginMeetingForEvent(startedAtMs, micJson, audioJson, eventKey)
+            CoreJson.obj(reply, Begun::from).also { r ->
+                // F15-FR5: who transcribes the chunks is fixed now, before the first one exists.
+                if (live != null && r is CoreResult.Ok) NativeBridge.nativeStartLive(r.value.id, live)
+            }
+        }, done)
 
     override fun addSegment(id: String, path: String, startOffsetMs: Long, done: (CoreResult<SegmentAdded>) -> Unit) =
         call({ CoreJson.obj(NativeBridge.nativeAddSegment(id, path, startOffsetMs), SegmentAdded::from) }, done)
 
     override fun closeSegment(id: String, index: Int, path: String, measure: Boolean, fallbackMs: Long) = CoreJobs.exec {
         NativeBridge.nativeCloseSegment(id, index, (if (measure) measured(duration, path) else null) ?: fallbackMs)
+    }
+
+    /** F15-FR5: queued in order with the segment calls, so a chunk is known before its segment closes. */
+    override fun chunkReady(id: String, c: ChunkDone) = CoreJobs.exec {
+        NativeBridge.nativeChunkReady(id, c.index, c.path, c.startOffsetMs, c.durationMs, c.speechMs)
+        if (live == true) LiveJobs.lane.kick(id) // recorded first, so the lane sees it
     }
 
     override fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit) = call({

@@ -8,12 +8,19 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+mod chunks;
 mod edit;
 mod list;
 mod recover;
+pub(crate) use chunks::remove_all as remove_chunks;
+pub use chunks::{
+    ChunkIn, ChunkReadied, MAX_CHUNK_MS, MAX_CHUNKS, Piece, ToCut, chunk_dir, chunk_file_name,
+    chunk_path,
+};
 pub use edit::TodoRef;
+pub(crate) use list::stamp_of;
 pub use list::{MeetingSummary, MeetingView, Source};
-pub use recover::{Flagged, Measure, Recovery};
+pub use recover::{AUDIO_LOST, Flagged, Measure, Recovery};
 
 const MAX_MIC_NAME: usize = 200;
 const MAX_CODEC: usize = 32;
@@ -287,8 +294,10 @@ impl Library<'_> {
         if d == 0 && seg.flag.is_none() {
             seg.flag = Some(SegmentFlag::Empty);
         }
+        crate::chunk::fill_segments(&mut sc); // F15-FR6
         if sc.status != Status::Recording {
             measured(&mut sc, index);
+            recover::mark_lost(&mut sc); // F15-FR8: the last readable segment is gone
         }
         sidecar::write(&dir, &sc)?;
         Ok(())
@@ -354,6 +363,11 @@ fn clean_note(n: &str) -> String {
         .map(|c| if c.is_control() { ' ' } else { c })
         .collect();
     one_line.trim().chars().take(MAX_NOTE).collect()
+}
+
+#[cfg(test)]
+pub(crate) fn open_segment_for_tests(file: &str, start_offset_ms: u64) -> Segment {
+    open_segment(file.to_owned(), start_offset_ms)
 }
 
 pub(crate) fn open_segment(file: String, start_offset_ms: u64) -> Segment {

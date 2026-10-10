@@ -7,15 +7,26 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.View
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.CalendarFormat
+import dev.jraghavan.snmeeting.model.CalendarLink
+import dev.jraghavan.snmeeting.model.CalendarPatch
+import dev.jraghavan.snmeeting.model.CalendarPrefs
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.IndexStatus
+import dev.jraghavan.snmeeting.model.SearchModel
 import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
 import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
+import dev.jraghavan.snmeeting.model.RatesView
+import dev.jraghavan.snmeeting.model.Reprice
+import dev.jraghavan.snmeeting.model.Spend
+import dev.jraghavan.snmeeting.model.SpendReport
 import dev.jraghavan.snmeeting.model.TemplateChoice
 import dev.jraghavan.snmeeting.model.TemplateRow
 import dev.jraghavan.snmeeting.model.TestResult
@@ -49,6 +60,9 @@ class SettingsActivity : Activity() {
     /** The Custom… folder field is open. */
     private var editingFolder = false
     private var templates: List<TemplateRow> = emptyList()
+    /** F16-FR5: the last 12 months of spend and the rates in force; null until the core answers. */
+    private var spend: SpendReport? = null
+    private var rates: RatesView? = null
 
     /**
      * The last Test connection result per "role/provider" (F10-FR5: shown until the next test),
@@ -60,8 +74,31 @@ class SettingsActivity : Activity() {
     private val modelViews = mutableMapOf<String, TextView>()
 
     /** settings.debug.segmentMs; the rows show once set, or after a long-press on the version. */
+    /** F19-FR5: the Rebuild search index line ("Indexing 120/340", then the result). */
+    private var indexLine: String? = null
+    private var indexView: TextView? = null
+    private var rebuilding = false
+    private val indexPoll = object : Runnable {
+        override fun run() {
+            if (!rebuilding) return
+            SearchJobs.query({ NativeBridge.nativeIndexStatus() }) { json ->
+                if (isDestroyed || !rebuilding) return@query
+                val line = CoreJson.obj(json, IndexStatus::from).getOrNull()?.let(SearchModel::indexing) ?: return@query
+                if (line != indexLine) { indexLine = line; indexView?.text = line } // the line only, no redraw
+            }
+            handler.postDelayed(this, 1000)
+        }
+    }
     private var segmentMs: Long? = null
     private var showSegmentLength = false
+
+    /** F18-FR13: the calendar's settings and links (by name and elided URL, never the URL). */
+    private var calendar = CalendarPrefs()
+    private var links: List<CalendarLink>? = null
+    private var refreshing = false
+    /** Home's "CALENDAR" opens this screen at the Calendar card. */
+    private var calendarCard: View? = null
+    private var scrollToCalendar = false
 
     /** F14-AC2: whether this copy carries the release key (read once; a cheap PackageManager call). */
     private val canUpdate by lazy { UpdateController(this).canUpdateItself() }
@@ -72,6 +109,9 @@ class SettingsActivity : Activity() {
         ui = Inkwell(this)
         scope = ScreenScope(this)
         CoreJobs.init(filesDir.absolutePath)
+        SearchJobs.init(filesDir.absolutePath)
+        CalendarJobs.init(filesDir.absolutePath)
+        scrollToCalendar = intent.getStringExtra(EXTRA_SECTION) == SECTION_CALENDAR
         render()
     }
 
@@ -81,9 +121,11 @@ class SettingsActivity : Activity() {
         bt = BluetoothState(this, handler) { render() }.also { it.open() }
         // F14-FR8: a check or download finishing redraws About with its result.
         unobserveUpdates = UpdateGate.observe { render() }
+        if (rebuilding) handler.postDelayed(indexPoll, 1000)
     }
 
     override fun onStop() {
+        handler.removeCallbacks(indexPoll) // the rebuild carries on; onStart polls again
         unobserveUpdates?.invoke(); unobserveUpdates = null
         bt?.close(); bt = null
         super.onStop()
@@ -97,6 +139,79 @@ class SettingsActivity : Activity() {
             CoreJson.list(json, TemplateRow::from).getOrNull()?.let { templates = it }
         }
         scope.core({ NativeBridge.nativeGetSettings() }) { applySettings(it) }
+        loadSpend()
+        loadLinks() // the links file may have changed on the desktop (F18-FR1)
+    }
+
+    /** F16-FR5: spend by month and the rates' date; one redraw when both are in. */
+    private fun loadSpend() {
+        scope.core({ NativeBridge.nativeGetRates() }) { json -> rates = CoreJson.obj(json, RatesView::from).getOrNull() }
+        scope.core({
+            val (from, to) = Spend.lastMonths(java.time.YearMonth.now())
+            NativeBridge.nativeSpend(from, to)
+        }) { json -> spend = CoreJson.obj(json, SpendReport::from).getOrNull(); render() }
+    }
+
+    /**
+     * F16-FR5 / FR6: "rates as of", the last 12 months by provider (transcription and minutes),
+     * what the totals leave out, Edit rates, and Re-price with current rates.
+     */
+    private fun spendSection(column: LinearLayout) {
+        val report = spend ?: return
+        ui.section(column, "Spend").apply {
+            rates?.let { r ->
+                addView(ui.note("Rates as of ${r.asOf}", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(4)) })
+                r.problems.forEach { addView(error(it)) }
+            }
+            val rows = report.rows()
+            if (rows.isEmpty()) addView(ui.note("Nothing spent yet", 15f).apply { setPadding(0, ui.dim(10), 0, ui.dim(10)) })
+            rows.forEachIndexed { i, row ->
+                if (i > 0) addView(ui.hairline())
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(0, ui.dim(10), 0, ui.dim(10))
+                    addView(LinearLayout(this@SettingsActivity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER_VERTICAL
+                        addView(ui.body(row.month, 16f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(ui.body(row.total, 16f, bold = row.total != "—"))
+                    })
+                    row.lines.forEach { addView(ui.note(it, 13f), ui.wrap().apply { topMargin = ui.dim(3) }) }
+                })
+            }
+            addView(ui.hairline())
+            val notes = report.notes + if (report.unpriced > 0) listOf("“+” means a call has no rate yet; add one, then re-price.") else emptyList()
+            notes.forEach { addView(ui.note(it, 13f, ui.textMuted), ui.wrap().apply { topMargin = ui.dim(6) }) }
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, ui.dim(14), 0, ui.dim(12))
+                addView(ui.pill("Edit rates  →", size = 15f) {
+                    startActivity(Intent(this@SettingsActivity, RatesActivity::class.java)); overridePendingTransition(0, 0)
+                })
+                addView(ui.pill("Re-price with current rates", size = 15f) { reprice() }, ui.wrap().apply { marginStart = ui.dim(12) })
+            })
+        }
+    }
+
+    /** F16-FR6: a dry run says what would change; only a confirmation rewrites stored costs. */
+    private fun reprice() {
+        scope.core({ NativeBridge.nativeRepriceAll(true) }) { json ->
+            when (val r = CoreJson.obj(json, Reprice::from)) {
+                is CoreResult.Err -> InkDialog.error(this, "Couldn't re-price", r.message)
+                is CoreResult.Ok -> {
+                    val q = r.value.question()
+                        ?: return@core InkDialog.error(this, "Nothing to re-price", "Every meeting's cost already matches the current rates.")
+                    InkDialog.confirm(this, "Re-price with current rates?", q, "Re-price") {
+                        scope.core({ NativeBridge.nativeRepriceAll(false) }) { done ->
+                            val e = CoreJson.ok(done)
+                            if (e is CoreResult.Err) InkDialog.error(this, "Couldn't re-price", e.message)
+                            loadSpend()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** nativeGetSettings / nativeSetSettings reply: the new settings, or a refusal by field. */
@@ -106,6 +221,7 @@ class SettingsActivity : Activity() {
                 if (r.value.saveFolder != settings?.saveFolder) editingFolder = false
                 settings = r.value; errors.clear()
                 segmentMs = r.value.segmentMsDebug
+                CoreJson.obj(json) { o -> CalendarPrefs.from(o.optJSONObject("settings")?.optJSONObject("calendar")) }.getOrNull()?.let { calendar = it }
             }
             is CoreResult.Err -> errors[r.field ?: ""] = r.message
         }
@@ -146,6 +262,44 @@ class SettingsActivity : Activity() {
                 })
             }
             errors["mic"]?.let { addView(error(it)) }
+        }
+    }
+
+    /**
+     * F15 / ADR D14: which recorder a new meeting uses. Standard (the default) is Android's
+     * recorder, transcribed after Stop; Near-live (new) records through its own encoder and
+     * writes the transcript while recording. A meeting under way keeps the recorder it began with.
+     */
+    private fun recorderSection(column: LinearLayout) {
+        val s = settings ?: return
+        ui.section(column, "Recorder").apply {
+            choice("Standard", "Transcribe after you stop", !s.nearLive) { patch(SettingsPatch.recorder(SettingsView.STANDARD)) }
+            addView(ui.hairline())
+            choice("Near-live (new)", "The transcript fills in while you record, about twice a minute", s.nearLive) {
+                patch(SettingsPatch.recorder(SettingsView.NEAR_LIVE))
+            }
+            errors["recorder"]?.let { addView(error(it)) }
+        }
+    }
+
+    /**
+     * F17-FR2 (OQ13): the notes tool bar docks right (the default) or left, never top.
+     */
+    private fun notesSection(column: LinearLayout) {
+        val n = settings?.notes ?: return
+        ui.section(column, "Notes").apply {
+            choice("Tool bar on the right", null, n.dock == dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.RIGHT) {
+                patch(dev.jraghavan.snmeeting.notes.NotesPatch.dock(dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.RIGHT))
+            }
+            addView(ui.hairline())
+            choice("Tool bar on the left", null, n.dock == dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.LEFT) {
+                patch(dev.jraghavan.snmeeting.notes.NotesPatch.dock(dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.LEFT))
+            }
+            addView(ui.hairline())
+            // F17-FR9 / OQ20: on by default; the regions of the canvas go with the Stop call.
+            choice("Use my notes for the minutes", "At Stop, images of your notes go with the transcript, so the minutes and Search can use your handwriting",
+                n.useForMinutes) { patch(dev.jraghavan.snmeeting.notes.NotesPatch.useForMinutes(!n.useForMinutes)) }
+            errors["notes.dock"]?.let { addView(error(it)) }
         }
     }
 
@@ -285,7 +439,114 @@ class SettingsActivity : Activity() {
         val p = ui.page(column)
         page = p
         setContentView(p)
-        if (y > 0) p.post { p.scrollTo(0, y) }
+        val target = calendarCard
+        if (scrollToCalendar && target != null && settings != null) {
+            scrollToCalendar = false
+            p.post { p.scrollTo(0, (target.top - ui.dim(40)).coerceAtLeast(0)) }
+        } else if (y > 0) p.post { p.scrollTo(0, y) }
+    }
+
+    /** F18-FR13: each link's name, elided URL and status, as the core reports them. */
+    private fun loadLinks() {
+        scope.core({ NativeBridge.nativeCalendarLinks() }) { json ->
+            CoreJson.list(json, CalendarLink::from).getOrNull()?.let { if (it != links) { links = it; render() } }
+        }
+    }
+
+    /** Refresh now: every link, then the list again (F18-FR4). */
+    private fun refreshLinks() {
+        if (refreshing) return
+        refreshing = true; render()
+        CalendarJobs.refresh(true) { _ ->
+            refreshing = false
+            if (!isDestroyed) { render(); loadLinks() }
+        }
+    }
+
+    /**
+     * F18-FR13: Settings → CALENDAR. The links (added from the computer, read-only here), Refresh
+     * now, the refresh interval, linking by time, sending the event with the minutes (OQ25), the
+     * template keyword rules, and how to add a link.
+     */
+    private fun calendarSection(column: LinearLayout) {
+        if (settings == null) return
+        val card = ui.section(column, "Calendar")
+        calendarCard = card
+        val zone = java.time.ZoneId.systemDefault()
+        val l = links
+        card.apply {
+            when {
+                l == null -> addView(ui.note("Reading the calendar links…", 13f).apply { setPadding(0, ui.dim(10), 0, ui.dim(10)) })
+                l.isEmpty() -> addView(ui.body("No calendar link yet.", 16f).apply { setPadding(0, ui.dim(10), 0, ui.dim(4)) })
+                else -> l.forEachIndexed { i, link ->
+                    if (i > 0) addView(ui.hairline())
+                    addView(LinearLayout(this@SettingsActivity).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(0, ui.dim(10), 0, ui.dim(10))
+                        addView(ui.body(link.name, 17f, bold = true))
+                        addView(ui.eyebrow(link.elided, ui.textMuted).apply { isAllCaps = false; text = link.elided }, ui.wrap().apply { topMargin = ui.dim(2) })
+                        addView(ui.note(CalendarFormat.linkStatus(link, zone), 13f), ui.wrap().apply { topMargin = ui.dim(4) })
+                    })
+                }
+            }
+            if (!l.isNullOrEmpty()) {
+                addView(ui.pill(if (refreshing) "Refreshing…" else "Refresh now", size = 15f) { refreshLinks() },
+                    ui.wrap().apply { topMargin = ui.dim(6); bottomMargin = ui.dim(10) })
+            }
+            addView(ui.hairline())
+            addView(ui.eyebrow("Refresh").apply { setPadding(0, ui.dim(12), 0, 0) })
+            CalendarFormat.INTERVALS.forEachIndexed { i, (min, label) ->
+                if (i > 0) addView(ui.hairline())
+                choice(label, if (min == 0) "Only when you tap Refresh or UPDATED on Home" else null, calendar.refreshMin == min) {
+                    patch(CalendarPatch.refreshMin(min))
+                }
+            }
+            errors["calendar.refreshMin"]?.let { addView(error(it)) }
+            addView(ui.hairline())
+            toggle("Link recordings to events by time", "A recording started during an event (or 5 minutes before) is linked to it.", calendar.linkByTime) {
+                patch(CalendarPatch.linkByTime(!calendar.linkByTime))
+            }
+            addView(ui.hairline())
+            toggle("Send the event with the minutes", "The title, time, attendees' names and agenda go to the summary provider at Stop.", calendar.eventInMinutes) {
+                patch(CalendarPatch.eventInMinutes(!calendar.eventInMinutes))
+            }
+            addView(ui.hairline())
+            addView(ui.eyebrow("Template by keyword").apply { setPadding(0, ui.dim(12), 0, 0) })
+            addView(ui.note("The first keyword found in an event's title picks its template; otherwise the default.", 13f).apply { setPadding(0, ui.dim(4), 0, ui.dim(6)) })
+            calendar.rules.forEachIndexed { i, (keyword, tid) ->
+                addView(LinearLayout(this@SettingsActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(0, ui.dim(8), 0, ui.dim(8))
+                    val name = templates.firstOrNull { it.id == tid }?.name ?: tid
+                    addView(ui.body("“$keyword”  →  $name", 16f), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(ui.eyebrow("Remove", ui.textMuted).apply {
+                        setPadding(ui.dim(12), ui.dim(6), 0, ui.dim(6)); isClickable = true
+                        setOnClickListener { patch(CalendarPatch.rules(calendar.rules.filterIndexed { j, _ -> j != i })) }
+                    })
+                })
+            }
+            errors["calendar.templateRules"]?.let { addView(error(it)) }
+            addView(ui.pill("Add a rule", size = 15f) { addRule() }, ui.wrap().apply { topMargin = ui.dim(6); bottomMargin = ui.dim(12) })
+            addView(ui.hairline())
+            addView(ui.eyebrow("Adding a link").apply { setPadding(0, ui.dim(12), 0, 0) })
+            addView(ui.note(CalendarFormat.HOW_TO, 13f).apply { setPadding(0, ui.dim(6), 0, 0); setLineSpacing(0f, 1.2f) })
+            addView(ui.note(CalendarFormat.LIMIT, 13f).apply { setPadding(0, ui.dim(6), 0, 0) })
+            addView(ui.note(CalendarFormat.SYNC_NOTE, 13f, ui.textMuted).apply { setPadding(0, ui.dim(6), 0, ui.dim(12)) })
+        }
+    }
+
+    /** A keyword, then the template it picks; saved as the whole list (F18-FR13). */
+    private fun addRule() {
+        InkDialog.text(this, ui, "Keyword in the event's title", "") { keyword ->
+            val k = keyword.trim()
+            if (k.isEmpty()) return@text
+            val rows = templates
+            if (rows.isEmpty()) return@text
+            android.app.AlertDialog.Builder(this, R.style.InkDialog).setTitle("Template for “$k”")
+                .setItems(rows.map { it.name }.toTypedArray()) { _, i -> patch(CalendarPatch.rules(calendar.rules + (k to rows[i].id))) }
+                .setNegativeButton("CANCEL", null).show()
+        }
     }
 
     override fun finish() {
@@ -295,7 +556,7 @@ class SettingsActivity : Activity() {
 
     /** Rebuilds the page after each choice; e-ink redraws once per tap, never animates. */
     private fun render() {
-        resultViews.clear(); modelViews.clear()
+        resultViews.clear(); modelViews.clear(); calendarCard = null
         val column = ui.column().apply {
             addView(ui.header("Back"))
             addView(ui.spacer(ui.dim(28)))
@@ -303,6 +564,8 @@ class SettingsActivity : Activity() {
         }
 
         micSection(column)
+        recorderSection(column)
+        notesSection(column)
         errors[""]?.let { column.addView(error(it)) }
 
         saveSection(column)
@@ -312,6 +575,10 @@ class SettingsActivity : Activity() {
         providerSection(column, "Summary & to-dos", SettingsView.SUMMARISE, null)
 
         templateSection(column)
+
+        calendarSection(column)
+
+        spendSection(column)
 
         ui.section(column, "About").apply {
             addView(LinearLayout(this@SettingsActivity).apply {
@@ -326,12 +593,43 @@ class SettingsActivity : Activity() {
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
             updates(this)
+            searchIndex(this)
             if (showSegmentLength || segmentMs != null) segmentLength(this)
         }
 
         column.addView(ui.spacer(ui.dim(36)))
         column.addView(ui.closingMark())
         show(column)
+    }
+
+    /**
+     * F19-FR5: "Rebuild search index" in About. The index is a cache of the meeting files, so
+     * this loses nothing; while it runs the line reads "Indexing 120/340", and Search answers
+     * from what is indexed so far.
+     */
+    private fun searchIndex(card: LinearLayout) {
+        card.addView(ui.hairline())
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, ui.dim(12), 0, ui.dim(12))
+            addView(ui.pill("Rebuild search index", size = 15f) { rebuildIndex() }, ui.wrap())
+            val note = ui.note(indexLine ?: "Search reads a copy of your meetings kept on this device; rebuilding it loses nothing.", 13f)
+            indexView = note
+            addView(note, ui.wrap().apply { topMargin = ui.dim(8) })
+        })
+    }
+
+    private fun rebuildIndex() {
+        if (rebuilding) return
+        rebuilding = true
+        indexLine = "Still indexing…"; indexView?.text = indexLine
+        handler.postDelayed(indexPoll, 1000)
+        SearchJobs.index({ NativeBridge.nativeRebuildIndex() }) { json ->
+            rebuilding = false
+            handler.removeCallbacks(indexPoll)
+            if (isDestroyed) return@index
+            indexLine = SearchModel.rebuilt(json); indexView?.text = indexLine
+        }
     }
 
     /**
@@ -432,5 +730,8 @@ class SettingsActivity : Activity() {
 
     companion object {
         private const val SHORT_SEGMENT_MS = 60_000L
+        /** Open at a card: Home's "CALENDAR" asks for [SECTION_CALENDAR]. */
+        const val EXTRA_SECTION = "section"
+        const val SECTION_CALENDAR = "calendar"
     }
 }

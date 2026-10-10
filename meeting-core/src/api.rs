@@ -274,6 +274,254 @@ pub fn finish_meeting(id: &str, duration_ms: i64, note: &str) -> String {
     with_app(|app| app.finish_json(id, duration_ms, note))
 }
 
+/// `nativeChunkReady(id, index, path, startOffsetMs, durationMs, speechMs)` (F15-FR5): a chunk
+/// file is finalised; `speechMs` is -1 when unknown. `{index, state, added}`.
+pub fn chunk_ready(
+    id: &str,
+    index: i32,
+    path: &str,
+    start_offset_ms: i64,
+    duration_ms: i64,
+    speech_ms: i64,
+) -> String {
+    with_app(|app| {
+        let c = crate::library::ChunkIn {
+            index,
+            path,
+            start_offset_ms,
+            duration_ms,
+            speech_ms,
+        };
+        app.chunk_ready_json(id, c)
+    })
+}
+
+/// `nativeStartLive(id, send)` (F15-FR5 / FR12): the near-live recorder began `id`.
+pub fn start_live(id: &str, send: bool) -> String {
+    with_app(|app| app.start_live_json(id, send))
+}
+
+/// `nativeLiveDrain(id)` (F15-FR5): send the pending chunks. Blocking.
+pub fn live_drain(id: &str) -> String {
+    with_app(|app| app.live_drain_json(id))
+}
+
+/// `nativeLiveTranscript(id, afterLine)` (F15-FR6): the live transcript's lines and status.
+pub fn live_transcript(id: &str, after_line: i32) -> String {
+    with_app(|app| app.live_transcript_json(id, after_line))
+}
+
+/// `nativeChunksToCut(id)` (F15-FR9 / FR10): the chunk files to re-cut from their segments.
+pub fn chunks_to_cut(id: &str) -> String {
+    with_app(|app| app.chunks_to_cut_json(id))
+}
+
+/// `nativeAddMark(id, atMs)` (F15-FR11): `{markId}`.
+pub fn add_mark(id: &str, at_ms: i64) -> String {
+    with_app(|app| app.add_mark_json(id, at_ms))
+}
+
+/// `nativeSetMarkLabel(id, markId, label)` (F15-FR11); "" clears it.
+pub fn set_mark_label(id: &str, mark_id: &str, label: &str) -> String {
+    with_app(|app| app.set_mark_label_json(id, mark_id, label))
+}
+
+/// `nativeDeleteMark(id, markId)` (F15-FR11).
+pub fn delete_mark(id: &str, mark_id: &str) -> String {
+    with_app(|app| app.delete_mark_json(id, mark_id))
+}
+
+// Notes (F17). Ink calls are short: they run on the CoreJobs thread.
+
+/// `nativeNotesOpen(id)` (F17-FR5): `{view, clock, bounds, strokes}`.
+pub fn notes_open(id: &str) -> String {
+    with_app(|app| app.notes_open_json(id))
+}
+
+/// `nativeInkStroke(id, layer, tool, width, xypt)` (F17-FR4): one batched stroke.
+pub fn ink_stroke(id: &str, layer: &str, tool: i32, width: f32, xypt: &[f32]) -> String {
+    with_app(|app| app.ink_stroke_json(id, layer, tool, width, xypt))
+}
+
+/// `nativeInkErase(id, layer, xy, r)`: an eraser sweep, one undo step.
+pub fn ink_erase(id: &str, layer: &str, xy: &[f32], r: f32) -> String {
+    with_app(|app| app.ink_erase_json(id, layer, xy, r))
+}
+
+/// `nativeInkUndo` / `nativeInkRedo` (F13-FR5).
+pub fn ink_history(id: &str, layer: &str, redo: bool) -> String {
+    with_app(|app| app.ink_history_json(id, layer, redo))
+}
+
+/// `nativeInkLasso(id, layer, loopXy)`: the strokes a loop takes.
+pub fn ink_lasso(id: &str, layer: &str, xy: &[f32]) -> String {
+    with_app(|app| app.ink_lasso_json(id, layer, xy))
+}
+
+/// `nativeInkMove(id, layer, idsJson, dx, dy)`: moves a lasso selection.
+pub fn ink_move(id: &str, layer: &str, ids: &str, dx: f32, dy: f32) -> String {
+    with_app(|app| app.ink_move_json(id, layer, ids, dx, dy))
+}
+
+/// `nativeInkDelete(id, layer, idsJson)`: deletes a lasso selection.
+pub fn ink_delete(id: &str, layer: &str, ids: &str) -> String {
+    with_app(|app| app.ink_delete_json(id, layer, ids))
+}
+
+/// `nativeInkStrokesForDraw(id, layer, x0, y0, x1, y1)`: the strokes in a world rectangle.
+pub fn ink_strokes(id: &str, layer: &str, rect: [f32; 4]) -> String {
+    with_app(|app| app.ink_strokes_json(id, layer, rect))
+}
+
+/// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
+pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
+    with_app(|app| app.ink_hit_json(id, layer, x, y, r))
+}
+
+/// `nativeEditMinutes(id, patchJson)` (F17-FR10): a correction, marked the user's.
+pub fn edit_minutes(id: &str, patch: &str) -> String {
+    with_app(|app| app.edit_minutes_json(id, patch))
+}
+
+/// `nativeInkSave(id)` (F17-FR5): the deferred flush.
+pub fn ink_save(id: &str) -> String {
+    with_app(|app| app.ink_save_json(id))
+}
+
+/// `nativeNotesClose(id, cx, cy, zoom)`: saves the ink and the viewport, lets the layers go.
+pub fn notes_close(id: &str, cx: f32, cy: f32, zoom: f32) -> String {
+    with_app(|app| app.notes_close_json(id, f64::from(cx), f64::from(cy), f64::from(zoom)))
+}
+
+/// F15-FR1 (D14 revised 2026-10-09): the near-live recorder's `.m4a` files, written by the
+/// core because `MediaMuxer.stop()` aborts the process on the Manta's firmware. Pure: no
+/// `nativeInit` needed; the capture thread calls these directly.
+pub fn mp4_open(path: &str, rate_hz: i32, channels: i32, asc: &[u8], journal: &str) -> String {
+    guarded(|| crate::mp4::open_json(path, rate_hz, channels, asc, journal))
+}
+
+/// One AAC access unit; "" when written.
+pub fn mp4_write(handle: i64, frame: &[u8]) -> String {
+    guarded(|| crate::mp4::write_json(handle, frame))
+}
+
+/// Finalise: `{frames, durationMs}`.
+pub fn mp4_close(handle: i64) -> String {
+    guarded(|| crate::mp4::close_json(handle))
+}
+
+/// Let a file go without its index (its journal stays for recovery).
+pub fn mp4_abandon(handle: i64) -> String {
+    guarded(|| crate::mp4::abandon_json(handle))
+}
+
+/// A chunk re-cut from a segment (F15-FR9/FR10): `{frames}`.
+pub fn mp4_cut(segment: &str, from_ms: i64, to_ms: i64, out: &str) -> String {
+    guarded(|| crate::mp4::cut_json(segment, from_ms, to_ms, out))
+}
+
+/// A segment repaired from its journal or rebuilt from its chunks (F15-FR8).
+pub fn mp4_rebuild(path: &str, journal: &str, pieces_json: &str) -> String {
+    guarded(|| crate::mp4::rebuild_json(path, journal, pieces_json))
+}
+
+/// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
+/// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
+/// capture thread can ask at any time.
+pub fn chunk_plan(id: &str, rms_json: &str) -> String {
+    guarded(|| crate::chunk::plan_json(id, rms_json))
+}
+
+/// `nativeSpend(fromMonth, toMonth)` (F16-FR5): spend per month, `YYYY-MM` inclusive.
+pub fn spend(from: &str, to: &str) -> String {
+    with_app(|app| app.spend_json(from, to))
+}
+
+/// `nativeRepriceAll(dryRun)` (F16-FR6): `{meetings, oldUsd, newUsd, …}`; writes only when
+/// `dry_run` is false.
+pub fn reprice_all(dry_run: bool) -> String {
+    with_app(|app| app.reprice_json(dry_run))
+}
+
+/// `nativeGetRates()` (F16-FR4): `{asOf, entries, problems}`.
+pub fn get_rates() -> String {
+    with_app(App::get_rates_json)
+}
+
+/// `nativeSetRates(json)` (F16-FR4): the user's entries; replies as `nativeGetRates`.
+pub fn set_rates(json: &str) -> String {
+    with_app(|app| app.set_rates_json(json))
+}
+
+/// `nativeSearch(query, filter, limit)` (F19-FR2): the local index only.
+pub fn search(query: &str, filter: &str, limit: i32) -> String {
+    with_app(|app| app.search_json(query, filter, limit))
+}
+
+/// `nativeRecogniseQuery(png)` (F19-FR9): blocking, at most 15 s.
+pub fn recognise_query(png: &[u8]) -> String {
+    with_app(|app| app.recognise_query_json(png))
+}
+
+/// `nativeIndexStatus()` (F19-FR5): `{state, done, total}`.
+pub fn index_status() -> String {
+    with_app(App::index_status_json)
+}
+
+/// `nativeIndexUpdate()` (F19-FR5): re-index what changed. Blocking.
+pub fn index_update() -> String {
+    with_app(App::index_update_json)
+}
+
+/// `nativeRebuildIndex()` (F19-FR5): rebuild the index from the files. Blocking.
+pub fn rebuild_index() -> String {
+    with_app(App::rebuild_index_json)
+}
+
+/// `nativeCalendarLinks()` (F18-FR13): each link's id, name and elided URL, never the URL.
+pub fn calendar_links() -> String {
+    with_app(App::calendar_links_json)
+}
+
+/// `nativeCalendarRefresh(force)` (F18-FR4): fetch the due links. Blocking.
+pub fn calendar_refresh(force: bool) -> String {
+    with_app(|app| app.calendar_refresh_json(force))
+}
+
+/// `nativeAgenda(fromDay, toDay)` (F18-FR7): the days Home shows, from the cache and the
+/// library.
+pub fn agenda(from: &str, to: &str) -> String {
+    with_app(|app| app.agenda_json(from, to))
+}
+
+/// `nativeEvent(eventKey)` (F18-FR8): the event sheet.
+pub fn event(key: &str) -> String {
+    with_app(|app| app.event_json(key))
+}
+
+/// `nativeLinkEvent(id, eventKey)` (F18-FR10); `""` unlinks.
+pub fn link_event(id: &str, key: &str) -> String {
+    with_app(|app| app.link_event_json(id, key))
+}
+
+/// `nativeBeginMeetingForEvent(startedAtMs, micJson, audioJson, eventKey)` (F18-FR8): as
+/// `nativeBeginMeeting`, linked to the event (`linkSource: user`).
+pub fn begin_meeting_for_event(
+    started_at_ms: i64,
+    mic_json: &str,
+    audio_json: &str,
+    key: &str,
+) -> String {
+    with_app(|app| {
+        app.begin_linked(
+            started_at_ms,
+            mic_json,
+            audio_json,
+            Some(key).filter(|k| !k.is_empty()),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +530,12 @@ mod tests {
     fn a_panic_becomes_the_error_envelope() {
         assert_eq!(guarded(|| panic!("boom")), r#"{"error":"internal error"}"#);
         assert_eq!(guarded(|| "fine".to_owned()), "fine");
+    }
+
+    #[test]
+    fn chunk_plan_needs_no_init() {
+        let r = chunk_plan("meeting-20261009-100000", r#"{"rms":[],"limitMs":0}"#);
+        assert_eq!(r, r#"{"cutAtMs":0,"overlapMs":0,"speechMs":0}"#);
     }
 
     #[test]

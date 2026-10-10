@@ -35,6 +35,13 @@ enum class InputSource { MIC, VOICE_COMMUNICATION }
 interface RecorderEvents {
     fun onApproachingLimit() // MEDIA_RECORDER_INFO_MAX_FILESIZE_APPROACHING (90 %)
     fun onNextFileStarted() // MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED
+    /**
+     * F15-FR2: a time-driven recorder started the next file at [offsetMs] on the recording
+     * clock (samples ÷ rate), not the elapsed time it was heard. MediaRecorder never calls it.
+     */
+    fun onNextFileStartedAt(offsetMs: Long) = onNextFileStarted()
+    /** F15-FR4: a near-live chunk file was finalised. MediaRecorder never calls it. */
+    fun onChunk(c: ChunkDone) {}
     fun onLimitReached() // MAX_DURATION_REACHED, or MAX_FILESIZE_REACHED with no next file
     fun onError(what: Int)
     fun onRoutedTo(deviceId: Int?) // the input actually in use
@@ -56,6 +63,13 @@ interface RecorderPort {
 
     /** stop() + release(). true = finalised; false = stop() threw with no audio captured (F2-FR7). */
     fun stop(): Boolean
+
+    /**
+     * F15-FR2 (D14): this recorder rolls over by sample count at exactly the plan's length, so
+     * it is started with that length and the plan's size cap only as a runaway guard. false
+     * for MediaRecorder, whose rollover is size-driven (F2-FR5).
+     */
+    val timeDriven: Boolean get() = false
 }
 
 interface StoragePort {
@@ -79,6 +93,8 @@ interface RecorderCore {
     fun closeSegment(id: String, index: Int, path: String, measure: Boolean, fallbackMs: Long)
     /** finish, then (if [discard]) nativeDeleteMeeting: a meeting with no audio leaves nothing behind. */
     fun finish(id: String, durationMs: Long, note: String, discard: Boolean, done: () -> Unit)
+    /** F15-FR5: a chunk file is finalised (nativeChunkReady), queued before the next close or finish. */
+    fun chunkReady(id: String, c: ChunkDone) {}
 }
 
 /** Measures a finalised file (MediaMetadataRetriever METADATA_KEY_DURATION); null if unreadable. */

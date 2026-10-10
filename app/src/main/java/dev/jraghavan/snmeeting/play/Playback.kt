@@ -70,6 +70,21 @@ class Playback(private val list: SegmentPlaylist, private val port: PlayerPort, 
         onChange()
     }
 
+    /**
+     * F19-FR3: be ready to play from [ms] into the whole recording, without playing: a search
+     * hit opens the meeting at its moment, and ▶ starts there.
+     */
+    fun cue(ms: Long) {
+        if (!canPlay) return
+        if (opened) { port.release(); opened = false }
+        playing = false
+        var i = 0
+        var at = ms.coerceAtLeast(0)
+        while (i < lengths.size - 1 && lengths[i] > 0 && at >= lengths[i]) { at -= lengths[i]; i++ }
+        index = i; resumeAt = at
+        onChange()
+    }
+
     /** Elapsed time in the whole recording. */
     fun positionMs(): Long = offsetOf(index) + if (opened) port.positionMs() else resumeAt
 

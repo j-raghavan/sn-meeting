@@ -38,6 +38,8 @@ object HomeRows {
     data class Meeting(
         val id: String, val title: String, val untitled: Boolean, val stamp: String,
         val detail: String, val chip: String, val attention: Boolean,
+        /** F16-FR5: the meeting's cost, "—" with none. */
+        val cost: String = "—",
     )
 
     data class Todo(val meetingId: String, val todoId: String, val text: String, val meta: String)
@@ -70,6 +72,7 @@ object HomeRows {
             stamp = "${Format.day(m.startedAt)}  ·  ${Format.time(m.startedAt)}",
             detail = Format.duration(m.durationMs) + todos,
             chip = label, attention = attention,
+            cost = m.cost,
         )
     }
 
@@ -85,9 +88,13 @@ object HomeRows {
 }
 
 /** F7-FR5: the meeting screen's heading and the mono eyebrows under it. */
-data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: String, val length: String, val mic: String?, val note: String?) {
+data class MeetingHeader(
+    val title: String, val untitled: Boolean, val stamp: String, val length: String, val mic: String?, val note: String?,
+    /** F16-FR5: what the meeting has cost so far ("≈ $0.41"), "—" with nothing recorded. */
+    val cost: String = "—",
+) {
     companion object {
-        fun of(m: Sidecar): MeetingHeader {
+        fun of(m: Sidecar, cost: String = "—"): MeetingHeader {
             val n = m.segments.size
             val mic = m.mic?.let { (if (it.kind == "bluetooth") "Bluetooth" else "USB") + " — " + it.name }
             return MeetingHeader(
@@ -97,20 +104,28 @@ data class MeetingHeader(val title: String, val untitled: Boolean, val stamp: St
                 length = "${Format.duration(m.durationMs)}  ·  ${Format.plural(n, "segment")}",
                 mic = mic,
                 note = m.note?.takeIf { it.isNotBlank() }?.let { "Recording ended: $it" },
+                cost = cost,
             )
         }
     }
 }
 
 /** F7-FR3: what the meeting screen's Summary card shows; null when there is no summary yet. */
-data class SummaryCard(val summary: String?, val decisions: List<String>, val sections: List<Section>) {
+data class SummaryCard(
+    val summary: String?, val decisions: List<String>, val sections: List<Section>,
+    /** F17-FR10: each shown decision's and section's index in the sidecar (for a correction). */
+    val decisionIndex: List<Int> = decisions.indices.toList(),
+    val sectionIndex: List<Int> = sections.indices.toList(),
+    /** How many decisions the sidecar holds (the index a new one takes). */
+    val decisionCount: Int = decisions.size,
+) {
     companion object {
         fun of(m: Sidecar): SummaryCard? {
             val summary = m.summary?.trim()?.ifEmpty { null }
-            val decisions = m.decisions.map { it.trim() }.filter { it.isNotEmpty() }
-            val sections = m.sections.filter { it.heading.isNotBlank() || it.body.isNotBlank() }
-            if (summary == null && decisions.isEmpty() && sections.isEmpty()) return null
-            return SummaryCard(summary, decisions, sections)
+            val d = m.decisions.withIndex().filter { it.value.isNotBlank() }
+            val s = m.sections.withIndex().filter { it.value.heading.isNotBlank() || it.value.body.isNotBlank() }
+            if (summary == null && d.isEmpty() && s.isEmpty()) return null
+            return SummaryCard(summary, d.map { it.value.trim() }, s.map { it.value }, d.map { it.index }, s.map { it.index }, m.decisions.size)
         }
     }
 }
@@ -132,12 +147,34 @@ data class Actions(
     companion object {
         /** "Transcribing 2/3": the segment in flight (1-based) over the total. */
         fun transcribing(m: Sidecar): String {
+            // F15-FR9: a near-live meeting counts its chunks ("Transcribing 41/42").
+            if (m.chunkTotal > 0) return "Transcribing ${minOf(m.chunksDone + 1, m.chunkTotal)}/${m.chunkTotal}"
             val total = m.segments.size
             val n = minOf(m.segments.count { it.text != null } + 1, total)
             return "Transcribing $n/$total"
         }
 
-        fun of(m: Sidecar, jobRunning: Boolean, transcribeKey: KeyStatus?, summariseKey: KeyStatus?): Actions {
+        /** F15-FR8: the core's error on a recorded meeting with no audio left (recovery). */
+        const val AUDIO_LOST = "Audio couldn't be recovered"
+
+        /** Shown under a job that has run [SLOW_MS]: a reasoning model can take a while. */
+        const val SLOW = "Reasoning models can take a minute or two."
+        const val SLOW_MS = 20_000L
+        private const val LEAVE = "You can leave this screen; it carries on."
+
+        /**
+         * F7-FR2's progress label with the job's elapsed time, in 10 s steps so the label
+         * redraws at most every 10 s: "Summarising… 0:40". Nothing is added before 10 s.
+         */
+        fun withElapsed(label: String, elapsedMs: Long?): String {
+            val s = (elapsedMs ?: 0) / 10_000 * 10
+            return if (s <= 0) label else "%s %d:%02d".format(java.util.Locale.ROOT, label, s / 60, s % 60)
+        }
+
+        private fun note(elapsedMs: Long?, summarising: Boolean) =
+            if (summarising && (elapsedMs ?: 0) >= SLOW_MS) "$SLOW $LEAVE" else LEAVE
+
+        fun of(m: Sidecar, jobRunning: Boolean, transcribeKey: KeyStatus?, summariseKey: KeyStatus?, elapsedMs: Long? = null): Actions {
             fun problem(k: KeyStatus?) = when (k) {
                 null -> "Checking the key…"
                 is KeyStatus.Problem -> k.detail
@@ -150,10 +187,12 @@ data class Actions(
             return when {
                 m.status == Status.RECORDING -> Actions(null, false, "Recording…", false, null, false)
                 m.status == Status.TRANSCRIBING && jobRunning ->
-                    Actions(null, false, transcribing(m), true, "You can leave this screen; it carries on.", false)
+                    Actions(null, false, withElapsed(transcribing(m), elapsedMs), true, note(elapsedMs, summarising = false), false)
                 // No job here (a screen restored after the process died): resume it (INV8).
                 m.status == Status.TRANSCRIBING -> offer(Job.TRANSCRIBE, transcribeKey, "Transcription was interrupted.")
-                jobRunning -> Actions(null, false, "Summarising…", true, "You can leave this screen; it carries on.", false)
+                jobRunning -> Actions(null, false, withElapsed("Summarising…", elapsedMs), true, note(elapsedMs, summarising = true), false)
+                // F15-FR8: nothing to transcribe; say so, and leave Delete.
+                m.status == Status.RECORDED && m.error == AUDIO_LOST -> Actions(null, false, null, false, "$AUDIO_LOST.", true)
                 m.status == Status.RECORDED || (m.status == Status.FAILED && m.failedAt != FailedAt.SUMMARISING) ->
                     offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.")
                 m.status == Status.TRANSCRIBED || m.status == Status.DONE -> {
@@ -203,6 +242,42 @@ object TranscriptPages {
     fun paragraphs(segments: List<Segment>): List<Para> = segments.filter { !it.text.isNullOrBlank() }.flatMap { s ->
         s.text!!.split(Regex("\n\\s*\n")).map { it.trim() }.filter { it.isNotEmpty() }
             .mapIndexed { i, t -> Para(if (i == 0) Format.duration(s.startOffsetMs) else null, t) }
+    }
+
+    /**
+     * F15-FR11: the paragraphs with each mark as its own line, `◆ [0:12:41] Mark`, before the
+     * first paragraph that starts after it.
+     */
+    fun paragraphs(segments: List<Segment>, marks: List<Mark>): List<Para> = timed(segments, marks).map { it.second }
+
+    /** Each paragraph, with its segment's start on the first of each segment's paragraphs. */
+    private fun timed(segments: List<Segment>, marks: List<Mark>): List<Pair<Long?, Para>> {
+        val left = ArrayDeque(marks.sortedBy { it.atMs })
+        val out = mutableListOf<Pair<Long?, Para>>()
+        for (s in segments.filter { !it.text.isNullOrBlank() }) {
+            while (left.isNotEmpty() && left.first().atMs < s.startOffsetMs) out += null to Para(null, left.removeFirst().line)
+            paragraphs(listOf(s)).forEachIndexed { i, p -> out += (if (i == 0) s.startOffsetMs else null) to p }
+        }
+        left.forEach { out += null to Para(null, it.line) }
+        return out
+    }
+
+    /**
+     * F19-FR3: the paragraph spoken at [ms] (the last segment starting at or before it, its first
+     * paragraph), as (page, index on that page) of the pages built from [segments] and [marks];
+     * null when none.
+     */
+    fun locate(segments: List<Segment>, ms: Long, budget: Int = PAGE_CHARS, marks: List<Mark> = emptyList()): Pair<Int, Int>? {
+        val all = timed(segments, marks)
+        var target: Int? = null
+        all.forEachIndexed { i, (start, _) -> if (start != null && start <= ms) target = i }
+        val t = target ?: return null
+        var seen = 0
+        pages(all.map { it.second }, budget).forEachIndexed { pi, page ->
+            if (t < seen + page.size) return pi to (t - seen)
+            seen += page.size
+        }
+        return null
     }
 
     /** Greedy by characters, so pages are even in height; a long paragraph gets a page to itself. */

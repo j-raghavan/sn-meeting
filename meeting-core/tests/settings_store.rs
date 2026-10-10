@@ -13,8 +13,18 @@ fn defaults_json() -> Value {
         "summarise": {"provider": null, "model": null},
         "defaultTemplate": "general",
         "noticeShown": {"openai": false, "gemini": false, "anthropic": false},
+        "liveNoticeShown": {"openai": false, "gemini": false, "anthropic": false},
         "debug": {"segmentMs": null},
-        "updates": {"autoCheck": true, "autoInstall": false, "lastCheckMs": 0, "skipVersion": ""}
+        "recorder": "standard",
+        "updates": {"autoCheck": true, "autoInstall": false, "lastCheckMs": 0, "skipVersion": ""},
+        "calendar": {"refreshMin": 30, "linkByTime": true, "eventInMinutes": true, "templateRules": [
+            {"keyword": "1:1", "templateId": "one-on-one"}, {"keyword": "1-1", "templateId": "one-on-one"},
+            {"keyword": "one on one", "templateId": "one-on-one"}, {"keyword": "stand-up", "templateId": "standup"},
+            {"keyword": "standup", "templateId": "standup"}, {"keyword": "daily", "templateId": "standup"},
+            {"keyword": "interview", "templateId": "interview"}, {"keyword": "lecture", "templateId": "lecture"},
+            {"keyword": "talk", "templateId": "lecture"}]},
+        "notes": {"dock": "right", "sidebar": "expanded", "focus": false, "useForMinutes": true,
+                  "noticeShown": {"openai": false, "gemini": false, "anthropic": false}}
     })
 }
 
@@ -49,8 +59,13 @@ fn unknown_fields_survive_a_save_at_every_level() {
         "summarise": {"provider": null, "model": "m", "temperature": 0.2},
         "defaultTemplate": "general",
         "noticeShown": {"openai": true, "gemini": false, "anthropic": false, "deepseek": true},
+        "liveNoticeShown": {"openai": true, "gemini": false, "anthropic": false},
         "debug": {"segmentMs": 60000, "y": [2]},
+        "recorder": "near-live",
         "updates": {"autoCheck": false, "autoInstall": false, "lastCheckMs": 7, "skipVersion": "0.2.0", "w": 4},
+        "calendar": {"refreshMin": 60, "linkByTime": false, "eventInMinutes": false, "templateRules": [{"keyword": "sync", "templateId": "general"}], "v": 5},
+        "notes": {"dock": "left", "sidebar": "collapsed", "focus": true, "useForMinutes": false,
+                  "noticeShown": {"openai": false, "gemini": true, "anthropic": false}, "u": 6},
         "transcriptOptions": {"z": 3}
     });
     fs::write(&p, v.to_string()).unwrap();
@@ -329,4 +344,18 @@ fn a_wrongly_typed_field_reads_as_its_default_and_keeps_the_folders() {
     assert_eq!(s.save_folder, "EXPORT/sn-meeting");
     assert!(s.previous_folders.is_empty());
     assert_eq!(s.default_template, "lecture");
+}
+
+#[test]
+fn a_notice_is_shown_per_provider() {
+    use meeting::keyfile::Provider;
+    let n = meeting::settings::NoticeShown {
+        openai: true,
+        gemini: false,
+        anthropic: true,
+        extra: Default::default(),
+    };
+    assert!(
+        n.shown(Provider::OpenAi) && !n.shown(Provider::Gemini) && n.shown(Provider::Anthropic)
+    );
 }

@@ -34,6 +34,8 @@ pub struct MeetingSummary {
     pub open_todo_count: usize,
     pub source: Source,
     pub folder: String,
+    /// The meeting's cost so far (F16-FR5).
+    pub spend: crate::spend::Total,
 }
 
 /// `nativeGetMeeting`: the whole sidecar, unknown fields included, plus absolute paths.
@@ -45,6 +47,12 @@ pub struct MeetingView {
     pub dir: String,
     pub segment_paths: Vec<String>,
     pub transcript_path: Option<String>,
+    /// The meeting's cost so far (F16-FR5).
+    pub spend: crate::spend::Total,
+    /// F15-FR6: a near-live meeting's transcript, one paragraph per chunk (the overlap's
+    /// repeated words removed); omitted for a meeting without chunks.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub paragraphs: Vec<crate::chunk::Para>,
 }
 
 /// The local wall-clock time in an id (`meeting-YYYYMMDD-HHMMSS…`).
@@ -82,6 +90,11 @@ impl Library<'_> {
         }
     }
 
+    /// Every listable meeting's sidecar (legacy and unreadable ones have no usage).
+    pub fn sidecars(&self) -> Vec<Sidecar> {
+        self.all().into_iter().map(|(_, sc)| sc).collect()
+    }
+
     /// Every listable meeting with its sidecar, newest first (`startedAt`, then id).
     pub(crate) fn all(&self) -> Vec<(MeetingSummary, Sidecar)> {
         let mut v: Vec<(MeetingSummary, Sidecar)> = self
@@ -115,6 +128,7 @@ impl Library<'_> {
             open_todo_count: sc.todos.iter().filter(|t| !t.done).count(),
             source,
             folder: f.dir.to_string_lossy().into_owned(),
+            spend: crate::spend::meeting_total(sc),
         }
     }
 
@@ -139,6 +153,8 @@ impl Library<'_> {
             transcript_path: sc.transcript_file.as_deref().map(path),
             dir: f.dir.to_string_lossy().into_owned(),
             source,
+            spend: crate::spend::meeting_total(&sc),
+            paragraphs: crate::chunk::paragraphs(&sc),
             meeting: sc,
         })
     }

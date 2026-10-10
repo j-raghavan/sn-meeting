@@ -2,11 +2,13 @@
 //! job (F5-FR7). Part of the providers module: no rig or reqwest type leaves it (R8). Every
 //! detail is scrubbed with the key and never formats a transport error with its URL (rig's
 //! Gemini wire puts `?key=` in the URL).
-use super::{ConnStatus, Endpoints, classify_http, classify_transport, rig_http};
+use super::{ConnStatus, Endpoints, Measured, classify_http, classify_transport, rig_http};
 use crate::keyfile::{Provider, ProviderKey};
 use crate::scrub::scrub;
-use rig_core::completion::{CompletionRequest, FinishReason};
-use rig_core::message::{AudioMediaType, Message, StopReason, UserContent};
+use rig_core::completion::{CompletionRequest, FinishReason, Usage};
+use rig_core::message::{
+    AudioMediaType, ImageDetail, ImageMediaType, Message, StopReason, UserContent,
+};
 use rig_core::providers::anthropic::AnthropicConfig;
 use rig_core::providers::gemini::GeminiConfig;
 use rig_core::providers::openai::OpenAIConfig;
@@ -42,13 +44,16 @@ pub enum CallFail {
 }
 
 /// A failed call. `detail` is user-worded, scrubbed and at most `scrub::MAX_LEN` chars.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CallError {
     pub kind: CallFail,
     pub status: Option<u16>,
     /// `Retry-After` in whole seconds, when the reply carried one.
     pub retry_after: Option<Duration>,
     pub detail: String,
+    /// A 2xx reply that can't be used (cut off, blocked, empty) was still billed: its usage
+    /// (F16-FR2). `None` when no reply arrived, so nothing was reported (OQ16).
+    pub spent: Option<Box<Measured>>,
 }
 
 impl CallError {
@@ -58,8 +63,50 @@ impl CallError {
             status: None,
             retry_after: None,
             detail: detail.into(),
+            spent: None,
         }
     }
+
+    /// This failure, with the usage its reply reported.
+    fn with_spent(mut self, m: Measured) -> CallError {
+        self.spent = Some(Box::new(m));
+        self
+    }
+}
+
+/// A successful call: the text and what the provider reported it used (F16-FR1).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Replied {
+    pub text: String,
+    pub measured: Measured,
+}
+
+/// The model a reply names, when it is a plausible id and holds no secret; else `requested`.
+fn reply_model(requested: &str, reported: Option<&str>, secrets: &[&str]) -> String {
+    let ok = |m: &&str| {
+        !m.is_empty() && m.len() <= 128 && !m.chars().any(|c| c.is_whitespace() || c.is_control())
+    };
+    let m = reported.filter(ok).unwrap_or(requested);
+    scrub(m, secrets)
+}
+
+/// rig's normalised counters and the reply document, as a [`Measured`].
+fn measured(
+    p: Provider,
+    requested: &str,
+    reported: Option<&str>,
+    u: &Usage,
+    raw: &serde_json::Value,
+    secrets: &[&str],
+) -> Measured {
+    let mut m = Measured::new(p, &reply_model(requested, reported, secrets));
+    m.input_tokens = u.input_tokens;
+    m.output_tokens = u.output_tokens;
+    m.cached_input_tokens = u.cached_input_tokens;
+    m.cache_write_tokens = u.cache_creation_input_tokens;
+    m.reasoning_tokens = u.reasoning_tokens;
+    m.read_raw(raw);
+    m
 }
 
 /// One audio segment to transcribe, read from disk by the caller.
@@ -72,6 +119,9 @@ pub struct AudioIn {
     /// The segment's measured length, when known: past [`LONG_SEGMENT_MS`] an empty, blocked
     /// or cut-off reply is a failure to retry, not silence (F5-FR13).
     pub duration_ms: Option<u64>,
+    /// F15-FR5: an empty or cut-off reply is returned as [`NO_SPEECH`] whatever the length; the
+    /// near-live lane applies its own rule (retry once when the chunk had speech).
+    pub empty_ok: bool,
 }
 
 /// A segment longer than this that comes back with no text is a failure, not silence.
@@ -106,9 +156,13 @@ pub async fn transcribe(
     key: &ProviderKey,
     model: &str,
     audio: AudioIn,
-) -> Result<String, CallError> {
+) -> Result<Replied, CallError> {
     let name = provider_name(key.provider);
-    let long = audio.duration_ms.filter(|ms| *ms > LONG_SEGMENT_MS);
+    let secret = [key.expose()];
+    let audio_ms = audio.duration_ms;
+    let long = audio
+        .duration_ms
+        .filter(|ms| !audio.empty_ok && *ms > LONG_SEGMENT_MS);
     let nothing = |ms: u64, what: &str| {
         let d = format!("{name} returned {what} for {} of audio", length_label(ms));
         CallError::new(CallFail::Retryable, d)
@@ -122,11 +176,17 @@ pub async fn transcribe(
             if !audio.prompt.trim().is_empty() {
                 b = b.prompt(audio.prompt);
             }
-            client
-                .transcription(model)
-                .call(b.build())
-                .await
-                .map(|r| r.text)
+            client.transcription(model).call(b.build()).await.map(|r| {
+                let m = measured(
+                    key.provider,
+                    model,
+                    r.model.as_deref(),
+                    &r.usage,
+                    &r.raw,
+                    &secret,
+                );
+                (r.text, m)
+            })
         }
         Provider::Gemini => {
             let client = GeminiConfig::new(key.expose())
@@ -144,12 +204,24 @@ pub async fn transcribe(
                 )],
             };
             let req = CompletionRequest::new(msg).preamble(system);
-            match (client.completion(model).call(req).await, long) {
+            let r = client.completion(model).call(req).await.map(|r| {
+                let reported = r.origin.response_model.clone();
+                let m = measured(
+                    key.provider,
+                    model,
+                    reported.as_deref(),
+                    &r.usage,
+                    &r.raw,
+                    &secret,
+                );
+                (r, m)
+            });
+            match (r, long) {
                 // Blocked or cut off: the text is not the whole segment (F5-FR13).
-                (Ok(r), Some(ms)) if r.stop() != StopReason::Stop => {
-                    return Err(nothing(ms, "no complete text"));
+                (Ok((r, m)), Some(ms)) if r.stop() != StopReason::Stop => {
+                    return Err(nothing(ms, "no complete text").with_spent(with_audio(m, audio_ms)));
                 }
-                (r, _) => r.map(|r| r.text()),
+                (r, _) => r.map(|(r, m)| (r.text(), m)),
             }
         }
         Provider::Anthropic => {
@@ -159,12 +231,21 @@ pub async fn transcribe(
             ));
         }
     };
-    let text = reply.map_err(|e| classify_call(key.provider, model, &e, &[key.expose()]))?;
+    let (text, m) = reply.map_err(|e| classify_call(key.provider, model, &e, &secret))?;
+    let m = with_audio(m, audio_ms);
     let text = text.trim();
     match long {
-        Some(ms) if text.is_empty() => Err(nothing(ms, "no text")),
-        _ => Ok(if text.is_empty() { NO_SPEECH } else { text }.to_owned()),
+        Some(ms) if text.is_empty() => Err(nothing(ms, "no text").with_spent(m)),
+        _ => Ok(Replied {
+            text: if text.is_empty() { NO_SPEECH } else { text }.to_owned(),
+            measured: m,
+        }),
     }
+}
+
+fn with_audio(mut m: Measured, audio_ms: Option<u64>) -> Measured {
+    m.audio_ms = audio_ms;
+    m
 }
 
 /// The longest reply text kept; a structured summary of a long meeting is ~10 KB.
@@ -176,6 +257,30 @@ pub struct JsonAsk {
     pub user: String,
     pub schema: serde_json::Value,
     pub max_tokens: u64,
+    /// Images sent after the text, each after its label (F19-FR6's note regions).
+    pub images: Vec<ImageIn>,
+}
+
+/// A PNG for the user message, introduced by a line of text ("Note region 0:").
+#[derive(Clone, Debug, PartialEq)]
+pub struct ImageIn {
+    pub label: String,
+    pub png: Vec<u8>,
+}
+
+/// The user message: the text, then each image after its label. rig base64-encodes the raw
+/// bytes; the media type is given, so nothing is sniffed.
+fn user_content(text: &str, images: &[ImageIn]) -> Message {
+    let mut content = vec![UserContent::text(text)];
+    for i in images {
+        content.push(UserContent::text(i.label.clone()));
+        content.push(UserContent::image_raw(
+            i.png.clone(),
+            Some(ImageMediaType::PNG),
+            Some(ImageDetail::High),
+        ));
+    }
+    Message::User { content }
 }
 
 /// F5-FR4: one structured completion; returns the model's JSON text, not yet validated.
@@ -187,16 +292,40 @@ pub async fn complete_json(
     key: &ProviderKey,
     model: &str,
     ask: &JsonAsk,
-) -> Result<String, CallError> {
+) -> Result<Replied, CallError> {
+    complete(http, ep, key, model, ask, true).await
+}
+
+/// F19-FR9: one plain-text completion (the handwritten query); `ask.schema` is not sent.
+pub async fn complete_text(
+    http: &Http,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: &str,
+    ask: &JsonAsk,
+) -> Result<Replied, CallError> {
+    complete(http, ep, key, model, ask, false).await
+}
+
+async fn complete(
+    http: &Http,
+    ep: &Endpoints,
+    key: &ProviderKey,
+    model: &str,
+    ask: &JsonAsk,
+    structured: bool,
+) -> Result<Replied, CallError> {
     let secret = [key.expose()];
     let name = provider_name(key.provider);
     let bad = |d: String| CallError::new(CallFail::BadResponse, scrub(&d, &secret));
-    let schema = rig_core::schemars::Schema::try_from(ask.schema.clone())
-        .map_err(|_| bad("internal: the schema is not an object".into()))?;
-    let req = CompletionRequest::new(Message::user(ask.user.clone()))
+    let mut req = CompletionRequest::new(user_content(&ask.user, &ask.images))
         .preamble(ask.system.clone())
-        .max_tokens(ask.max_tokens)
-        .output_schema(schema);
+        .max_tokens(ask.max_tokens);
+    if structured {
+        let schema = rig_core::schemars::Schema::try_from(ask.schema.clone())
+            .map_err(|_| bad("internal: the schema is not an object".into()))?;
+        req = req.output_schema(schema);
+    }
     let t = rig_http(http.clone());
     let reply = match key.provider {
         Provider::OpenAi => {
@@ -219,22 +348,26 @@ pub async fn complete_json(
         }
     };
     let r = reply.map_err(|e| classify_call(key.provider, model, &e, &secret))?;
+    let reported = r.origin.response_model.as_deref();
+    let m = measured(key.provider, model, reported, &r.usage, &r.raw, &secret);
+    let spent = |e: CallError| e.with_spent(m.clone());
     match r.stop() {
         StopReason::Stop => {}
-        StopReason::Length => return Err(bad("The summary was cut off".into())),
+        StopReason::Length => return Err(spent(bad("The summary was cut off".into()))),
         StopReason::Error(_)
             if key.provider == Provider::Anthropic
                 && r.finish_reason() == Some(FinishReason::ContentFilter) =>
         {
-            return Err(bad("Anthropic declined to summarise this meeting".into()));
+            let e = bad("Anthropic declined to summarise this meeting".into());
+            return Err(spent(e));
         }
-        other => return Err(bad(format!("{name} stopped: {}", stop_text(&other)))),
+        other => return Err(spent(bad(format!("{name} stopped: {}", stop_text(&other))))),
     }
     let text = r.text();
     if text.chars().count() > MAX_REPLY_CHARS {
-        return Err(bad("The summary was too long".into()));
+        return Err(spent(bad("The summary was too long".into())));
     }
-    Ok(text)
+    Ok(Replied { text, measured: m })
 }
 
 fn stop_text(s: &StopReason) -> String {
@@ -261,6 +394,7 @@ pub fn classify_call(p: Provider, model: &str, e: &ProviderError, secrets: &[&st
         status,
         retry_after,
         detail: scrub(&detail, secrets),
+        spent: None,
     };
     if let Some(code) = e.provider_response_status().map(|s| s.as_u16()) {
         let body = e.provider_response_body().unwrap_or_default();

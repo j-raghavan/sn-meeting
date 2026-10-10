@@ -61,4 +61,16 @@ class JobLaneTest {
         lane.cancelQueued("m2")
         assertFalse("a cancelled queued job is gone", lane.hasMeetingJob())
     }
+
+    @Test fun aRunningJobReportsHowLongItHasRun() { // F7-FR2
+        val queued = mutableListOf<Runnable>()
+        var now = 1_000L
+        val lane = JobLane(Jobs({ queued += it }, { it.run() })) { now }
+        var during: Long? = -1
+        lane.run("m1", { now += 40_000; during = lane.elapsedMs("m1"); "{}" }) {}
+        assertEquals("queued: not running yet", null, lane.elapsedMs("m1"))
+        queued.removeAt(0).run()
+        assertEquals(40_000L, during)
+        assertEquals("ended", null, lane.elapsedMs("m1"))
+    }
 }

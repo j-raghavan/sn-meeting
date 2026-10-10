@@ -94,6 +94,40 @@ class PresentersTest {
         }
     }
 
+    @Test fun aRunningJobShowsHowLongItHasTakenIn10sSteps() { // F7-FR2 (device finding 2026-10-09)
+        fun run(st: Status, ms: Long?) = Actions.of(sc(st, texts = listOf("a", null)), true, found, found, ms)
+        assertEquals("Summarising…", run(Status.TRANSCRIBED, null).progress)
+        assertEquals("Summarising…", run(Status.TRANSCRIBED, 9_999).progress)
+        assertEquals("Summarising… 0:10", run(Status.TRANSCRIBED, 10_000).progress)
+        assertEquals("Summarising… 0:40", run(Status.TRANSCRIBED, 49_999).progress)
+        assertEquals("Summarising… 1:20", run(Status.TRANSCRIBED, 80_500).progress)
+        assertEquals("You can leave this screen; it carries on.", run(Status.TRANSCRIBED, 19_999).note)
+        assertEquals("Reasoning models can take a minute or two. You can leave this screen; it carries on.",
+            run(Status.TRANSCRIBED, 20_000).note)
+        assertEquals("Transcribing 2/2 0:30", run(Status.TRANSCRIBING, 35_000).progress)
+        assertEquals("no reasoning hint while transcribing", "You can leave this screen; it carries on.",
+            run(Status.TRANSCRIBING, 90_000).note)
+    }
+
+    @Test fun aMeetingWhoseAudioWasLostOffersNoTranscribe() { // F15-FR8 (device finding 2026-10-09)
+        val lost = sc(Status.RECORDED).copy(error = Actions.AUDIO_LOST)
+        val a = Actions.of(lost, false, found, found)
+        assertEquals(null, a.primary)
+        assertEquals("Audio couldn't be recovered.", a.note)
+        assertTrue(a.canDelete)
+        assertEquals(Actions.Job.TRANSCRIBE, Actions.of(sc(Status.RECORDED), false, found, found).primary)
+    }
+
+    @Test fun aCorrectionAddressesTheSidecarsOwnIndex() { // F17-FR10
+        val m = sc(Status.DONE).copy(decisions = listOf(" ", "Ship it", "Hire"),
+            sections = listOf(Section("", " "), Section("Risks", "Budget")))
+        val c = SummaryCard.of(m)!!
+        assertEquals(listOf("Ship it", "Hire"), c.decisions)
+        assertEquals(listOf(1, 2), c.decisionIndex)
+        assertEquals(listOf(1), c.sectionIndex)
+        assertEquals(3, c.decisionCount)
+    }
+
     @Test fun theActionFollowsTheStatus() { // F7-FR2
         fun job(st: Status, f: FailedAt? = null) = Actions.of(sc(st, f), false, found, found).primary
         assertEquals(Actions.Job.TRANSCRIBE, job(Status.RECORDED))

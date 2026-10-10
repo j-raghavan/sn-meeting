@@ -3,13 +3,19 @@
 Meetings is licensed under the GNU Affero General Public License v3.0 only (`AGPL-3.0-only`;
 see `LICENSE`). Every component below is under a permissive licence (MIT, Apache-2.0, BSD,
 ISC, MIT-0, Zlib, Unicode-3.0, CDLA-Permissive-2.0, Unlicense, SIL OFL 1.1), all compatible with
-distributing them as part of an AGPL-3.0 work.
+distributing them as part of an AGPL-3.0 work. SQLite, compiled into the library for the search
+index, is in the public domain. Code adapted from the owner's other projects is listed under
+"Adapted source code": inkread is AGPL-3.0-only like Meetings, and sn-canvas is MIT.
 
 ## Bundled fonts
 
 | Font | Source | License | Styles |
 |------|--------|---------|--------|
 | Pinyon Script | github.com/SorkinType/Pinyon (Google Fonts) | SIL Open Font License 1.1 | Regular |
+| Virgil | Excalidraw's hand-drawn font, via sn-canvas `scripts/fonts` | SIL Open Font License 1.1 | Regular |
+
+Virgil is bundled at `app/src/main/assets/fonts/virgil.ttf` for the notes canvas's onboarding
+hints (F17-FR14), with its licence beside it (`virgil-OFL.txt`).
 
 Pinyon Script is bundled at `app/src/main/assets/fonts/pinyon_script.ttf` for the "Meetings"
 wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
@@ -20,6 +26,26 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 | Icon | Source | License |
 |------|--------|---------|
 | `res/drawable/ic_settings.xml` (gear) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_search.xml` (magnifier, Search) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_home.xml` (house, back to Home) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_tool_{pen,highlighter,eraser}.xml`, `ic_sel_{undo,redo}.xml` (notes tools, via inkread) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_tool_lasso.xml` (lasso, from inkread) | inkread (same author) | AGPL-3.0-only |
+| `res/drawable/ic_tool_listen.xml` (speaker, the Listen tool) | Material Design Icons (Google) | Apache License 2.0 |
+
+## Adapted source code
+
+Copied and adapted (not linked as a dependency) from projects by the same author, J-Raghavan.
+Each adapted file names its origin in its header.
+
+| Meetings file | Adapted from | License |
+|---------------|--------------|---------|
+| `meeting-core/src/ink/{mod,model,codec,select}.rs` | inkread `inkread-ink/src/{lib,model,codec,select}.rs` (world coordinates, recording-clock stroke times, `.inkbin` v2) | AGPL-3.0-only |
+| `app/.../notes/TouchArbiter.kt` (`TouchArbiter`, `Contact`, `PointerInput`) | sn-canvas `android/app/src/main/java/com/sncanvas/canvas/TouchArbiter.kt` | MIT (notice below) |
+| `app/.../notes/TouchArbiter.kt` (`PalmRule`), `app/.../notes/NoteTool.kt` (`forPen`) | inkread `PalmFilter.kt`, `ToolPalette.kt` (`Tool.forStylus`) | AGPL-3.0-only |
+| `app/.../notes/Viewport.kt` (pan, zoom, fit, minimap frame) | sn-canvas `CanvasCore.kt`, `ViewTransforms.kt`, `Minimap.kt` | MIT (notice below) |
+| `app/.../notes/SupernoteInk.kt` | inkread `eink/SupernoteInk.kt`, `eink/SupernoteEinkAdapter.kt` | AGPL-3.0-only |
+| `app/.../notes/Hints.kt` (hand-drawn arrow, caption placement) | sn-canvas `scripts/draw_hints.py`, `src/ui/HelpHints.tsx` | MIT (notice below) |
+| `app/.../notes/DockedToolBar.kt` | inkread `ToolPalette.kt` (vertical docked palette, Define removed, docked collapse) | AGPL-3.0-only |
 
 ## Rust crates linked into `libmeeting.so`
 
@@ -31,6 +57,8 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 
 | Crate | Version | License |
 |-------|---------|---------|
+| adler2 | 2.0.1 | 0BSD OR MIT OR Apache-2.0 |
+| ahash | 0.8.12 | MIT OR Apache-2.0 |
 | android_system_properties | 0.1.6 | MIT OR Apache-2.0 |
 | async-stream | 0.3.6 | MIT |
 | atomic-waker | 1.1.2 | Apache-2.0 OR MIT |
@@ -41,18 +69,24 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | bitflags | 2.13.2 | MIT OR Apache-2.0 |
 | block-buffer | 0.10.4 | MIT OR Apache-2.0 |
 | bytes | 1.12.1 | MIT |
+| calcard | 0.3.14 | Apache-2.0 OR MIT |
 | cfg-if | 1.0.5 | MIT OR Apache-2.0 |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 |
 | chrono | 0.4.45 | MIT OR Apache-2.0 |
+| chrono-tz | 0.10.4 | MIT OR Apache-2.0 |
 | combine | 4.6.8 | MIT |
 | cpufeatures | 0.2.17 | MIT OR Apache-2.0 |
+| crc32fast | 1.5.2 | MIT OR Apache-2.0 |
 | crypto-common | 0.1.7 | MIT OR Apache-2.0 |
 | data-encoding | 2.11.1 | MIT |
 | digest | 0.10.7 | MIT OR Apache-2.0 |
 | dyn-clone | 1.0.20 | MIT OR Apache-2.0 |
 | encoding_rs | 0.8.42 | (Apache-2.0 OR MIT) AND BSD-3-Clause |
 | equivalent | 1.0.2 | Apache-2.0 OR MIT |
+| fallible-iterator | 0.3.0 | MIT/Apache-2.0 |
+| fallible-streaming-iterator | 0.1.9 | MIT/Apache-2.0 |
 | fastrand | 2.5.0 | Apache-2.0 OR MIT |
+| flate2 | 1.1.10 | MIT OR Apache-2.0 |
 | fnv | 1.0.7 | Apache-2.0 / MIT |
 | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 |
 | futures | 0.3.34 | MIT OR Apache-2.0 |
@@ -95,19 +129,25 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | jni | 0.22.4 | MIT OR Apache-2.0 |
 | jni-sys | 0.4.1 | MIT OR Apache-2.0 |
 | libc | 0.2.190 | MIT OR Apache-2.0 |
+| libsqlite3-sys | 0.38.2 | MIT |
 | litemap | 0.8.3 | Unicode-3.0 |
 | log | 0.4.34 | MIT OR Apache-2.0 |
 | lru-slab | 0.1.3 | MIT OR Apache-2.0 OR Zlib |
+| mail-builder | 1.0.0 | Apache-2.0 OR MIT |
+| mail-parser | 0.11.9 | Apache-2.0 OR MIT |
 | memchr | 2.8.3 | Unlicense OR MIT |
 | memo-map | 0.3.4 | Apache-2.0 |
 | mime | 0.3.17 | MIT OR Apache-2.0 |
 | mime_guess | 2.0.5 | MIT |
 | minijinja | 2.24.0 | Apache-2.0 |
+| miniz_oxide | 0.9.1 | MIT OR Zlib OR Apache-2.0 |
 | mio | 1.2.4 | MIT |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 |
 | ordered-float | 5.5.0 | MIT |
 | percent-encoding | 2.3.2 | MIT OR Apache-2.0 |
+| phf | 0.12.1 | MIT |
+| phf_shared | 0.12.1 | MIT |
 | pin-project-lite | 0.2.17 | Apache-2.0 OR MIT |
 | potential_utf | 0.1.6 | Unicode-3.0 |
 | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 |
@@ -127,6 +167,7 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | rig-reqwest | 0.44.0 | MIT |
 | rig-tungstenite | 0.44.0 | MIT |
 | ring | 0.17.14 | Apache-2.0 AND ISC |
+| rusqlite | 0.40.2 | MIT |
 | rustc-hash | 2.1.3 | Apache-2.0 OR MIT |
 | rustls | 0.23.45 | Apache-2.0 OR ISC OR MIT |
 | rustls-pki-types | 1.15.1 | MIT OR Apache-2.0 |
@@ -141,8 +182,10 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | serde_json | 1.0.151 | MIT OR Apache-2.0 |
 | sha1 | 0.10.7 | MIT OR Apache-2.0 |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 |
+| simd-adler32 | 0.3.10 | MIT |
 | simd_cesu8 | 1.2.0 | Apache-2.0 OR MIT |
 | simdutf8 | 0.1.5 | MIT OR Apache-2.0 |
+| siphasher | 1.0.4 | MIT OR Apache-2.0 |
 | slab | 0.4.12 | MIT |
 | smallvec | 1.16.2 | MIT OR Apache-2.0 |
 | socket2 | 0.6.5 | MIT OR Apache-2.0 |
@@ -184,7 +227,39 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | zerovec | 0.11.8 | Unicode-3.0 |
 | zmij | 1.0.23 | MIT |
 
+## Bundled C library
+
+| Library | Via | License |
+|---------|-----|---------|
+| SQLite 3.53.2 (with FTS5) | libsqlite3-sys 0.38.2, feature `bundled` (the search index, F19) | Public domain (https://www.sqlite.org/copyright.html) |
+
 ## License notices
+
+### MIT — sn-canvas (adapted Kotlin files listed under "Adapted source code")
+
+```
+MIT License
+
+Copyright (c) 2026 JRaghavan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 The licenses above that require their notice to accompany a binary, other than MIT and
 Apache-2.0 (whose texts are at https://opensource.org/license/mit and

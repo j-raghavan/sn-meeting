@@ -25,6 +25,13 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Every job that builds the tests links each integration-test binary against the whole
+  # crate graph. With full debug info the linker ran out of room on the runner
+  # (ld: signal 7, bus error), first in rust host, then in coverage. Line tables keep
+  # backtraces and coverage line mapping at a fraction of the size.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: '0'
   # Same exclusion as scripts/gates.sh: the JNI edge runs only on the device.
   COVERAGE_IGNORE: 'meeting-core/src/jni\.rs$'
 
@@ -51,7 +58,9 @@ jobs:
       - name: cargo build (library alone, jni-bridge)
         run: cargo build -p meeting-core --lib --features jni-bridge
       - name: cargo test
-        run: cargo test -p meeting-core
+        run: |
+          df -h . /tmp | sed 's/^/disk: /'
+          cargo test -p meeting-core
       - name: INV5 - jni absent from the host graph
         run: |
           set -euo pipefail

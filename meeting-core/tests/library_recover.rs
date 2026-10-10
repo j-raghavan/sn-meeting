@@ -368,3 +368,50 @@ fn zero_segment_recording_is_flagged() {
     );
     assert_eq!(m["error"], "No audio was recorded");
 }
+
+/// F15-FR8 (device finding 2026-10-09): a crashed recording whose only segment can't be read
+/// or rebuilt says "Audio couldn't be recovered" instead of reading as a silent 0:00 meeting.
+#[test]
+fn a_meeting_whose_audio_is_all_lost_says_so() {
+    let e = Env::new();
+    crashed_while_recording(&e);
+    let app = e.app();
+    recover(&app, false);
+    // The shell couldn't read or repair -01.m4a: it closes the segment at 0.
+    assert_eq!(
+        parse(&app.close_segment_json(ID0, 0, 0)),
+        json!({"ok": true})
+    );
+    let sc = read_sidecar(&e.export(), ID0);
+    assert_eq!(sc.segments[0].flag, Some(SegmentFlag::Empty));
+    assert_eq!(sc.error.as_deref(), Some(meeting::library::AUDIO_LOST));
+    assert_eq!(sc.status, Status::Recorded);
+    // Recovery again changes nothing more.
+    assert_eq!(
+        recover(&app, false),
+        json!({"recovered": [], "measure": [], "flagged": []})
+    );
+
+    // A meeting with one readable segment left keeps its Transcribe.
+    let e2 = Env::new();
+    crashed_while_recording(&e2);
+    let app2 = e2.app();
+    recover(&app2, false);
+    app2.close_segment_json(ID0, 0, 41_000);
+    assert_eq!(read_sidecar(&e2.export(), ID0).error, None);
+}
+
+/// Every segment file gone on the desktop: recovery itself marks the meeting.
+#[test]
+fn recovery_marks_a_meeting_with_every_segment_missing() {
+    let e = Env::new();
+    crashed_while_recording(&e);
+    fs::remove_file(e.export().join(format!("{ID0}-01.m4a"))).unwrap();
+    let app = e.app();
+    let r = recover(&app, false);
+    assert_eq!(r["flagged"][0]["flag"], "missing");
+    assert_eq!(
+        read_sidecar(&e.export(), ID0).error.as_deref(),
+        Some(meeting::library::AUDIO_LOST)
+    );
+}

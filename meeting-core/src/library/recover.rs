@@ -20,6 +20,11 @@ pub struct Recovery {
     /// Additive: omitted when empty.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub no_audio: Vec<String>,
+    /// F15-FR9 / F15-AC8: near-live meetings recovered from `recording` with chunks still to
+    /// send (and sending allowed): the shell runs their Stop job, so the transcript catches up
+    /// and the minutes fill in. Omitted when empty.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub resume: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -28,6 +33,11 @@ pub struct Measure {
     pub id: String,
     pub index: usize,
     pub path: String,
+    /// F15-FR8: the segment's finalised chunk files, in order. If the segment file can't be
+    /// read (its writer was killed before it wrote the index), the shell has the core repair it
+    /// from its frame journal, else rebuild it from these (`mp4.rs`), then measures it. Omitted when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub chunks: Vec<super::Piece>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -39,6 +49,23 @@ pub struct Flagged {
 }
 
 pub(crate) const INTERRUPTED: &str = "Transcription was interrupted";
+/// F15-FR8: every segment file of a recorded meeting is missing, empty or unreadable, and no
+/// chunk holds text: there is nothing to transcribe, so the meeting says so (and the shell
+/// offers no Transcribe) instead of reading as a silent 0:00 recording.
+pub const AUDIO_LOST: &str = "Audio couldn't be recovered";
+
+/// Set [`AUDIO_LOST`] on a recorded meeting that has no audio left; `true` when it changed.
+pub(crate) fn mark_lost(sc: &mut Sidecar) -> bool {
+    let lost = sc.status == Status::Recorded
+        && !sc.segments.is_empty()
+        && sc.segments.iter().all(|s| s.flag.is_some())
+        && sc.chunks.iter().all(|c| c.text.is_none());
+    if !lost || sc.error.as_deref() == Some(AUDIO_LOST) {
+        return false;
+    }
+    sc.error = Some(AUDIO_LOST.into());
+    true
+}
 
 impl Library<'_> {
     /// F3-FR5. `recording` with no live recording becomes `recorded`; `transcribing` with no
@@ -48,7 +75,8 @@ impl Library<'_> {
     /// has its open, non-empty segments listed (D3: legacy audio a Transcribe tap gave a
     /// sidecar before it was measured). The live meeting and running jobs keep their status. Unreadable sidecars are not touched; legacy audio (no sidecar) is
     /// only listed for measuring.
-    pub fn recover(&self, live: &Liveness) -> Recovery {
+    /// `chunks` is `<filesDir>/chunks`, where a near-live meeting's chunk files are (F15-FR8).
+    pub fn recover(&self, live: &Liveness, chunks: Option<&Path>) -> Recovery {
         let mut r = Recovery::default();
         for (id, f) in self.scan() {
             if !f.has_sidecar {
@@ -100,18 +128,32 @@ impl Library<'_> {
                 super::extend_duration(&mut sc);
             }
             let longer = sc.duration_ms != before;
-            let changed = moved || canonical || empty || longer || !flagged.is_empty();
+            let lost = mark_lost(&mut sc);
+            let changed = moved || canonical || empty || longer || lost || !flagged.is_empty();
             if changed && sidecar::write(&f.dir, &sc).is_err() {
                 continue; // not recovered after all; the next launch tries again
             }
             if moved {
                 r.recovered.push(id.clone());
+                let sending = sc.live.as_ref().is_some_and(|l| l.paused.is_none());
+                let pending = sc
+                    .chunks
+                    .iter()
+                    .any(|c| c.state == crate::sidecar::ChunkState::Pending);
+                if sc.status == Status::Recorded && sending && pending {
+                    r.resume.push(id.clone());
+                }
             }
             if empty {
                 r.no_audio.push(id);
             }
             r.flagged.extend(flagged);
-            r.measure.extend(measure);
+            r.measure.extend(measure.into_iter().map(|mut m| {
+                if let Some(root) = chunks {
+                    m.chunks = super::chunks::pieces(root, &sc, m.index);
+                }
+                m
+            }));
         }
         r
     }
@@ -129,6 +171,7 @@ fn legacy_measures(id: &str, f: &super::Found) -> Vec<Measure> {
                 id: id.to_owned(),
                 index,
                 path: path.to_string_lossy().into_owned(),
+                chunks: Vec::new(),
             })
         })
         .collect()
@@ -148,6 +191,7 @@ fn unmeasured(id: &str, dir: &Path, sc: &Sidecar) -> Vec<Measure> {
                 id: id.to_owned(),
                 index,
                 path: path.to_string_lossy().into_owned(),
+                chunks: Vec::new(),
             })
         })
         .collect()
@@ -180,6 +224,7 @@ fn check_segments(id: &str, dir: &Path, sc: &mut Sidecar) -> (Vec<Flagged>, Vec<
                 id: id.to_owned(),
                 index,
                 path: path.to_string_lossy().into_owned(),
+                chunks: Vec::new(),
             }),
             None => {}
         }

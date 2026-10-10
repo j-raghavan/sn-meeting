@@ -1,116 +1,281 @@
 package dev.jraghavan.snmeeting
 
 import android.app.Activity
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.jraghavan.snmeeting.model.AgendaDay
+import dev.jraghavan.snmeeting.model.AgendaRow
+import dev.jraghavan.snmeeting.model.CalendarFormat
+import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.HomeRows
+import dev.jraghavan.snmeeting.model.Marks
+import dev.jraghavan.snmeeting.model.TodoRef
+import java.time.LocalDate
+import java.time.ZoneId
 
 /**
- * Home's two side-by-side lists (F6-FR1, owner decision 2026-10-07): the recent meetings on the
- * left and every open to-do on the right, equal-height cards that scroll inside, each heading
- * with a count. Rows are rebuilt only when the core's answer arrives.
+ * Home's layout A (F18-FR7, owner mock-up 2026-10-09): the week strip, the day's timeline on the
+ * left ("Today ‹ ›", events and recordings in time order, the current event boxed) and the open
+ * to-dos on the right. Rows are rebuilt only when the core's answer for them changes; the
+ * recording timer is the one view that ticks (NFR2).
  */
-class HomeLists(private val a: Activity, private val ui: Inkwell, private val onMeeting: (String) -> Unit) {
-    private val meetingTitle = ui.eyebrowItalic("Recent meetings")
-    private val todoTitle = ui.eyebrowItalic("Open to-dos")
-    private val meetingRows = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
-    private val todoRows = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+class HomeLists(private val a: Activity, private val ui: Inkwell, private val actions: Actions) {
 
-    /** Two equal columns, equal heights, with a gutter. */
-    val view: View = LinearLayout(a).apply {
-        orientation = LinearLayout.HORIZONTAL
-        addView(section(meetingTitle, meetingRows), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginEnd = ui.dim(12) })
-        addView(section(todoTitle, todoRows), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply { marginStart = ui.dim(12) })
+    /** What a tap on Home does; MainActivity owns the flows. */
+    interface Actions {
+        fun onDay(d: LocalDate)
+        fun onEvent(r: AgendaRow)
+        fun onMeeting(id: String)
+        fun onUnscheduled(r: AgendaRow)
+        fun onRecordEvent(r: AgendaRow)
+        fun onTick(t: TodoRef)
+        fun onTodoSource(t: TodoRef)
+        fun onRecent()
     }
 
-    /** Heading over a card that fills the column's height and scrolls inside. */
-    private fun section(title: TextView, rows: LinearLayout): View = LinearLayout(a).apply {
-        orientation = LinearLayout.VERTICAL
-        addView(title, ui.fullWidth())
-        addView(ui.spacer(ui.dim(14)))
-        addView(ui.scrollCard(rows), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+    private val zone get() = ZoneId.systemDefault()
+
+    val week: LinearLayout = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+    private val dayTitle = ui.body("Today", 19f, bold = true)
+    private val timeline = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+    private val todoTitle = ui.eyebrowItalic("Open to-dos").apply { gravity = Gravity.START }
+    private val todoRows = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+    private val dayColumn = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+
+    /** The recording timer inside the current event's box, when there is one (F18-FR7). */
+    var timer: TextView? = null
+        private set
+
+    private fun arrow(text: String, onClick: () -> Unit) = ui.body(text, 22f).apply {
+        setPadding(ui.dim(14), ui.dim(2), ui.dim(14), ui.dim(2)); isClickable = true; setOnClickListener { onClick() }
+    }
+
+    private var shown: LocalDate = LocalDate.now()
+    /** Whether any calendar link is set: only then can a recording be linked (F18-FR10). */
+    private var hasLinks = false
+    /** The rows of the day shown: whether a recording can be linked depends on them. */
+    private var dayRows: List<AgendaRow> = emptyList()
+
+    /** The two columns: the day (wider) and the to-dos, equal heights, each scrolling inside. */
+    val columns: View = LinearLayout(a).apply {
+        orientation = LinearLayout.HORIZONTAL
+        dayColumn.addView(LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(dayTitle)
+            addView(arrow("‹") { actions.onDay(shown.minusDays(1)) })
+            addView(arrow("›") { actions.onDay(shown.plusDays(1)) })
+            addView(View(a), LinearLayout.LayoutParams(0, 1, 1f))
+            // OQ22: the five most recent meetings stay one tap away.
+            addView(ui.eyebrow("Recent  ›").apply {
+                setPadding(ui.dim(8), ui.dim(8), 0, ui.dim(8)); isClickable = true; setOnClickListener { actions.onRecent() }
+            })
+        }, ui.fullWidth())
+        dayColumn.addView(ui.spacer(ui.dim(10)))
+        dayColumn.addView(ui.scrollCard(timeline), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(dayColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 3f).apply { marginEnd = ui.dim(12) })
+        addView(LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(todoTitle, ui.fullWidth().apply { topMargin = ui.dim(6) })
+            addView(ui.spacer(ui.dim(14)))
+            addView(ui.scrollCard(todoRows), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 2f).apply { marginStart = ui.dim(12) })
+    }
+
+    /** Mon–Sun: today a filled circle, the shown day outlined, a dot under days with meetings. */
+    fun showWeek(days: List<LocalDate>, today: LocalDate, selected: LocalDate, dots: Set<LocalDate>) {
+        week.removeAllViews()
+        days.forEach { d ->
+            week.addView(LinearLayout(a).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_HORIZONTAL
+                isClickable = true
+                setOnClickListener { actions.onDay(d) }
+                addView(ui.eyebrow(CalendarFormat.weekday(d), if (d == today) ui.ink else ui.textMuted).apply { gravity = Gravity.CENTER })
+                val size = ui.dim(40)
+                addView(TextView(a).apply {
+                    text = d.dayOfMonth.toString(); gravity = Gravity.CENTER; textSize = ui.fs(17f); typeface = ui.serifBold
+                    setTextColor(if (d == today) Color.WHITE else ui.ink)
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(if (d == today) ui.ink else Color.WHITE)
+                        if (d == selected && d != today) setStroke(maxOf(1, ui.dp(2)), ui.ink)
+                    }
+                }, LinearLayout.LayoutParams(size, size).apply { topMargin = ui.dim(6) })
+                val dot = ui.dim(7)
+                addView(View(a).apply {
+                    background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(ui.ink) }
+                    visibility = if (d in dots) View.VISIBLE else View.INVISIBLE
+                }, LinearLayout.LayoutParams(dot, dot).apply { topMargin = ui.dim(6) })
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
     }
 
     private fun empty(rows: LinearLayout, text: String) {
         rows.addView(ui.note(text).apply { setPadding(0, ui.dim(14), 0, ui.dim(14)) })
     }
 
-    /** [error]: the core couldn't list them; shown in place of the rows. */
-    fun showMeetings(meetings: List<HomeRows.Meeting>, error: String? = null) {
-        meetingRows.removeAllViews()
-        meetingTitle.text = if (error != null) "Recent meetings" else "Recent meetings  ·  ${meetings.size}"
-        if (error != null) return empty(meetingRows, "Couldn't read the meetings: $error")
-        if (meetings.isEmpty()) return empty(meetingRows, "No meetings yet. Tap ＋ New to record one.")
-        meetings.forEachIndexed { i, m ->
-            if (i > 0) meetingRows.addView(ui.hairline())
-            meetingRows.addView(LinearLayout(a).apply {
+    /** The day's rows. [recording]: a meeting is being recorded (the box shows its timer). */
+    fun showDay(day: AgendaDay?, d: LocalDate, today: LocalDate, hasLinks: Boolean, recording: Boolean, error: String? = null) {
+        shown = d
+        this.hasLinks = hasLinks
+        dayTitle.text = CalendarFormat.dayTitle(d, today)
+        timeline.removeAllViews()
+        timer = null
+        if (error != null) return empty(timeline, "Couldn't read the day: $error")
+        val all = day?.allDay.orEmpty()
+        val rows = day?.rows.orEmpty()
+        dayRows = rows
+        if (all.isEmpty() && rows.isEmpty()) {
+            return empty(timeline, if (hasLinks) "Nothing on the calendar. Tap ＋ New to record a meeting."
+                else "No recordings this day. Tap ＋ New to record one.")
+        }
+        all.forEach { r ->
+            timeline.addView(LinearLayout(a).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, ui.dim(14), 0, ui.dim(14))
+                setPadding(0, ui.dim(10), 0, ui.dim(10))
                 isClickable = true
-                setOnClickListener { onMeeting(m.id) }
-                addView(LinearLayout(a).apply {
-                    orientation = LinearLayout.VERTICAL
-                    // Title first (serif, bold); an untitled meeting reads muted until it is named.
-                    addView(ui.body(m.title, 18f, bold = !m.untitled).apply {
-                        if (m.untitled) { setTextColor(ui.textMuted); typeface = ui.serifItalic }
-                    })
-                    addView(ui.eyebrow(m.stamp), ui.wrap().apply { topMargin = ui.dim(4) })
-                    addView(ui.note(m.detail), ui.wrap().apply { topMargin = ui.dim(3) })
-                    // Half-width column: the status chip sits under the details, not beside them.
-                    addView(ui.chip(m.chip, filled = m.attention), ui.wrap().apply { topMargin = ui.dim(8) })
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-                addView(ui.body("→", 18f).apply { setPadding(ui.dim(16), 0, 0, 0) })
+                setOnClickListener { actions.onEvent(r) }
+                addView(ui.eyebrow("All day", ui.textMuted), LinearLayout.LayoutParams(ui.dim(110), LinearLayout.LayoutParams.WRAP_CONTENT))
+                addView(ui.body(CalendarFormat.rowTitle(r) ?: "", 16f).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             })
+            timeline.addView(ui.hairline())
+        }
+        rows.forEachIndexed { i, r ->
+            if (i > 0) timeline.addView(ui.hairline())
+            timeline.addView(if (r.current) currentBox(r, recording) else row(r))
         }
     }
 
-    /**
-     * S1: no all-files access yet. In place of the meetings, why it is needed and a Grant access
-     * pill that opens the system screen (only when tapped).
-     */
-    fun showStorageNeeded(text: String, onGrant: () -> Unit) {
-        meetingRows.removeAllViews(); todoRows.removeAllViews()
-        meetingTitle.text = "Recent meetings"; todoTitle.text = "Open to-dos"
-        meetingRows.addView(ui.eyebrow("All-files access"), ui.wrap().apply { topMargin = ui.dim(14) })
-        meetingRows.addView(ui.body(text, 17f), ui.wrap().apply { topMargin = ui.dim(8) })
-        meetingRows.addView(ui.pill("Grant access", size = 16f, onClick = onGrant), ui.wrap().apply { topMargin = ui.dim(16); bottomMargin = ui.dim(14) })
-        empty(todoRows, "To-dos appear here once Meetings can read your recordings.")
+    /** One row: time and title, room and attendees, then the four marks in fixed places. */
+    private fun row(r: AgendaRow): View = LinearLayout(a).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, ui.dim(14), 0, ui.dim(14))
+        isClickable = true
+        setOnClickListener {
+            when (CalendarFormat.rowTap(r)) {
+                CalendarFormat.RowTap.EVENT -> actions.onEvent(r)
+                CalendarFormat.RowTap.MEETING -> r.meetingId?.let(actions::onMeeting)
+                CalendarFormat.RowTap.NONE -> Unit
+            }
+        }
+        addView(LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(ui.eyebrow(CalendarFormat.range(r.startMs, r.endMs, zone)))
+            val title = CalendarFormat.rowTitle(r)
+            addView(ui.body(title ?: Format.UNTITLED, 17f, bold = title != null).apply {
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                if (title == null) { typeface = ui.serifItalic; setTextColor(ui.textMuted) }
+            }, ui.fullWidth().apply { topMargin = ui.dim(4) })
+            val detail = CalendarFormat.detail(r)
+            if (detail.isNotEmpty()) addView(ui.note(detail, 13f).apply { maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                ui.fullWidth().apply { topMargin = ui.dim(2) })
+            // Length and cost; for a recording outside any event, its own link control.
+            val line = CalendarFormat.meetingLine(r)
+            val link = CalendarFormat.canLink(r, dayRows)
+            if (line.isNotEmpty() || link) addView(LinearLayout(a).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(ui.eyebrow(line, ui.inkSoft).apply { isAllCaps = false; text = line },
+                    LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                if (link) addView(ui.eyebrow(CalendarFormat.LINK).apply {
+                    gravity = Gravity.CENTER_VERTICAL
+                    minHeight = ui.dp(48) // a touch area of its own; the rest of the row opens the meeting
+                    setPadding(ui.dim(12), 0, ui.dim(4), 0)
+                    isClickable = true
+                    setOnClickListener { actions.onUnscheduled(r) }
+                })
+            }, ui.fullWidth().apply { topMargin = ui.dim(4) })
+            // F18-FR7: what the meeting has, in words (also what a screen reader says).
+            val has = CalendarFormat.has(r.marks, r.meetingId?.let { LongJobs.lane.isRunning(it) } == true)
+            if (has.isNotEmpty()) addView(ui.eyebrow(has, ui.inkSoft).apply { contentDescription = has },
+                ui.fullWidth().apply { topMargin = ui.dim(4) })
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
     }
 
-    /** Open to-dos from every meeting, not just the five listed. [onTick] marks one done. */
-    fun showTodos(todos: List<HomeRows.Todo>, error: String? = null, onTick: ((HomeRows.Todo) -> Unit)? = null) {
+    /** The current event: boxed, with "● Record" (or the running timer) and "From last time". */
+    private fun currentBox(r: AgendaRow, recording: Boolean): View = LinearLayout(a).apply {
+        orientation = LinearLayout.VERTICAL
+        background = ui.outline(ui.dim(6))
+        setPadding(ui.dim(16), ui.dim(12), ui.dim(12), ui.dim(14))
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = ui.dim(8); bottomMargin = ui.dim(8)
+        }
+        addView(row(r))
+        addView(LinearLayout(a).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ui.eyebrow("Now", ui.ink), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            if (recording) {
+                addView(ui.body("● 0:00:00", 18f, bold = true).also { timer = it })
+            } else {
+                addView(ui.pill("●  Record", filled = true, size = 16f) { actions.onRecordEvent(r) })
+            }
+        })
+        if (r.fromLastTime.isNotEmpty()) {
+            addView(ui.eyebrow("From last time", ui.inkSoft), ui.fullWidth().apply { topMargin = ui.dim(12) })
+            r.fromLastTime.forEach { t -> addView(todoRow(t, showSource = false)) }
+        }
+    }
+
+    /** F6-FR1's rule: one kind of to-do, from every meeting; each names its meeting and date. */
+    fun showTodos(todos: List<TodoRef>, error: String? = null) {
         todoRows.removeAllViews()
         todoTitle.text = if (error != null) "Open to-dos" else "Open to-dos  ·  ${todos.size}"
         if (error != null) return empty(todoRows, "Couldn't read the to-dos: $error")
         if (todos.isEmpty()) return empty(todoRows, "Nothing open. To-dos appear here after a meeting is transcribed.")
         todos.forEachIndexed { i, t ->
             if (i > 0) todoRows.addView(ui.hairline())
-            todoRows.addView(LinearLayout(a).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, ui.dim(14), 0, ui.dim(14))
-                addView(ui.checkbox(false).apply {
-                    if (onTick != null) {
-                        isClickable = true
-                        setOnClickListener {
-                            // Ticked at once (one redraw); the row leaves when the list is re-read.
-                            isClickable = false; text = "✓"; setTextColor(android.graphics.Color.WHITE)
-                            background = ui.outline(ui.dim(3), ui.ink)
-                            onTick(t)
-                        }
-                    }
-                })
-                addView(LinearLayout(a).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(ui.dim(16), 0, 0, 0)
-                    addView(ui.body(t.text, 17f))
-                    if (t.meta.isNotEmpty()) addView(ui.note(t.meta, 13f), ui.wrap().apply { topMargin = ui.dim(3) })
-                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            })
+            todoRows.addView(todoRow(t, showSource = true))
         }
+    }
+
+    private fun todoRow(t: TodoRef, showSource: Boolean): View = LinearLayout(a).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(0, ui.dim(12), 0, ui.dim(12))
+        addView(ui.checkbox(false).apply {
+            isClickable = true
+            setOnClickListener {
+                // Ticked at once (one redraw); the row leaves when the list is re-read.
+                isClickable = false; text = "✓"; setTextColor(Color.WHITE)
+                background = ui.outline(ui.dim(3), ui.ink)
+                actions.onTick(t)
+            }
+        })
+        addView(LinearLayout(a).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(ui.dim(14), 0, 0, 0)
+            addView(ui.body(t.text, 16f))
+            val meta = if (showSource) CalendarFormat.todoSource(t) else HomeRows.todo(t).meta
+            if (meta.isNotEmpty()) addView(ui.note(meta, 13f).apply {
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+                if (showSource) { isClickable = true; setOnClickListener { actions.onTodoSource(t) } }
+            }, ui.wrap().apply { topMargin = ui.dim(3) })
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    }
+
+    /** S1: no all-files access yet; why it is needed and Grant access, in place of the day. */
+    fun showStorageNeeded(text: String, onGrant: () -> Unit) {
+        timeline.removeAllViews(); todoRows.removeAllViews()
+        timer = null
+        timeline.addView(ui.eyebrow("All-files access"), ui.wrap().apply { topMargin = ui.dim(14) })
+        timeline.addView(ui.body(text, 17f), ui.wrap().apply { topMargin = ui.dim(8) })
+        timeline.addView(ui.pill("Grant access", size = 16f, onClick = onGrant), ui.wrap().apply { topMargin = ui.dim(16); bottomMargin = ui.dim(14) })
+        empty(todoRows, "To-dos appear here once Meetings can read your recordings.")
+    }
+
+    companion object {
+        /** A to-do's meeting, as the right column names it ("Weekly sync · Wed 7 Oct"). */
+        fun untitled(t: TodoRef) = t.meetingTitle?.ifBlank { null } ?: Format.UNTITLED
     }
 }

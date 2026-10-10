@@ -68,7 +68,15 @@ data class SettingsView(
     val origin: String, val effectiveTranscribe: Effective, val effectiveSummarise: Effective,
     val saveFolderPath: String, val effectiveDefaultTemplate: String, val keys: Map<String, KeyStatus>,
     val updates: UpdatePrefs = UpdatePrefs(),
+    /** F15 / D14: [STANDARD] (MediaRecorder, the default) or [NEAR_LIVE]. */
+    val recorder: String = STANDARD,
+    /** F15-FR12: the near-live notice answered, per provider. */
+    val liveNoticeShown: Map<String, Boolean> = emptyMap(),
+    /** F17-FR2: the notes bar's side and state, Focus, and notes with the minutes. */
+    val notes: dev.jraghavan.snmeeting.notes.NotesPrefs = dev.jraghavan.snmeeting.notes.NotesPrefs(),
 ) {
+    val nearLive get() = recorder == NEAR_LIVE
+
     fun effective(role: String) = if (role == TRANSCRIBE) effectiveTranscribe else effectiveSummarise
     fun choice(role: String) = if (role == TRANSCRIBE) transcribe else summarise
 
@@ -76,6 +84,8 @@ data class SettingsView(
         const val TRANSCRIBE = "transcribe"
         const val SUMMARISE = "summarise"
         val PROVIDERS = listOf("openai", "gemini", "anthropic")
+        const val STANDARD = "standard"
+        const val NEAR_LIVE = "near-live"
 
         /** Anthropic takes no audio (Non-Goals), so it summarises only. */
         fun providersFor(role: String) = if (role == TRANSCRIBE) listOf("openai", "gemini") else PROVIDERS
@@ -103,6 +113,9 @@ data class SettingsView(
                 effectiveDefaultTemplate = e.strOr("defaultTemplate", default),
                 keys = PROVIDERS.mapNotNull { p -> k?.obj(p)?.let { p to KeyStatus.from(it) } }.toMap(),
                 updates = UpdatePrefs.from(s.obj("updates")),
+                recorder = if (s.str("recorder") == NEAR_LIVE) NEAR_LIVE else STANDARD,
+                liveNoticeShown = PROVIDERS.associateWith { s.obj("liveNoticeShown")?.bool(it) ?: false },
+                notes = dev.jraghavan.snmeeting.notes.NotesPrefs.from(s.obj("notes")),
             )
         }
     }
@@ -117,6 +130,10 @@ object SettingsPatch {
     fun model(role: String, m: String) = """{"$role":{"model":${if (m.isBlank()) "null" else CoreJson.quote(m.trim())}}}"""
     fun defaultTemplate(id: String) = """{"defaultTemplate":${CoreJson.quote(id)}}"""
     /** F2-AC3's hidden segment length; null returns to the standard plan. */
+    /** F15-FR12: the near-live notice was accepted for [provider]. */
+    fun liveNoticeShown(provider: String) = """{"liveNoticeShown":{${CoreJson.quote(provider)}:true}}"""
+    /** F15: Standard or Near-live (new). */
+    fun recorder(r: String) = """{"recorder":${CoreJson.quote(r)}}"""
     fun segmentMs(ms: Long?) = """{"debug":{"segmentMs":${ms ?: "null"}}}"""
     /** Turning auto-check off turns auto-install off; turning auto-install on turns auto-check
      *  on (as inkread's Settings). */
@@ -185,5 +202,25 @@ object ProviderRows {
             else -> "the default"
         }
         return "$m  ·  $from"
+    }
+}
+
+/**
+ * F15-FR12 (Security): the one-time notice before the first near-live recording to a provider.
+ * Accepting sends the chunks while recording; declining records anyway, and the chunks wait
+ * until the user taps Transcribe.
+ */
+object LiveNotice {
+    const val TITLE = "Before you record"
+    const val SEND = "Send while recording"
+    const val WITHOUT = "Record without it"
+
+    /** The notice to show before recording, or null (Standard recorder, or already answered). */
+    fun of(s: SettingsView): String? {
+        if (!s.nearLive) return null
+        val p = s.effectiveTranscribe.provider
+        if (s.liveNoticeShown[p] == true) return null
+        return "Audio is sent to ${Format.providerName(p)} while you record, about twice a minute, using your key. " +
+            "Each provider may keep what it receives under its own policy; Meetings can't prevent that."
     }
 }

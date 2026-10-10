@@ -76,17 +76,24 @@ object CoreJobs {
  * running, so a screen rebuilt mid-job still shows its progress, and tells listeners when a job
  * ends (Home refreshes, F6-FR4).
  */
-class JobLane(private val jobs: Jobs) {
+class JobLane(private val jobs: Jobs, private val nowMs: () -> Long = { System.nanoTime() / 1_000_000 }) {
     /** One per queued or running job; a cancelled one that hasn't started never runs (N9). */
     private class Ticket {
         var started = false
         var cancelled = false
+        /** When it began to run ([nowMs]), for the progress line's elapsed time (F7-FR2). */
+        var startedAtMs = 0L
     }
 
     private val tickets = HashMap<String, Ticket>()
     private val listeners = LinkedHashSet<(String) -> Unit>()
 
     fun isRunning(key: String) = synchronized(tickets) { key in tickets }
+
+    /** How long [key]'s job has been running; null when it is queued or not on the lane. */
+    fun elapsedMs(key: String): Long? = synchronized(tickets) {
+        tickets[key]?.takeIf { it.started }?.let { nowMs() - it.startedAtMs }
+    }
 
     /** A transcribe or summarise job is queued or running: any key but Test connection's
      *  `test:<role>`. The updater waits for these (F14-FR8). Any thread. */
@@ -100,7 +107,10 @@ class JobLane(private val jobs: Jobs) {
             tickets[key] = t
         }
         jobs.run({
-            val go = synchronized(tickets) { if (!t.cancelled) t.started = true; t.started }
+            val go = synchronized(tickets) {
+                if (!t.cancelled) { t.started = true; t.startedAtMs = nowMs() }
+                t.started
+            }
             if (go) work() else CANCELLED
         }) { r ->
             if (t.cancelled) return@run // already off the lane, listeners told
@@ -162,4 +172,64 @@ object PreviewJobs {
     }
 
     fun run(work: () -> String, done: (String) -> Unit) = jobs.run(work, done)
+}
+
+/**
+ * F19: Search's own threads, so neither lane waits for it nor it for them. Index updates and
+ * rebuilds (seconds, up to a minute) run on one; queries on the other, so a search during a
+ * rebuild answers at once from what is indexed ("Still indexing…").
+ */
+object SearchJobs {
+    private fun jobs(name: String) = lazy {
+        val worker = Executors.newSingleThreadExecutor { r -> Thread(r, name).apply { isDaemon = true } }
+        val main = Handler(Looper.getMainLooper())
+        Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) }
+    }
+    private val index by jobs("meeting-index")
+    private val query by jobs("meeting-search")
+
+    /** The app data dir: these threads may run before CoreJobs' nativeInit, so each call makes
+     *  sure of it first (idempotent and cheap). */
+    @Volatile private var dir: String? = null
+
+    fun init(appDataDir: String) { dir = appDataDir }
+
+    private fun initialised(work: () -> String): () -> String = {
+        val d = dir
+        val init = if (d == null) null else NativeBridge.nativeInit(d)
+        if (init != null && init.contains("\"error\"")) init else work()
+    }
+
+    /** nativeIndexUpdate or nativeRebuildIndex; queued in order, one at a time. */
+    fun index(work: () -> String, done: (String) -> Unit) = index.run(initialised(work), done)
+
+    /** nativeSearch, nativeIndexStatus, nativeRecogniseQuery. */
+    fun query(work: () -> String, done: (String) -> Unit) = query.run(initialised(work), done)
+
+    /** On launch, resume and after a job: bring the index up to date in the background. */
+    fun refresh() = index.exec { initialised { NativeBridge.nativeIndexUpdate() }() }
+}
+
+/**
+ * F18-FR4: calendar refreshes on their own thread. A refresh is one HTTPS GET of up to 30 s per
+ * link, so on [CoreJobs] it would hold up a tick or the recorder's next segment.
+ */
+object CalendarJobs {
+    private val jobs by lazy {
+        val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "meeting-calendar").apply { isDaemon = true } }
+        val main = Handler(Looper.getMainLooper())
+        Jobs(worker, { main.post(it) }) { Log.w("Meetings", it) }
+    }
+
+    /** The app data dir, as [SearchJobs]: this thread may run before CoreJobs' nativeInit. */
+    @Volatile private var dir: String? = null
+
+    fun init(appDataDir: String) { dir = appDataDir }
+
+    /** nativeCalendarRefresh([force]); the reply on the main thread. */
+    fun refresh(force: Boolean, done: (String) -> Unit) = jobs.run({
+        val d = dir
+        val init = if (d == null) null else NativeBridge.nativeInit(d)
+        if (init != null && init.contains("\"error\"")) init else NativeBridge.nativeCalendarRefresh(force)
+    }, done)
 }

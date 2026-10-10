@@ -28,7 +28,8 @@ fn spike_files_are_single_segment_recorded_meetings() {
         list[0],
         json!({"id": SPIKE_B, "startedAt": "2026-10-07T21:17:06-07:00", "startedAtMs": T0,
                "durationMs": null, "status": "recorded", "failedAt": null, "title": null,
-               "segmentCount": 1, "openTodoCount": 0, "source": "legacy", "folder": e.export()})
+               "segmentCount": 1, "openTodoCount": 0, "source": "legacy", "folder": e.export(),
+               "spend": {"usd": 0.0, "unpriced": 0, "records": 0, "label": "—"}})
     );
     assert_eq!(list[1]["id"], SPIKE_A);
     assert!(

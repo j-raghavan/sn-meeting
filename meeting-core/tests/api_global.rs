@@ -19,6 +19,14 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("beginMeeting", api::begin_meeting(0, "{}", "{}")),
         ("addSegment", api::add_segment("x", "y", 0)),
         ("closeSegment", api::close_segment("x", 0, 0)),
+        ("chunkReady", api::chunk_ready("x", 0, "y", 0, 1, -1)),
+        ("startLive", api::start_live("x", true)),
+        ("liveDrain", api::live_drain("x")),
+        ("liveTranscript", api::live_transcript("x", 0)),
+        ("chunksToCut", api::chunks_to_cut("x")),
+        ("addMark", api::add_mark("x", 0)),
+        ("setMarkLabel", api::set_mark_label("x", "m", "")),
+        ("deleteMark", api::delete_mark("x", "m")),
         ("finishMeeting", api::finish_meeting("x", 0, "")),
         ("listRecent", api::list_recent(5)),
         ("getMeeting", api::get_meeting("x")),
@@ -40,6 +48,43 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("saveTemplate", api::save_template("{}")),
         ("resetTemplate", api::reset_template("../x")),
         ("previewTemplate", api::preview_template("{}")),
+        ("getRates", api::get_rates()),
+        ("spend", api::spend("2026-10", "2026-10")),
+        ("repriceAll", api::reprice_all(true)),
+        ("setRates", api::set_rates("[]")),
+        ("search", api::search("x", "all", 0)),
+        ("recogniseQuery", api::recognise_query(b"x")),
+        ("indexStatus", api::index_status()),
+        ("indexUpdate", api::index_update()),
+        ("rebuildIndex", api::rebuild_index()),
+        ("calendarLinks", api::calendar_links()),
+        ("calendarRefresh", api::calendar_refresh(false)),
+        ("agenda", api::agenda("2026-10-09", "2026-10-09")),
+        ("event", api::event("0123abcd:u:-")),
+        ("linkEvent", api::link_event("x", "")),
+        ("notesOpen", api::notes_open("x")),
+        (
+            "inkStroke",
+            api::ink_stroke("x", "canvas", 0, 1.0, &[0.0; 4]),
+        ),
+        ("inkErase", api::ink_erase("x", "canvas", &[0.0; 2], 1.0)),
+        ("inkUndo", api::ink_history("x", "canvas", false)),
+        ("inkRedo", api::ink_history("x", "canvas", true)),
+        ("inkLasso", api::ink_lasso("x", "canvas", &[0.0; 6])),
+        ("inkMove", api::ink_move("x", "canvas", "[]", 1.0, 1.0)),
+        ("inkDelete", api::ink_delete("x", "canvas", "[]")),
+        (
+            "inkStrokesForDraw",
+            api::ink_strokes("x", "canvas", [0.0; 4]),
+        ),
+        ("inkSave", api::ink_save("x")),
+        ("editMinutes", api::edit_minutes("x", "{}")),
+        ("inkHit", api::ink_hit("x", "canvas", 0.0, 0.0, 1.0)),
+        ("notesClose", api::notes_close("x", 0.0, 0.0, 1.0)),
+        (
+            "beginMeetingForEvent",
+            api::begin_meeting_for_event(0, "{}", "{}", ""),
+        ),
     ]
 }
 
@@ -116,8 +161,8 @@ fn init_then_the_app_exports() {
     );
 }
 
-/// Every Kotlin external but nativeVersion, nativeInit and nativeUpdateDecide (F14-FR5: a pure
-/// comparison) needs the app, so each must be in `app_exports` (checked before and after init
+/// Every Kotlin external but nativeVersion, nativeInit, nativeUpdateDecide (F14-FR5: a pure
+/// comparison) nativeChunkPlan (F15-FR4: a pure plan) and the nativeMp4* writer calls (F15-FR1) needs the app, so each must be in `app_exports` (checked before and after init
 /// above).
 #[test]
 fn app_exports_cover_the_bridge() {
@@ -135,7 +180,10 @@ fn app_exports_cover_the_bridge() {
             let first = c.next().unwrap().to_ascii_lowercase();
             std::iter::once(first).chain(c).collect()
         })
-        .filter(|n: &String| !["version", "init", "updateDecide"].contains(&n.as_str()))
+        .filter(|n: &String| {
+            !["version", "init", "updateDecide", "chunkPlan"].contains(&n.as_str())
+                && !n.starts_with("mp4") // F15-FR1: the MP4 writer is pure too
+        })
         .collect();
     bridge.sort();
     // Names only: calling app_exports here before init is harmless (they all refuse).

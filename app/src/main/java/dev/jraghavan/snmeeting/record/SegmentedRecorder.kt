@@ -91,7 +91,7 @@ class SegmentedRecorder(
         segBytes = segmentBytes(b, spec)
         if (lowSpace()) return discard("Storage full")
         try {
-            rec.start(spec, source, deviceId, b.firstSegmentPath, segBytes, safetyDurationMs(b), events)
+            rec.start(spec, source, deviceId, b.firstSegmentPath, startBytes(b), startDurationMs(b), events)
         } catch (e: Exception) {
             return discard(CANT_START)
         }
@@ -154,6 +154,25 @@ class SegmentedRecorder(
             }
         }
 
+        /** F15-FR2: the time-driven recorder's own offset (samples ÷ rate), gapless by construction. */
+        override fun onNextFileStartedAt(offsetMs: Long) {
+            safely("next file") {
+                val next = armed ?: return
+                if (phase != Phase.RECORDING) return
+                armed = null
+                beginNext(next, closePrevious = true, at = offsetMs)
+            }
+        }
+
+        /** F15-FR4: reported while recording and while stopping (the last chunk), never after finish. */
+        override fun onChunk(c: ChunkDone) {
+            safely("chunk") {
+                if (phase != Phase.RECORDING && phase != Phase.STOPPING) return
+                if (finishing) return
+                core.chunkReady(begun.id, c)
+            }
+        }
+
         override fun onLimitReached() {
             safely("limit") {
                 if (phase != Phase.RECORDING) return
@@ -163,7 +182,7 @@ class SegmentedRecorder(
                 val next = pathFor(index + 2)
                 armed = null
                 try {
-                    rec.start(spec, source, deviceId, next, segBytes, safetyDurationMs(begun), this)
+                    rec.start(spec, source, deviceId, next, startBytes(begun), startDurationMs(begun), this)
                 } catch (e: Exception) {
                     return finish(EndReason.RECORDER_ERROR)
                 }
@@ -189,8 +208,8 @@ class SegmentedRecorder(
         override fun onFault(where: String, t: Throwable) = this@SegmentedRecorder.onFault(where, t)
     }
 
-    private fun beginNext(next: String, closePrevious: Boolean) {
-        val offset = maxOf(clock.elapsedMs() - t0, lastOffset + 1) // the core needs strictly later
+    private fun beginNext(next: String, closePrevious: Boolean, at: Long? = null) {
+        val offset = maxOf(at ?: (clock.elapsedMs() - t0), lastOffset + 1) // the core needs strictly later
         if (closePrevious) core.closeSegment(begun.id, index, currentPath, measure = true, fallbackMs = offset - lastOffset)
         index += 1; lastOffset = offset; currentPath = next; closed = false
         core.addSegment(begun.id, next, offset) { r ->
@@ -262,6 +281,14 @@ class SegmentedRecorder(
     }
 
     private fun abort(message: String) { phase = Phase.ENDED; listener.onEnded(null, message) }
+
+    /** MediaRecorder switches at the size cap; a time-driven recorder at the plan's length, with
+     *  the plan's own size cap as the runaway guard (F15-FR1/FR2). */
+    private fun startBytes(b: Begun) = if (rec.timeDriven) b.maxFileBytes else segBytes
+
+    /** MediaRecorder: 10 % past the plan (the stop-and-restart safety net); time-driven: the plan. */
+    private fun startDurationMs(b: Begun) =
+        if (rec.timeDriven) b.maxDurationMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt() else safetyDurationMs(b)
 
     /** Room for another whole segment plus a margin for the container (EC5). */
     private fun lowSpace() = storage.usableBytes(begun.firstSegmentPath) < segBytes + RESERVE_BYTES

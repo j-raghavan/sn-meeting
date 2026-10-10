@@ -11,9 +11,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+mod agenda;
+mod calendar;
+mod live;
+mod notes;
 mod run;
+mod search;
+mod spend;
 mod templates;
+pub use agenda::people as agenda_people;
+pub use calendar::LinkState;
+pub use live::DECLINED as LIVE_DECLINED;
 pub use run::Job;
+pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};
 
 #[derive(Debug)]
 pub struct App {
@@ -33,6 +43,16 @@ pub struct App {
     pub templates: crate::templates::Store,
     /// D2: each provider's model listing, once read, for the life of the process.
     models: Mutex<HashMap<Provider, Vec<String>>>,
+    /// F19: the search index in `<app data>/search`, a cache of the files (INV17).
+    pub search: crate::search::Searcher,
+    /// F19-FR6: the note regions a summarise job sends (the canvas, M12; tests replace it).
+    pub notes: crate::notes_text::NotesSource,
+    /// F18: the calendar links file, the refresh lock and how fetches are bounded.
+    pub calendar: crate::calendar::Calendar,
+    /// F15-FR5: per meeting, the lock held while its chunks are being sent (lane or job).
+    lanes: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// F17-FR4 / FR5: the ink layers of the pages open now, flushed on a deferred timer.
+    ink: notes::OpenInk,
 }
 
 #[derive(Debug)]
@@ -52,6 +72,7 @@ impl App {
     pub fn with_tz(core: Core, storage_root: PathBuf, tz: Arc<dyn LocalTz>) -> App {
         let (settings, origin) = settings::load(&settings::path_in(&core.app_data_dir));
         let templates = crate::templates::Store::under(&storage_root);
+        let search = crate::search::Searcher::at(core.app_data_dir.join("search"));
         App {
             core,
             storage_root,
@@ -66,6 +87,11 @@ impl App {
             budgets: Default::default(),
             templates,
             models: Mutex::default(),
+            search,
+            notes: crate::notes_text::NotesSource::canvas(),
+            calendar: Default::default(),
+            lanes: Mutex::default(),
+            ink: Default::default(),
         }
     }
 
@@ -145,7 +171,21 @@ impl App {
     }
 
     /// `nativeBeginMeeting`. One recording at a time: the meeting stays live until finished.
+    /// A recording started during an event links to it by time (F18-FR9).
     pub fn begin_json(&self, started_at_ms: i64, mic_json: &str, audio_json: &str) -> String {
+        self.begin_linked(started_at_ms, mic_json, audio_json, None)
+    }
+
+    /// `begin_json`, linked to the event `event_key` when it is in the cache (F18-FR8's
+    /// "● Record"); else, or with no key, by time when Settings allow (F18-FR9). Recording never
+    /// depends on the calendar (R17): a link that can't be made leaves the meeting unscheduled.
+    pub fn begin_linked(
+        &self,
+        started_at_ms: i64,
+        mic_json: &str,
+        audio_json: &str,
+        event_key: Option<&str>,
+    ) -> String {
         let mic: Mic = match serde_json::from_str(mic_json) {
             Ok(m) => m,
             Err(e) => return error_json(&format!("micJson: {e}")),
@@ -166,6 +206,22 @@ impl App {
         {
             Ok(b) => {
                 st.live.recording = Some(b.id.clone());
+                let by_time = st.settings.calendar.link_by_time;
+                let link = event_key
+                    .and_then(|k| self.user_link(k))
+                    .or_else(|| by_time.then(|| self.auto_link(started_at_ms)).flatten());
+                if let Some(l) = link {
+                    // F18-FR8: the event's keyword rule picks the template; best effort, as
+                    // the recording has begun whatever happens here.
+                    let (tid, keyword) = self.template_in(&st.settings, &l.title);
+                    let _ = self.library_of(&st.settings).update(&b.id, |sc, _| {
+                        if keyword.is_some() {
+                            sc.template_id.get_or_insert(tid);
+                        }
+                        crate::calendar::link::set_event(sc, Some(l));
+                        Ok(())
+                    });
+                }
                 json!(b).to_string()
             }
             Err(e) => error_json(&e.to_string()),
@@ -182,17 +238,42 @@ impl App {
         )
     }
 
-    /// `nativeCloseSegment`; `index` is 0-based.
+    /// `nativeCloseSegment`; `index` is 0-based. A closed segment's finished chunk files are
+    /// no longer needed (F15-FR8).
     pub fn close_segment_json(&self, id: &str, index: i32, duration_ms: i64) -> String {
         let Ok(index) = usize::try_from(index) else {
             return error_json("segIndex must be >= 0");
         };
         let _w = self.write_lock();
+        let lib = self.library();
+        let r = lib.close_segment(id, index, duration_ms);
+        if r.is_ok() {
+            let _ = lib.prune_chunks(id, &self.chunk_root());
+        }
+        reply(r.map(|()| ok()))
+    }
+
+    /// `<filesDir>/chunks`: the near-live chunk files, app-private (F15-FR4, Security).
+    pub fn chunk_root(&self) -> std::path::PathBuf {
+        self.core.app_data_dir.join("chunks")
+    }
+
+    /// `nativeChunksToCut(id)` (F15-FR9 / FR10): `[{index, segIndex, fromMs, toMs, segPath,
+    /// path, startOffsetMs, durationMs}]`, the chunk files to re-cut before a transcription.
+    pub fn chunks_to_cut_json(&self, id: &str) -> String {
         reply(
             self.library()
-                .close_segment(id, index, duration_ms)
-                .map(|()| ok()),
+                .chunks_to_cut(id, &self.chunk_root())
+                .map(|v| json!(v)),
         )
+    }
+
+    /// `nativeChunkReady(id, index, path, startOffsetMs, durationMs, speechMs)` (F15-FR5):
+    /// `{index, state, added}`.
+    pub fn chunk_ready_json(&self, id: &str, c: crate::library::ChunkIn<'_>) -> String {
+        let _w = self.write_lock();
+        let lib = self.library();
+        reply(lib.chunk_ready(id, &self.chunk_root(), c).map(|r| json!(r)))
     }
 
     /// `nativeFinishMeeting`; an empty `note` means none. The recording is over either way,
@@ -281,10 +362,11 @@ impl App {
         let _w = self.write_lock();
         let st = self.state();
         let lib = self.library_of(&st.settings);
-        reply(
-            lib.delete(id, &Self::live_of(&st, &self.jobs))
-                .map(|removed| json!({"ok": true, "removed": removed})),
-        )
+        let r = lib.delete(id, &Self::live_of(&st, &self.jobs));
+        if r.is_ok() {
+            crate::library::remove_chunks(&self.chunk_root(), id); // F15-FR8
+        }
+        reply(r.map(|removed| json!({"ok": true, "removed": removed})))
     }
 
     /// `nativeRecover(serviceAlive)` (F3-FR5). A dead service means nothing is recording.
@@ -295,7 +377,8 @@ impl App {
             st.live.recording = None;
         }
         let lib = self.library_of(&st.settings);
-        json!(lib.recover(&Self::live_of(&st, &self.jobs))).to_string()
+        let live = Self::live_of(&st, &self.jobs);
+        json!(lib.recover(&live, Some(&self.chunk_root()))).to_string()
     }
 
     /// Whether `id` is in the effective template set and usable by a job.
@@ -386,38 +469,51 @@ impl App {
         {
             return json!({"error": "template not found", "field": "defaultTemplate"}).to_string();
         }
-        {
-            self.settings(); // an unreadable file is tried again first
-            let mut st = self.state();
-            if st.origin == Origin::Newer {
-                let e = "settings.json is from a newer version of Meetings, so it can't be changed here";
-                return json!({"error": e, "field": null}).to_string();
-            }
-            if st.origin == Origin::Unreadable {
-                let e = "settings.json can't be read just now, so it can't be changed; try again";
-                return json!({"error": e, "field": null}).to_string();
-            }
-            let ks = |p| settings::key_status(&self.core.key_dir, p);
-            let secrets: Vec<String> = Provider::ALL
-                .iter()
-                .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
-                .map(|k| k.expose().to_owned())
-                .collect();
-            let ctx = Ctx {
-                storage_root: &self.storage_root,
-                key_status: &ks,
-                secrets: &secrets,
-            };
-            let next = match settings::apply(&st.settings, &patch, &ctx) {
-                Ok(n) => n,
-                Err(e) => return json!({"error": e.message, "field": e.field}).to_string(),
-            };
-            if let Err(e) = settings::save(&settings::path_in(&self.core.app_data_dir), &next) {
-                return error_json(&format!("can't save settings: {}", e.kind()));
-            }
-            (st.settings, st.origin) = (next, Origin::File);
+        let ks = |p| settings::key_status(&self.core.key_dir, p);
+        let secrets: Vec<String> = Provider::ALL
+            .iter()
+            .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
+            .map(|k| k.expose().to_owned())
+            .chain(self.link_secrets())
+            .collect();
+        let ctx = Ctx {
+            storage_root: &self.storage_root,
+            key_status: &ks,
+            secrets: &secrets,
+        };
+        let r = self.commit_settings(|cur| {
+            settings::apply(cur, &patch, &ctx)
+                .map_err(|e| json!({"error": e.message, "field": e.field}).to_string())
+        });
+        match r {
+            Ok(()) => self.get_settings_json(),
+            Err(e) => e,
         }
-        self.get_settings_json()
+    }
+
+    /// Replace the settings with `f(current)` and save them atomically. `Err` is the reply to
+    /// return: `f`'s own, or why settings.json can't be changed now (nothing is written).
+    pub(crate) fn commit_settings(
+        &self,
+        f: impl FnOnce(&Settings) -> Result<Settings, String>,
+    ) -> Result<(), String> {
+        self.settings(); // an unreadable file is tried again first
+        let mut st = self.state();
+        if st.origin == Origin::Newer {
+            let e =
+                "settings.json is from a newer version of Meetings, so it can't be changed here";
+            return Err(json!({"error": e, "field": null}).to_string());
+        }
+        if st.origin == Origin::Unreadable {
+            let e = "settings.json can't be read just now, so it can't be changed; try again";
+            return Err(json!({"error": e, "field": null}).to_string());
+        }
+        let next = f(&st.settings)?;
+        if let Err(e) = settings::save(&settings::path_in(&self.core.app_data_dir), &next) {
+            return Err(error_json(&format!("can't save settings: {}", e.kind())));
+        }
+        (st.settings, st.origin) = (next, Origin::File);
+        Ok(())
     }
 
     /// `nativeTestConnection`. Settings' model override applies only when `provider` is the

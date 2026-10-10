@@ -61,7 +61,7 @@ fn phase_word(p: Phase) -> &'static str {
 
 impl App {
     /// The role's provider, key and model, read now (F4-FR3, F10-FR4).
-    fn pick(
+    pub(crate) fn pick(
         &self,
         s: &Settings,
         role: Role,
@@ -110,6 +110,13 @@ impl App {
         let summarise_fallback = summarise
             .as_ref()
             .map(|(k, _)| fallback_model(k.provider).to_owned());
+        // F17-FR9 / FR14: the notes go only with "Use my notes for the minutes" on (the default)
+        // and once its one-time notice was answered for the summarise provider; until then the
+        // minutes are made from the transcript alone.
+        let notes_ok = s.notes.use_for_minutes
+            && summarise
+                .as_ref()
+                .is_some_and(|(k, _)| s.notes.notice_shown.shown(k.provider));
         Ok(JobPlan {
             http,
             endpoints: self.core.endpoints.clone(),
@@ -121,6 +128,14 @@ impl App {
             default_template: self.effective_default(&s),
             templates: self.templates.effective(),
             budgets: self.budgets,
+            rates: self.rates(),
+            notes: if notes_ok {
+                self.notes.clone()
+            } else {
+                crate::notes_text::NotesSource::none()
+            },
+            event_block: s.calendar.event_in_minutes,
+            chunks: None,
         })
     }
 
@@ -134,10 +149,17 @@ impl App {
         let Some(guard) = self.jobs.start(id) else {
             return error_json("meeting is busy");
         };
-        let plan = match self.plan(job) {
+        // F17-FR9: ink still waiting for the page's deferred save goes to disk first, so the
+        // Stop call sends every stroke.
+        let _ = self.flush_ink(Some(id));
+        let mut plan = match self.plan(job) {
             Ok(p) => p,
             Err(e) => return error_json(&e),
         };
+        plan.chunks = Some(crate::pipeline::ChunkCtx {
+            root: self.chunk_root(),
+            lane: self.lane(id),
+        });
         let lib = self.library();
         let cancel = &guard.cancel;
         let r = crate::runtime::block_on(async {

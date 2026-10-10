@@ -50,6 +50,9 @@ object InkDialog {
             .showSerif()
     }
 
+    /** A message with only OK (an event's details from Search, until its sheet exists). */
+    fun info(a: Activity, title: String, message: String) = error(a, title, message)
+
     fun error(a: Activity, title: String, message: String) {
         if (gone(a)) return
         builder(a).setTitle(title).setMessage(message).setPositiveButton("OK", null).showSerif()

@@ -36,7 +36,14 @@ class AndroidScoAudio(private val am: AudioManager) : ScoAudio {
  * broadcasts, each of which calls [onChange] on [handler]'s thread. API 30: BLUETOOTH is a normal
  * permission; from API 31 BLUETOOTH_CONNECT is checked and, if denied, Bluetooth reads as absent.
  */
-class BluetoothState(private val ctx: Context, private val handler: Handler, private val onChange: () -> Unit) : BtPort {
+class BluetoothState(context: Context, private val handler: Handler, private val onChange: () -> Unit) : BtPort {
+    /**
+     * F2-FR2 (device finding 2026-10-09): the profile bindings and the receiver are made on the
+     * application context, not the service's. A proxy that arrives, or is closed, after the
+     * recording service is destroyed (close runs on the recorder thread, after onDestroy) is
+     * then not a leaked ServiceConnection of the service; ProxySlots closes it either way.
+     */
+    private val ctx: Context = context.applicationContext ?: context
     private val adapter: BluetoothAdapter? = ctx.getSystemService(BluetoothManager::class.java)?.adapter
     /** S15: a proxy bound after close() is closed at once, and onChange isn't called. */
     private val slots = ProxySlots<BluetoothProfile>({ profile, p -> adapter?.closeProfileProxy(profile, p) }) { handler.post(onChange) }
