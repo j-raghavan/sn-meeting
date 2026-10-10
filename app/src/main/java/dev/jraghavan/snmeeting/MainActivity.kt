@@ -100,6 +100,8 @@ class MainActivity : Activity(), HomeLists.Actions {
     private var pendingEvent: String? = null
     /** The template chosen in the event sheet, applied once its recording has an id. */
     private var pendingTemplate: String? = null
+    /** F18-FR8 / F17: "● Record" on an event opens the new meeting's page (layout B, Notes). */
+    private var openWhenRecording = false
 
     /** F6-FR4: lists re-read on resume, on recording transitions and when a job ends; ≤ 1/s. */
     private val gate = RefreshGate(SystemClock::elapsedRealtime, { ms, r ->
@@ -248,6 +250,8 @@ class MainActivity : Activity(), HomeLists.Actions {
             if (changed) liveNote = null
             rec = next; render()
             if (next is RecState.Recording) applyPendingTemplate(next.id)
+            if (next is RecState.Recording && openWhenRecording) { openWhenRecording = false; openMeeting(next.id, null) }
+            if (next is RecState.Idle) openWhenRecording = false
             if (changed) {
                 gate.request() // a meeting began or ended: its row and marks change
                 handler.removeCallbacks(tick)
@@ -409,6 +413,7 @@ class MainActivity : Activity(), HomeLists.Actions {
         if (rec.busy) return InkDialog.error(this, "Already recording", "Stop the current meeting first.")
         pendingEvent = key
         pendingTemplate = templateId
+        openWhenRecording = true
         toggle()
     }
 
@@ -429,7 +434,9 @@ class MainActivity : Activity(), HomeLists.Actions {
         }
     }
 
-    /** A to-do's source opens its meeting on the minutes (the moment it was said is M12's). */
+    /** F18-FR7: a to-do's source opens its meeting on the Minutes tab, at its to-dos. A to-do
+     *  carries no time of its own yet, so "the moment it was said" isn't known and it opens on
+     *  the minutes, as the spec allows. */
     override fun onTodoSource(t: TodoRef) = openMeeting(t.meetingId, "todos")
 
     /** OQ22: "Recent ›" lists the five newest meetings (F6-AC1 applies to this list). */
