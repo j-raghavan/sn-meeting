@@ -318,3 +318,34 @@ fn listen_finds_the_moment_a_stroke_was_written() {
             .is_some()
     );
 }
+
+/// F17-FR12 (F13-FR6): the notes page never touches the recording. Writing, saving and
+/// closing the page leave the meeting recording, its segments and its liveness as they were;
+/// only the sidecar's `notes` object is added.
+#[test]
+fn the_page_is_independent_of_the_recording() {
+    let f = fixture();
+    let before = read_sidecar(&f.dir, &f.id);
+    stroke(&f, "canvas", 0.0, 0.0, 1_000.0);
+    f.app.ink_save_json(&f.id);
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    let after = read_sidecar(&f.dir, &f.id);
+    assert_eq!(after.status, meeting::status::Status::Recording);
+    assert_eq!(after.segments, before.segments);
+    assert_eq!(after.duration_ms, before.duration_ms);
+    let mut added = after.extra.clone();
+    assert!(added.remove("notes").is_some());
+    assert_eq!(added, before.extra);
+    assert_eq!(f.app.liveness().recording.as_deref(), Some(f.id.as_str()));
+    // And the recording finishing with the page open loses no ink.
+    stroke(&f, "canvas", 0.0, 100.0, 2_000.0);
+    f.app.finish_json(&f.id, 5_000, "");
+    assert_eq!(parse(&f.app.ink_save_json(&f.id)), json!({"saved": 1}));
+    assert_eq!(
+        notes::load(&f.dir, &f.id, Layer::Canvas)
+            .unwrap()
+            .strokes()
+            .len(),
+        2
+    );
+}

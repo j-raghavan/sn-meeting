@@ -22,6 +22,10 @@ import org.json.JSONObject
  * Notes tab (F17-FR1): the infinite canvas with its zoom pill and minimap. Strokes go to the
  * core as they end; the core keeps them in memory and this page flushes them on a short
  * deferred timer ([SAVE_MS], inkread's 1 500 ms) and when it closes, with the viewport.
+ *
+ * F17-FR12: the page never touches the recording. Leaving it, the screen sleeping or another
+ * app in front only saves the ink and gives the pen back; the recording service and the
+ * near-live lane carry on. Strokes written once the recording stops are untimed.
  */
 class NotesPage(
     private val a: Activity,
