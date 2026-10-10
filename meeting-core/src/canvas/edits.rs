@@ -344,6 +344,63 @@ impl Scene {
     }
 }
 
+/// What a creation needs besides its geometry: the style it takes (the default), when it was
+/// made (`recMs` on the recording clock, or untimed) and the local time.
+#[derive(Clone, Debug)]
+pub struct Made<'a> {
+    pub style: super::style::Style,
+    pub rec_ms: Option<u64>,
+    pub created_at: &'a str,
+}
+
+impl Scene {
+    /// Add `it` on top as one step (its id made unique here). Its ref.
+    pub fn add_item(&mut self, mut it: Item) -> Option<Ref> {
+        if !self.items_ok() {
+            return None;
+        }
+        if it.id.is_empty() || self.item(&it.id).is_some() {
+            it.id = self.fresh_id();
+        }
+        let r = Ref::Item(it.id.clone());
+        let rr = r.clone();
+        self.step_doc(move |d| {
+            d.order.push(rr);
+            d.items.push(it);
+        })?;
+        Some(r)
+    }
+
+    /// F21-FR8: a rectangle or ellipse from a pen drag, corner to corner (`boxFromDrag`), or a
+    /// line or arrow from start to end whose ends bind to the shapes they were drawn from and
+    /// to (`connectorFromDrag`, `bindingTargetAt`). In the default style; one step.
+    pub fn create_shape(&mut self, kind: &str, from: Pt, to: Pt, made: &Made<'_>) -> Option<Ref> {
+        let finite = [from.x, from.y, to.x, to.y].iter().all(|v| v.is_finite());
+        if !finite || !matches!(kind, "rectangle" | "ellipse" | "line" | "arrow") {
+            return None;
+        }
+        let mut it = Item::new("", kind, made.style.clone());
+        it.rec_ms = made.rec_ms;
+        it.created_at = Some(made.created_at.to_owned());
+        if matches!(kind, "line" | "arrow") {
+            it.start = Some(super::item::End {
+                x: from.x,
+                y: from.y,
+                bind: self.binding_target(from, None),
+            });
+            it.end = Some(super::item::End {
+                x: to.x,
+                y: to.y,
+                bind: self.binding_target(to, None),
+            });
+        } else {
+            (it.x, it.y) = (from.x.min(to.x), from.y.min(to.y));
+            (it.width, it.height) = ((to.x - from.x).abs(), (to.y - from.y).abs());
+        }
+        self.add_item(it)
+    }
+}
+
 /// A style's true colour as `.inkbin` keeps it (F21-FR7): its RGB, its opacity as alpha.
 #[must_use]
 pub fn ink_color(style: &super::style::Style) -> crate::ink::InkColor {
@@ -770,6 +827,55 @@ mod tests {
         assert_eq!(broken.restyle(&both, "color", "red"), None);
         let half = crate::canvas::style::Style::default().with("opacity", "0.5");
         assert_eq!(ink_color(&half).a, 128);
+    }
+
+    /// F21-FR8: shapes by a drag; an arrow's ends bind to what they were drawn from and to.
+    #[test]
+    fn shapes_and_attached_arrows_are_drawn() {
+        let mut s = empty();
+        let made = Made {
+            style: Style::default().with("color", "blue"),
+            rec_ms: Some(9),
+            created_at: "t",
+        };
+        let r = s
+            .create_shape("rectangle", Pt::new(100.0, 80.0), Pt::new(0.0, 0.0), &made)
+            .unwrap();
+        let Ref::Item(id) = &r else { panic!() };
+        let it = s.item(id).unwrap().clone();
+        assert_eq!((it.x, it.y, it.width, it.height), (0.0, 0.0, 100.0, 80.0));
+        assert_eq!((it.style.color, it.rec_ms), ("blue", Some(9)));
+        let e = s
+            .create_shape("ellipse", Pt::new(400.0, 0.0), Pt::new(500.0, 80.0), &made)
+            .unwrap();
+        let ar = s
+            .create_shape("arrow", Pt::new(50.0, 40.0), Pt::new(450.0, 40.0), &made)
+            .unwrap();
+        let Ref::Item(aid) = &ar else { panic!() };
+        let a = s.item(aid).unwrap();
+        assert_eq!(a.start.as_ref().unwrap().bind, Some(r.clone()));
+        assert_eq!(a.end.as_ref().unwrap().bind, Some(e));
+        let free = s
+            .create_shape("line", Pt::new(900.0, 900.0), Pt::new(950.0, 900.0), &made)
+            .unwrap();
+        let Ref::Item(fid) = &free else { panic!() };
+        assert_eq!(s.item(fid).unwrap().start.as_ref().unwrap().bind, None);
+        assert_eq!(s.order().len(), 4);
+        s.undo();
+        assert_eq!(s.order().len(), 3);
+        assert_eq!(
+            s.create_shape("hexagon", Pt::new(0.0, 0.0), Pt::new(1.0, 1.0), &made),
+            None
+        );
+        assert_eq!(
+            s.create_shape("line", Pt::new(f64::NAN, 0.0), Pt::new(1.0, 1.0), &made),
+            None
+        );
+        let mut dup = rect("a", 0.0, 0.0);
+        dup.id = id.clone();
+        assert_ne!(s.add_item(dup), Some(r), "a taken id gets a fresh one");
+        let (mut broken, _) = Scene::load(InkLayer::new(), Err("io".into()));
+        assert_eq!(broken.add_item(rect("b", 0.0, 0.0)), None);
     }
 
     #[test]

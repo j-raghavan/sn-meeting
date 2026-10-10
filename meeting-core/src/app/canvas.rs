@@ -4,7 +4,7 @@ use super::App;
 use super::notes::rect_of;
 use crate::api::error_json;
 use crate::canvas::draw::{bbox_json, refs_json};
-use crate::canvas::edits::{Corner, Measured};
+use crate::canvas::edits::{Corner, Made, Measured};
 use crate::canvas::geom::Pt;
 use crate::canvas::{Ref, Scene, Style};
 use crate::ink::BBox;
@@ -36,6 +36,14 @@ fn pick(op: &Value) -> Result<(String, String), String> {
         _ => return Err("value is needed".into()),
     };
     Ok((p.to_owned(), v))
+}
+
+/// A world point given as `[x, y]`.
+fn pair(op: &Value, k: &str) -> Result<Pt, String> {
+    let v = floats(op, k)
+        .filter(|v| v.len() == 2)
+        .ok_or_else(|| format!("{k} must be [x, y]"))?;
+    Ok(Pt::new(f64::from(v[0]), f64::from(v[1])))
 }
 
 /// The op's one `ref`.
@@ -141,6 +149,8 @@ impl App {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_owned();
+        let default_style = self.default_style();
+        let created = now_local();
         let out = self.with_ink(id, Layer::Canvas, |o| -> Result<Value, String> {
             if name == "select" {
                 select(&mut o.scene, &op)?;
@@ -150,7 +160,24 @@ impl App {
                 return Err("The canvas's shapes can't be read, so they can't be changed".into());
             }
             let refs = refs_of(&op, &o.scene);
+            let made_style = default_style.clone();
+            let made = Made {
+                style: made_style,
+                rec_ms: op.get("recMs").and_then(Value::as_u64),
+                created_at: &created,
+            };
+            let mut created_ref = None;
             let dirty = match name.as_str() {
+                // F21-FR8: a shape or connector from a pen drag, in the default style.
+                "create" => {
+                    let kind = op.get("type").and_then(Value::as_str).unwrap_or("");
+                    let (from, to) = (pair(&op, "from")?, pair(&op, "to")?);
+                    created_ref = o.scene.create_shape(kind, from, to, &made);
+                    if created_ref.is_none() {
+                        return Err(format!("can't make a {kind:?} there"));
+                    }
+                    created_ref.as_ref().and_then(|r| o.scene.bounds_of_ref(r))
+                }
                 // F21-FR4: the selection (or the refs given) moved, deleted or duplicated.
                 "move" => {
                     let (dx, dy) = (num(&op, "dx")?, num(&op, "dy")?);
@@ -213,7 +240,11 @@ impl App {
                 other => return Err(format!("unknown edit {other:?}")),
             };
             o.dirty |= dirty.is_some();
-            Ok(edit_reply(&o.scene, dirty))
+            let mut reply = edit_reply(&o.scene, dirty);
+            if let Some(r) = created_ref {
+                reply["created"] = json!(r.to_string());
+            }
+            Ok(reply)
         });
         let reply = match out {
             Ok(Ok(v)) => v,

@@ -58,6 +58,8 @@ class NotesCanvasView(
         fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
         /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
         fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR8: a pen drag with a shape tool, from ([x0], [y0]) to ([x1], [y1]) in world units. */
+        fun createShape(tool: NoteTool, x0: Float, y0: Float, x1: Float, y1: Float) {}
         /** F21-FR5: a handle of the one selected thing ([ref]) dragged to a world point. */
         fun handleDragged(ref: String, h: Handles.Handle, x: Float, y: Float) {}
         /** A Listen tap at a world point (F17-FR7). */
@@ -455,7 +457,7 @@ class NotesCanvasView(
                 if (!movingSelection) invalidate() // the band or loop is drawn by the canvas itself
                 else preview()
             }
-            Gesture.SELECT -> preview() // the rectangle, or the selection following the pen
+            Gesture.SELECT, Gesture.SHAPE, Gesture.TABLE -> preview() // an outline following the pen
             Gesture.PAN -> if (moved && !palmNear()) {
                 setViewport(viewport.panBy((m.x - lastX).toDouble(), (m.y - lastY).toDouble()), notify = false)
             }
@@ -499,7 +501,11 @@ class NotesCanvasView(
                 movingSelection -> host.moveSelection(wx(x) - wx(downX), wy(y) - wy(downY))
                 else -> host.selectRect(wx(downX), wy(downY), wx(x), wy(y))
             }
-            Gesture.SHAPE, Gesture.PLACE, Gesture.TABLE -> Unit
+            // F21-FR8: a drag shorter than 8 px on screen makes nothing.
+            Gesture.SHAPE -> if (hypot(x - downX, y - downY) >= MIN_SHAPE_PX) {
+                host.createShape(penTool, wx(downX), wy(downY), wx(x), wy(y))
+            }
+            Gesture.PLACE, Gesture.TABLE -> Unit
             Gesture.PAN -> if (moved) {
                 host.viewportChanged(viewport) // the strokes now in view, once the drag ends
             } else {
@@ -568,6 +574,15 @@ class NotesCanvasView(
             canvas.save(); canvas.translate(dx, dy)
             box(canvas, sel, dashPaint)
             canvas.restore()
+        }
+        if (gesture == Gesture.SHAPE && moved) {
+            // F21-FR8: the shape's outline while the pen drags (firmware ink is off).
+            val l = minOf(downX, lastX); val t = minOf(downY, lastY); val r = maxOf(downX, lastX); val b = maxOf(downY, lastY)
+            when (penTool) {
+                NoteTool.ELLIPSE -> canvas.drawOval(l, t, r, b, dashPaint)
+                NoteTool.LINE, NoteTool.ARROW -> canvas.drawLine(downX, downY, lastX, lastY, dashPaint)
+                else -> canvas.drawRect(l, t, r, b, dashPaint)
+            }
         }
         val drag = dragging
         if (gesture == Gesture.SELECT && drag != null && moved) {
@@ -777,6 +792,8 @@ class NotesCanvasView(
         const val HIGHLIGHT_FACTOR = 3.3f
         /** F21-FR2 [Recommendation]: a drag's preview redraws at most this often. */
         const val PREVIEW_MS = 100L
+        /** F21-FR8: a shorter drag makes no shape. */
+        const val MIN_SHAPE_PX = 8f
         /** Half a handle's side on screen. */
         const val HANDLE_PX = 9f
         val MUTED = Color.rgb(170, 170, 170)

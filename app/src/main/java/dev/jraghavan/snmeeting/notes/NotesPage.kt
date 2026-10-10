@@ -118,6 +118,9 @@ class NotesPage(
         override fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) =
             select("""{"op":"select","rect":[$x0,$y0,$x1,$y1]}""")
 
+        override fun createShape(tool: NoteTool, x0: Float, y0: Float, x1: Float, y1: Float) =
+            edit("""{"op":"create","type":"${tool.name.lowercase()}","from":[$x0,$y0],"to":[$x1,$y1]${recMs()}}""")
+
         override fun handleDragged(ref: String, h: Handles.Handle, x: Float, y: Float) = edit(handleOp(ref, h, x, y), keepSelection = true)
         override fun listen(x: Float, y: Float, radiusWorld: Float) = scope.core({ NativeBridge.nativeInkHit(id, LAYER, x, y, radiusWorld) }) { json ->
             val hit = CoreJson.obj(json, ListenHit::from).getOrNull() ?: return@core
@@ -327,6 +330,14 @@ class NotesPage(
             }) { edit("""{"op":"clear"}""") }
         }
         refreshBar()
+    }
+
+    /** F21-FR15 / OQ36: `,"recMs":t` for something made now while recording, else nothing. */
+    private fun recMs(): String {
+        val since = host.recordingSince() ?: return ""
+        val t = StrokeTimes.recording(SystemClock.uptimeMillis(), SystemClock.elapsedRealtime(), since) { LiveClock.current }
+            .recMs(SystemClock.uptimeMillis()) ?: return ""
+        return ""","recMs":$t"""
     }
 
     /** F21: one gesture on the canvas through the core (one undo step), then what is in view

@@ -596,3 +596,59 @@ fn styled_pen_strokes_keep_colour_size_and_time() {
             .is_some()
     );
 }
+
+/// F21-FR8 / AC9: a rectangle drawn after a pick takes the default style; an arrow drawn from
+/// it binds; a bad shape is refused.
+#[test]
+fn new_shapes_take_the_default_style_and_arrows_attach() {
+    let f = fixture();
+    edit(
+        &f,
+        json!({"op": "setDefaultStyle", "property": "color", "value": "blue"}),
+    );
+    edit(
+        &f,
+        json!({"op": "setDefaultStyle", "property": "size", "value": "l"}),
+    );
+    let r = edit(
+        &f,
+        json!({"op": "create", "type": "rectangle", "from": [0, 0], "to": [100, 50], "recMs": 1200}),
+    );
+    let rect = r["created"].as_str().unwrap().to_owned();
+    assert!(r["dirty"].is_array());
+    let a = edit(
+        &f,
+        json!({"op": "create", "type": "arrow", "from": [50, 25], "to": [400, 25]}),
+    );
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e4, -1e4, 1e4, 1e4]));
+    let item = &d["entries"][0]["item"];
+    assert_eq!(
+        (
+            item["style"]["color"].clone(),
+            item["style"]["size"].clone()
+        ),
+        (json!("blue"), json!("l"))
+    );
+    assert_eq!(item["recMs"], 1200);
+    assert_eq!(d["entries"][1]["ref"], a["created"]);
+    assert_eq!(d["entries"][1]["item"]["bound"], json!([true, false]));
+    assert_eq!(
+        d["entries"][1]["item"]["ends"][0], 100.0,
+        "on the rectangle's edge"
+    );
+    assert!(rect.starts_with("i:"));
+    assert!(
+        edit(
+            &f,
+            json!({"op": "create", "type": "star", "from": [0, 0], "to": [1, 1]})
+        )["error"]
+            .is_string()
+    );
+    assert!(
+        edit(
+            &f,
+            json!({"op": "create", "type": "line", "from": [0], "to": [1, 1]})
+        )["error"]
+            .is_string()
+    );
+}
