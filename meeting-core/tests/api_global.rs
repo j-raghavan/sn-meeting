@@ -85,6 +85,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("removeTag", api::remove_tag("x", "gpu")),
         ("renameTag", api::rename_tag("gpus", "gpu")),
         ("tagGraph", api::tag_graph("all")),
+        ("tagMeetings", api::tag_meetings("gpu", "all")),
         (
             "beginMeetingForEvent",
             api::begin_meeting_for_event(0, "{}", "{}", ""),

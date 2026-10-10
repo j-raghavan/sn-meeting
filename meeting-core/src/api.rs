@@ -542,6 +542,11 @@ pub fn tag_graph(range: &str) -> String {
     with_app(|app| app.tag_graph_json(range))
 }
 
+/// `nativeTagMeetings(name, range)` (F20-FR8): the tag's recordings, newest first.
+pub fn tag_meetings(name: &str, range: &str) -> String {
+    with_app(|app| app.tag_meetings_json(name, range))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

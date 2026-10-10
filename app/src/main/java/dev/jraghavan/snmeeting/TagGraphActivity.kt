@@ -15,6 +15,8 @@ import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.TagGraph
 import dev.jraghavan.snmeeting.model.TagGraphMath
+import dev.jraghavan.snmeeting.model.TagList
+import dev.jraghavan.snmeeting.model.Tags
 
 /**
  * F20-FR7: the Tag Graph. Each tag is a circle sized by how many recordings use it; lines
@@ -34,6 +36,9 @@ class TagGraphActivity : Activity() {
     private var selectedName: String? = null
     /** The last reply drawn: the same reply again draws nothing. */
     private var drawn: String? = null
+    private lateinit var listBox: LinearLayout
+    private var list: TagList? = null
+    private var page = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,8 +114,11 @@ class TagGraphActivity : Activity() {
         }
     }
 
-    /** Room under the graph for what a selected tag shows (F20-FR8). */
-    private fun addExtras(column: LinearLayout) = Unit
+    /** F20-FR8: the selected tag's recordings, under the graph. */
+    private fun addExtras(column: LinearLayout) {
+        listBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        column.addView(listBox, ui.fullWidth().apply { topMargin = ui.dim(14) })
+    }
 
     private fun control(text: String, onClick: () -> Unit): TextView = ui.chip(text).apply {
         setPadding(ui.dim(16), ui.dim(8), ui.dim(16), ui.dim(8))
@@ -153,6 +161,7 @@ class TagGraphActivity : Activity() {
         onSelected()
     }
 
+    /** A tap on a circle selects it (another circle switches the list); paper does nothing. */
     private fun select(i: Int?) {
         if (i == null) return
         selectedName = graph.nodes.getOrNull(i)?.name
@@ -160,8 +169,80 @@ class TagGraphActivity : Activity() {
         onSelected()
     }
 
-    /** What a selection shows besides its ring (F20-FR8). */
-    private fun onSelected() = Unit
+    /** F20-FR8: a selection lists its recordings, newest first; none hides the list. */
+    private fun onSelected() {
+        val name = selectedName?.takeIf { graph.index(it) != null }
+        if (name == null) { list = null; listBox.visibility = View.GONE; listBox.removeAllViews(); return }
+        val r = range
+        CoreJobs.run({ NativeBridge.nativeTagMeetings(name, r.id) }) { json ->
+            if (isDestroyed || name != selectedName || r != range) return@run
+            when (val l = CoreJson.obj(json, TagList::from)) {
+                is CoreResult.Ok -> { if (list?.tag != name) page = 0; list = l.value; showList() }
+                is CoreResult.Err -> { list = null; listBox.removeAllViews(); listBox.addView(ui.note("Couldn't list the recordings: ${l.message}")); listBox.visibility = View.VISIBLE }
+            }
+        }
+    }
+
+    /** "#gpu · 5 recordings · newest first", Rename and ✕, then one page of rows. */
+    private fun showList() {
+        val l = list ?: return
+        listBox.removeAllViews()
+        listBox.visibility = View.VISIBLE
+        listBox.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            addView(ui.eyebrow(l.header), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(ui.eyebrow("Rename", ui.inkSoft).apply {
+                setPadding(ui.dim(12), ui.dim(10), ui.dim(12), ui.dim(10)); isClickable = true
+                setOnClickListener { rename(l.tag) }
+            })
+            addView(ui.body("✕", 20f).apply {
+                setPadding(ui.dim(12), ui.dim(4), ui.dim(4), ui.dim(4)); isClickable = true
+                contentDescription = "Close the list"
+                setOnClickListener { selectedName = null; graphView.selected = null; onSelected() }
+            })
+        }, ui.fullWidth())
+        listBox.addView(ui.hairline())
+        l.page(page).forEach { m ->
+            listBox.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, ui.dim(10), 0, ui.dim(10))
+                isClickable = true
+                setOnClickListener {
+                    startActivity(Intent(this@TagGraphActivity, MeetingActivity::class.java).putExtra(MeetingActivity.EXTRA_ID, m.id))
+                    overridePendingTransition(0, 0)
+                }
+                addView(ui.body(m.shownTitle, 17f, bold = m.title != null).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+                addView(LinearLayout(this@TagGraphActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    addView(ui.eyebrow(m.stamp, ui.inkSoft).apply { isAllCaps = false }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    if (m.tagLine.isNotEmpty()) addView(ui.eyebrow(m.tagLine, ui.inkSoft).apply { isAllCaps = false; maxLines = 1 })
+                }, ui.fullWidth().apply { topMargin = ui.dim(4) })
+            }, ui.fullWidth())
+            listBox.addView(ui.hairline())
+        }
+        if (l.pages() > 1) listBox.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            addView(ui.body("‹", 22f).apply { setPadding(ui.dim(18), ui.dim(4), ui.dim(18), ui.dim(4)); isClickable = true; setOnClickListener { if (page > 0) { page--; showList() } } })
+            addView(ui.eyebrow(l.pageLabel(page)))
+            addView(ui.body("›", 22f).apply { setPadding(ui.dim(18), ui.dim(4), ui.dim(18), ui.dim(4)); isClickable = true; setOnClickListener { if (page < l.pages() - 1) { page++; showList() } } })
+        }, ui.fullWidth().apply { topMargin = ui.dim(6) })
+    }
+
+    /** F20-FR4: rename from the Tag Graph; every meeting with the tag is rewritten. */
+    private fun rename(tag: String) {
+        InkDialog.text(this, ui, "Rename ${Tags.shown(tag)}", tag) { to ->
+            if (to.isBlank()) return@text
+            CoreJobs.run({ NativeBridge.nativeRenameTag(tag, to) }) { json ->
+                if (isDestroyed) return@run
+                when (val r = CoreJson.obj(json) { o -> o.optString("to").ifEmpty { null } }) {
+                    is CoreResult.Ok -> { selectedName = r.value; drawn = null; load() }
+                    is CoreResult.Err -> InkDialog.error(this, "Couldn't rename the tag", r.message)
+                }
+            }
+        }
+    }
 
     companion object {
         /** The tag to select on opening (a pill, a search hit, Home's panel). */

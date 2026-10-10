@@ -178,6 +178,10 @@ object NativeBridge {
      *  shared, weak}], meetings, bounds: [x0, y0, x1, y1]}, laidOut}`. Call it on the core thread. */
     external fun nativeTagGraph(range: String): String
 
+    /** F20-FR8: the recordings tagged [name] in [range], newest first: `{tag, count, meetings:
+     *  [{id, title, startedAt, startedAtMs, durationMs, tags}]}` (`tags`: its other tags). */
+    external fun nativeTagMeetings(name: String, range: String): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 

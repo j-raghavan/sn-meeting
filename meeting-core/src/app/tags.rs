@@ -159,6 +159,37 @@ impl App {
         json!({"range": range, "graph": g, "laidOut": laid_out}).to_string()
     }
 
+    /// `nativeTagMeetings(name, range)` (F20-FR8): the recordings tagged `name`, newest first
+    /// (by `startedAt`): `{tag, count, meetings: [{id, title, startedAt, startedAtMs,
+    /// durationMs, tags}]}`, `tags` being the meeting's other tags.
+    pub fn tag_meetings_json(&self, name: &str, range: &str) -> String {
+        self.tag_meetings_at(name, range, self.today())
+    }
+
+    /// `tag_meetings_json` as of `today` (tests fix it).
+    pub fn tag_meetings_at(&self, name: &str, range: &str, today: NaiveDate) -> String {
+        let Some(r) = Range::from_id(range) else {
+            return error_json("range must be all or 3m");
+        };
+        let Some(tag) = tags::normalise(name) else {
+            return error_json("no such tag");
+        };
+        // `tagged` is newest first already (F3-FR3's order: startedAt, then id).
+        let rows: Vec<serde_json::Value> = self
+            .tagged(r, today)
+            .into_iter()
+            .filter(|(_, t)| t.contains(&tag))
+            .map(|(m, t)| {
+                let others: Vec<&String> = t.iter().filter(|n| **n != tag).collect();
+                json!({
+                    "id": m.id, "title": m.title, "startedAt": m.started_at,
+                    "startedAtMs": m.started_at_ms, "durationMs": m.duration_ms, "tags": others,
+                })
+            })
+            .collect();
+        json!({"tag": tag, "count": rows.len(), "meetings": rows}).to_string()
+    }
+
     /// The rename over every meeting that has `from`; a meeting without it isn't rewritten.
     fn rename_everywhere(&self, from: &str, to: &str) -> usize {
         let lib = self.library();
