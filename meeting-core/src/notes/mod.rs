@@ -137,6 +137,39 @@ pub fn declare(sc: &mut Sidecar) -> bool {
     true
 }
 
+/// F17-FR7: how far before a stroke's time Listen starts playing.
+pub const LEAD_MS: u64 = 2_000;
+
+/// Where Listen starts playback for a stroke written at recording time `at_ms`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Seek {
+    /// `max(0, at − 2 s)` on the recording clock.
+    pub seek_ms: u64,
+    /// The segment that holds it (0-based) and how far into that segment.
+    pub seg_index: usize,
+    pub seg_offset_ms: u64,
+}
+
+/// F17-FR7 / F17-AC4: `max(0, at − 2 000 ms)`, placed in the last segment starting at or
+/// before it (segments are gapless on the recording clock, F15-FR2, so `startOffsetMs` places
+/// any moment). A meeting without segments seeks in a first one.
+pub fn seek(sc: &Sidecar, at_ms: u64) -> Seek {
+    let seek_ms = at_ms.saturating_sub(LEAD_MS);
+    let (seg_index, start) = sc
+        .segments
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.start_offset_ms <= seek_ms)
+        .map(|(i, s)| (i, s.start_offset_ms))
+        .next_back()
+        .unwrap_or((0, 0));
+    Seek {
+        seek_ms,
+        seg_index,
+        seg_offset_ms: seek_ms - start,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,5 +261,32 @@ mod tests {
             json!({"dir": "meeting-20261009-100000.notes", "format": "inkbin-2",
                    "space": "world", "clock": "recording-ms", "minutesInk": "minutes.inkbin"})
         );
+    }
+
+    /// F17-AC4: 0:07:30 in segment 1 seeks to 0:07:28; 0:21:10 in segment 2 (from 0:15:00)
+    /// to 0:21:08, 6:08 into it; under 2 s seeks to 0.
+    #[test]
+    fn listen_seeks_two_seconds_back_across_segments() {
+        let sc: Sidecar = serde_json::from_value(json!({
+            "schema": 1, "id": ID, "startedAt": "2026-10-09T10:00:00-07:00", "status": "done",
+            "segments": [{"file": "a-01.m4a", "startOffsetMs": 0, "durationMs": 900_000},
+                         {"file": "a-02.m4a", "startOffsetMs": 900_000, "durationMs": 900_000}]}))
+        .unwrap();
+        let s = seek(&sc, 450_000);
+        assert_eq!(
+            (s.seek_ms, s.seg_index, s.seg_offset_ms),
+            (448_000, 0, 448_000)
+        );
+        let s = seek(&sc, 1_270_000);
+        assert_eq!(
+            (s.seek_ms, s.seg_index, s.seg_offset_ms),
+            (1_268_000, 1, 368_000)
+        );
+        let s = seek(&sc, 1_500);
+        assert_eq!((s.seek_ms, s.seg_index, s.seg_offset_ms), (0, 0, 0));
+        let none: Sidecar = serde_json::from_value(json!({
+            "schema": 1, "id": ID, "startedAt": "2026-10-09T10:00:00-07:00", "status": "done"}))
+        .unwrap();
+        assert_eq!(seek(&none, 9_000).seg_index, 0);
     }
 }

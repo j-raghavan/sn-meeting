@@ -47,4 +47,11 @@ class InkModelTest { // F17-FR1 / FR4: what the canvas draws, from nativeInkStro
         assertEquals(listOf(49.5 to -1.5), MarkGlyphs.place(v.strokes, listOf(450_000L, 460_000L)))
         assertTrue(MarkGlyphs.place(v.strokes, listOf(10L)).isEmpty())
     }
+
+    @Test fun aListenHitSaysWhereToPlayFrom() { // F17-FR7
+        val h = ListenHit.from(JSONObject("""{"strokeId":4,"atMs":450000,"seekMs":448000,"segIndex":0,"segOffsetMs":448000,"lineN":7}"""))
+        assertEquals(ListenHit(4, 450_000, 448_000, 7), h)
+        assertEquals(ListenHit(1, null, null, null), ListenHit.from(JSONObject("""{"strokeId":1,"atMs":null}""")))
+        assertEquals(ListenHit(null, null, null, null), ListenHit.from(JSONObject("""{"strokeId":null}""")))
+    }
 }

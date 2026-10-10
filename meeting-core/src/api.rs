@@ -373,6 +373,11 @@ pub fn ink_strokes(id: &str, layer: &str, rect: [f32; 4]) -> String {
     with_app(|app| app.ink_strokes_json(id, layer, rect))
 }
 
+/// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
+pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
+    with_app(|app| app.ink_hit_json(id, layer, x, y, r))
+}
+
 /// `nativeInkSave(id)` (F17-FR5): the deferred flush.
 pub fn ink_save(id: &str) -> String {
     with_app(|app| app.ink_save_json(id))

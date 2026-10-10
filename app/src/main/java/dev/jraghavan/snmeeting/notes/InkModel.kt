@@ -65,6 +65,13 @@ data class InkView(val strokes: List<DrawStroke>, val bounds: WorldRect?, val ca
     }
 }
 
+/** `nativeInkHit` (F17-FR7): the stroke under a Listen tap, and where playback starts. */
+data class ListenHit(val strokeId: Int?, val atMs: Long?, val seekMs: Long?, val lineN: Int?) {
+    companion object {
+        fun from(o: JSONObject): ListenHit = ListenHit(o.int("strokeId"), o.long("atMs"), o.long("seekMs"), o.int("lineN"))
+    }
+}
+
 /**
  * F17-FR3 [Recommendation]: a mark draws a small ◆ beside the stroke written last before it:
  * just right of that stroke's top-right corner. Marks before any stroke have none.

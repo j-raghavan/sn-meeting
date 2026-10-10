@@ -211,6 +211,13 @@ class MeetingActivity : Activity() {
                 override fun canPlay() = playback?.canPlay == true && recordingHere() == null
                 override fun togglePlay() { playback?.toggle() }
                 override fun mark() { this@MeetingActivity.mark() }
+                override fun listenAt(seekMs: Long, lineN: Int?) {
+                    // F17-FR7: play from 2 s before the ink; on Minutes the paragraph then is outlined.
+                    playback?.cue(seekMs)
+                    playback?.play()
+                    view?.let { v -> TranscriptPages.locate(v.transcript, seekMs + 2_000, marks = v.meeting.marks)?.let { mark = it; transcriptPage = it.first } }
+                    notes?.refreshBar()
+                }
                 override fun stop() { if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity) }
             }).also {
                 notesHost.addView(it.view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
@@ -387,12 +394,15 @@ class MeetingActivity : Activity() {
         }
         ui.stylePill(pill, if (pb.playing) "❚❚  Pause" else "▶  Play", filled = pb.playing)
         showPosition()
+        notes?.refreshBar() // the bar's Play / Pause
         handler.removeCallbacks(tick)
         if (pb.playing) handler.postDelayed(tick, 1000)
     }
 
     private fun showPosition() {
         val pb = playback ?: return
+        // F17-FR7 / F13-FR3: ink written later than the position is muted while playing (≤ 1/s).
+        notes?.canvas?.setPosition(if (pb.playing) pb.positionMs() else null)
         position?.text = "${Format.duration(pb.positionMs())}  /  ${Format.duration(pb.totalMs())}"
     }
 

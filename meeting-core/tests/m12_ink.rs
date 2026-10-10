@@ -274,3 +274,47 @@ fn flushing_one_meeting_leaves_anothers_ink() {
     assert!(!notes::path(&f.dir, &f.id, Layer::Canvas).exists());
     assert_eq!(parse(&f.app.ink_save_json(&f.id)), json!({"saved": 1}));
 }
+
+/// F17-FR7 / F17-AC4 (host part): Listen's tap gives the stroke's time, where playback starts
+/// (2 s before, in its segment) and the transcript line spoken then; an untimed stroke and an
+/// empty spot give no seek.
+#[test]
+fn listen_finds_the_moment_a_stroke_was_written() {
+    let f = fixture();
+    stroke(&f, "canvas", 0.0, 0.0, 450_000.0);
+    stroke(&f, "canvas", 0.0, 500.0, -1.0);
+    let hit = parse(&f.app.ink_hit_json(&f.id, "canvas", 20.0, 1.0, 6.0));
+    assert_eq!(hit["strokeId"], 0);
+    assert_eq!(hit["atMs"], 450_000);
+    assert_eq!(hit["seekMs"], 448_000);
+    assert_eq!(
+        (hit["segIndex"].clone(), hit["segOffsetMs"].clone()),
+        (json!(0), json!(448_000))
+    );
+    assert_eq!(hit["lineN"], Value::Null, "no transcript lines yet");
+    assert_eq!(
+        parse(&f.app.ink_hit_json(&f.id, "canvas", 20.0, 500.0, 6.0)),
+        json!({"strokeId": 1, "atMs": null})
+    );
+    assert_eq!(
+        parse(&f.app.ink_hit_json(&f.id, "canvas", 900.0, 900.0, 6.0)),
+        json!({"strokeId": null})
+    );
+    assert!(
+        parse(&f.app.ink_hit_json(&f.id, "page", 0.0, 0.0, 6.0))
+            .get("error")
+            .is_some()
+    );
+    assert!(
+        parse(&f.app.ink_hit_json("../x", "canvas", 0.0, 0.0, 6.0))
+            .get("error")
+            .is_some()
+    );
+    // The sidecar unreadable: no seek can be placed.
+    std::fs::write(f.dir.join(format!("{}.json", f.id)), b"{bad").unwrap();
+    assert!(
+        parse(&f.app.ink_hit_json(&f.id, "canvas", 20.0, 1.0, 6.0))
+            .get("error")
+            .is_some()
+    );
+}

@@ -152,6 +152,11 @@ object NativeBridge {
      *  color: [r, g, b, a], atMs, pts: [x, y, …]}], bounds, canUndo, canRedo}`. */
     external fun nativeInkStrokesForDraw(id: String, layer: String, x0: Float, y0: Float, x1: Float, y1: Float): String
 
+    /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
+     *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
+     *  atMs: null}`; none `{strokeId: null}`. */
+    external fun nativeInkHit(id: String, layer: String, x: Float, y: Float, r: Float): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 

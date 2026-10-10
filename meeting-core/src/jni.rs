@@ -1019,3 +1019,21 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeNotesClos
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkHit<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    x: jfloat,
+    y: jfloat,
+    r: jfloat,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        env.new_string(crate::api::ink_hit(&id, &layer, x, y, r))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

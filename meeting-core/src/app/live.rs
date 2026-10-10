@@ -307,23 +307,7 @@ impl App {
             Ok(v) => v.meeting,
             Err(e) => return error_json(&e.to_string()),
         };
-        // (time, text, mark id): the chunks' lines, then each mark placed among them by time
-        // (F15-FR11, F15-AC10), a line before a mark at the same moment.
-        let mut rows: Vec<(u64, String, Option<String>)> = Vec::new();
-        for p in crate::chunk::paragraphs(&sc) {
-            let Some(c) = sc.chunks.iter().find(|c| c.index == p.index) else {
-                continue;
-            };
-            rows.extend(
-                crate::chunk::lines(&p, c)
-                    .into_iter()
-                    .map(|(at, t)| (at, t, None)),
-            );
-        }
-        for m in crate::marks::list(&sc) {
-            rows.push((m.at_ms, crate::marks::line(&m), Some(m.id)));
-        }
-        rows.sort_by_key(|(at, _, mark)| (*at, mark.is_some()));
+        let rows = transcript_rows(&sc);
         let lines: Vec<Value> = rows
             .into_iter()
             .enumerate()
@@ -349,10 +333,60 @@ impl App {
     }
 }
 
+/// (time, text, mark id): the chunks' lines, then each mark placed among them by time
+/// (F15-FR11, F15-AC10), a line before a mark at the same moment; line `n` is index + 1.
+pub(crate) fn transcript_rows(sc: &Sidecar) -> Vec<(u64, String, Option<String>)> {
+    let mut rows: Vec<(u64, String, Option<String>)> = Vec::new();
+    for p in crate::chunk::paragraphs(sc) {
+        let Some(c) = sc.chunks.iter().find(|c| c.index == p.index) else {
+            continue;
+        };
+        rows.extend(
+            crate::chunk::lines(&p, c)
+                .into_iter()
+                .map(|(at, t)| (at, t, None)),
+        );
+    }
+    for m in crate::marks::list(sc) {
+        rows.push((m.at_ms, crate::marks::line(&m), Some(m.id)));
+    }
+    rows.sort_by_key(|(at, _, mark)| (*at, mark.is_some()));
+    rows
+}
+
+/// F17-FR7: the number of the transcript line spoken at `at_ms` (the last line, not a mark,
+/// whose estimated time is at or before it), or `None`.
+pub(crate) fn line_at(rows: &[(u64, String, Option<String>)], at_ms: u64) -> Option<usize> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, (at, _, mark))| mark.is_none() && *at <= at_ms)
+        .map(|(i, _)| i + 1)
+        .next_back()
+}
+
 /// The F4-FR5 wording of a key problem.
 fn key_detail(p: Provider, e: keyfile::KeyError) -> String {
     settings::key_status_of(p, &Err(e))
         .detail()
         .map(str::to_owned)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod line_tests {
+    use super::line_at;
+
+    /// F17-FR7: the line spoken at a moment skips marks and takes the last line begun by then.
+    #[test]
+    fn the_line_spoken_at_a_moment() {
+        let rows = vec![
+            (0, "Hello.".to_owned(), None),
+            (4_000, "Budget.".to_owned(), None),
+            (5_000, "◆ Mark".to_owned(), Some("m-1".to_owned())),
+            (9_000, "Ship it.".to_owned(), None),
+        ];
+        assert_eq!(line_at(&rows, 5_500), Some(2));
+        assert_eq!(line_at(&rows, 9_000), Some(4));
+        assert_eq!(line_at(&rows[1..], 100), None);
+    }
 }

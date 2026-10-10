@@ -45,6 +45,9 @@ class NotesPage(
         fun togglePlay()
         fun mark()
         fun stop()
+        /** F17-FR7: Listen found ink written at a moment: play from [seekMs]; [lineN] is the
+         *  transcript line spoken then (or null). */
+        fun listenAt(seekMs: Long, lineN: Int?)
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -88,7 +91,12 @@ class NotesPage(
                 scheduleSave()
             }
         }
-        override fun listen(x: Float, y: Float, radiusWorld: Float) = Unit
+        override fun listen(x: Float, y: Float, radiusWorld: Float) = scope.core({ NativeBridge.nativeInkHit(id, LAYER, x, y, radiusWorld) }) { json ->
+            val hit = CoreJson.obj(json, ListenHit::from).getOrNull() ?: return@core
+            val seek = hit.seekMs ?: return@core // an untimed stroke, or no stroke: nothing happens
+            hit.lineN?.let { n -> showStrip(strip.state.copy(highlight = n)) }
+            host.listenAt(seek, hit.lineN)
+        }
         override fun viewportChanged(v: Viewport) = fetch(redraw = true)
     })
 

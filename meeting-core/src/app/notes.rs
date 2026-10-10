@@ -279,6 +279,37 @@ impl App {
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
+    /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7, Listen): the topmost stroke within `r` of the
+    /// world point. A timed one gives where playback starts (`max(0, t − 2 s)`, placed in its
+    /// segment) and the transcript line spoken at `t`: `{strokeId, atMs, seekMs, segIndex,
+    /// segOffsetMs, lineN}`; an untimed one `{strokeId, atMs: null}`; none `{strokeId: null}`.
+    pub fn ink_hit_json(&self, id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
+        let Some(layer) = Layer::from_id(layer) else {
+            return error_json("unknown layer");
+        };
+        let hit = match self.with_ink(id, layer, |o| {
+            o.ink.top_hit(x, y, r).map(|s| (s.id.0, s.rec_ms))
+        }) {
+            Ok(h) => h,
+            Err(e) => return error_json(&e),
+        };
+        let Some((sid, rec)) = hit else {
+            return json!({"strokeId": null}).to_string();
+        };
+        let Some(t) = rec else {
+            return json!({"strokeId": sid, "atMs": null}).to_string();
+        };
+        let sc = match self.library().get(id) {
+            Ok(v) => v.meeting,
+            Err(e) => return error_json(&e.to_string()),
+        };
+        let s = notes::seek(&sc, t);
+        let line = super::live::line_at(&super::live::transcript_rows(&sc), t);
+        json!({"strokeId": sid, "atMs": t, "seekMs": s.seek_ms, "segIndex": s.seg_index,
+               "segOffsetMs": s.seg_offset_ms, "lineN": line})
+        .to_string()
+    }
+
     /// Write every changed layer of `id` (or of every meeting when `None`). `(saved, error)`.
     pub(crate) fn flush_ink(&self, id: Option<&str>) -> (usize, Option<String>) {
         let mut open = self.ink.lock();
