@@ -143,8 +143,8 @@ class TagGraphActivity : Activity() {
     private fun load() {
         val r = range
         CoreJobs.run({ NativeBridge.nativeTagGraph(r.id) }) { json ->
-            if (isDestroyed || r != range || json == drawn) return@run
-            drawn = json
+            if (isDestroyed || r != range || TagGraph.drawKey(json) == drawn) return@run
+            drawn = TagGraph.drawKey(json)
             when (val g = CoreJson.obj(json, TagGraph::from)) {
                 is CoreResult.Ok -> show(g.value)
                 is CoreResult.Err -> { graph = TagGraph.EMPTY; graphView.show(graph); empty.text = "Couldn't read the tags: ${g.message}"; empty.visibility = View.VISIBLE }

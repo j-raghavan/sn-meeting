@@ -38,6 +38,7 @@ import dev.jraghavan.snmeeting.model.SettingsPatch
 import dev.jraghavan.snmeeting.model.SettingsView
 import dev.jraghavan.snmeeting.model.Spend
 import dev.jraghavan.snmeeting.model.SpendReport
+import dev.jraghavan.snmeeting.model.TagGraph
 import dev.jraghavan.snmeeting.model.TodoRef
 import dev.jraghavan.snmeeting.record.BluetoothState
 import dev.jraghavan.snmeeting.record.BtSnapshot
@@ -96,6 +97,8 @@ class MainActivity : Activity(), HomeLists.Actions {
     /** The last agenda and to-do replies drawn: the same reply again draws nothing. */
     private var drawnAgenda: String? = null
     private var drawnTodos: String? = null
+    /** F20-FR11: the last Tag Graph reply drawn on Home; redrawn only when tags change. */
+    private var drawnTags: String? = null
     /** "● Record" in an event's box or sheet: the event the next recording is for (F18-FR8). */
     private var pendingEvent: String? = null
     /** The template chosen in the event sheet, applied once its recording has an id. */
@@ -291,7 +294,7 @@ class MainActivity : Activity(), HomeLists.Actions {
         render()
         if (access.onResume(Environment.isExternalStorageManager()) == Permissions.OnResume.STORAGE_CARD) {
             gate.stop()
-            drawnAgenda = null; drawnTodos = null
+            drawnAgenda = null; drawnTodos = null; drawnTags = null
             lists.showStorageNeeded(Permissions.STORAGE_TEXT) { grantStorage() }
         } else {
             recover()
@@ -359,6 +362,15 @@ class MainActivity : Activity(), HomeLists.Actions {
             if (line.isNullOrEmpty()) { spendLine.visibility = View.GONE; return@run }
             if (spendLine.text.toString() != line) spendLine.text = line
             spendLine.visibility = View.VISIBLE
+        }
+        // F20-FR11: the compact Tag Graph, from the core's cached layout.
+        CoreJobs.run({ NativeBridge.nativeTagGraph("all") }) { json ->
+            if (isDestroyed || TagGraph.drawKey(json) == drawnTags) return@run
+            drawnTags = TagGraph.drawKey(json)
+            when (val r = CoreJson.obj(json, TagGraph::from)) {
+                is CoreResult.Ok -> lists.showTags(r.value)
+                is CoreResult.Err -> lists.showTags(TagGraph.EMPTY, r.message)
+            }
         }
         CoreJobs.run({ NativeBridge.nativeOpenTodos() }) { json ->
             if (isDestroyed || json == drawnTodos) return@run
@@ -457,6 +469,9 @@ class MainActivity : Activity(), HomeLists.Actions {
                 .setNegativeButton("CLOSE", null).show()
         }
     }
+
+    /** F20-FR11: "Tags ›" opens the Tag Graph; a circle opens it with that tag selected. */
+    override fun onTags(tag: String?) = TagGraphActivity.open(this, tag)
 
     /** "CALENDAR": Settings → Calendar; with no link set, the how-to (F18-FR14). */
     private fun openCalendarSettings() {

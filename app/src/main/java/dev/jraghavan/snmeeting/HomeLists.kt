@@ -15,6 +15,7 @@ import dev.jraghavan.snmeeting.model.CalendarFormat
 import dev.jraghavan.snmeeting.model.Format
 import dev.jraghavan.snmeeting.model.HomeRows
 import dev.jraghavan.snmeeting.model.Marks
+import dev.jraghavan.snmeeting.model.TagGraph
 import dev.jraghavan.snmeeting.model.TodoRef
 import java.time.LocalDate
 import java.time.ZoneId
@@ -37,6 +38,8 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
         fun onTick(t: TodoRef)
         fun onTodoSource(t: TodoRef)
         fun onRecent()
+        /** F20-FR11: the panel's heading (no tag) or a circle (its tag). */
+        fun onTags(tag: String?)
     }
 
     private val zone get() = ZoneId.systemDefault()
@@ -47,6 +50,14 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
     private val todoTitle = ui.eyebrowItalic("Open to-dos").apply { gravity = Gravity.START }
     private val todoRows = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
     private val dayColumn = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
+    /** F20-FR11: the compact Tag Graph (taps only; the full view zooms and pans). */
+    private var tagGraph: TagGraph = TagGraph.EMPTY
+    private val tagPanel = TagGraphView(a, a.resources.displayMetrics.density, interactive = false) { i ->
+        i?.let { tagGraph.nodes.getOrNull(it) }?.let { actions.onTags(it.name) }
+    }
+    private val tagEmpty = ui.note(TagGraphActivity.EMPTY, 14f, ui.textMuted).apply {
+        gravity = Gravity.CENTER; typeface = ui.serifItalic; setPadding(ui.dim(12), 0, ui.dim(12), 0)
+    }
 
     /** The recording timer inside the current event's box, when there is one (F18-FR7). */
     var timer: TextView? = null
@@ -80,11 +91,23 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
         dayColumn.addView(ui.spacer(ui.dim(10)))
         dayColumn.addView(ui.scrollCard(timeline), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         addView(dayColumn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 3f).apply { marginEnd = ui.dim(12) })
+        // F20-FR11: the right column split in two: open to-dos above, the compact Tag Graph below.
         addView(LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
             addView(todoTitle, ui.fullWidth().apply { topMargin = ui.dim(6) })
             addView(ui.spacer(ui.dim(14)))
             addView(ui.scrollCard(todoRows), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(ui.eyebrowItalic("Tags  ›").apply {
+                gravity = Gravity.START
+                setPadding(0, ui.dim(16), 0, ui.dim(10))
+                isClickable = true; setOnClickListener { actions.onTags(null) }
+            }, ui.fullWidth())
+            addView(android.widget.FrameLayout(a).apply {
+                background = ui.outline(ui.dim(6))
+                setPadding(ui.dp(1), ui.dp(1), ui.dp(1), ui.dp(1))
+                addView(tagPanel, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                addView(tagEmpty, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 2f).apply { marginStart = ui.dim(12) })
     }
 
@@ -266,6 +289,14 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
                 if (showSource) { isClickable = true; setOnClickListener { actions.onTodoSource(t) } }
             }, ui.wrap().apply { topMargin = ui.dim(3) })
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+    }
+
+    /** F20-FR11: the compact Tag Graph, drawn from the core's cached layout; [error] in its place. */
+    fun showTags(g: TagGraph, error: String? = null) {
+        tagGraph = g
+        tagPanel.show(g)
+        tagEmpty.text = error?.let { "Couldn't read the tags: $it" } ?: TagGraphActivity.EMPTY
+        tagEmpty.visibility = if (g.nodes.isEmpty()) View.VISIBLE else View.GONE
     }
 
     /** S1: no all-files access yet; why it is needed and Grant access, in place of the day. */

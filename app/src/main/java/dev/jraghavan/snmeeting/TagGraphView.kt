@@ -132,6 +132,8 @@ class TagGraphView(
                 if (moved) { pending?.let { vp = it }; pending = null; invalidate() }
                 else vp?.let { v -> onTap(TagGraphMath.hit(graph, v, e.x.toDouble(), e.y.toDouble(), minR.toDouble(), maxR())) }
             }
+            // One finger of a pinch lifts: a drag goes on from the finger that stays.
+            MotionEvent.ACTION_POINTER_UP -> { val k = if (e.actionIndex == 0) 1 else 0; downX = e.getX(k); downY = e.getY(k) }
             MotionEvent.ACTION_CANCEL -> { pending = null; moved = false }
         }
         return true

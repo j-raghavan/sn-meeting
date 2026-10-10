@@ -22,6 +22,7 @@ class TagGraphTest {
         assertEquals(1, g.index("vram"))
         assertNull(g.index("q4"))
         assertNull(TagGraph.from(JSONObject("{}")))
+        assertEquals(TagGraph.drawKey(json), TagGraph.drawKey(json.replace("\"laidOut\":true", "\"laidOut\":false")))
         assertEquals(listOf(0.0, 0.0, 0.0, 0.0), TagGraph.from(JSONObject("""{"graph":{}}"""))!!.bounds)
     }
 

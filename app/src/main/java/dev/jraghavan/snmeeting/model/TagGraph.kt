@@ -18,6 +18,10 @@ data class TagGraph(val nodes: List<TagNode>, val edges: List<TagEdge>, val meet
     companion object {
         val EMPTY = TagGraph(emptyList(), emptyList(), 0, listOf(0.0, 0.0, 0.0, 0.0))
 
+        /** A reply as far as drawing goes: `laidOut` (whether the core laid it out just now)
+         *  doesn't change the picture, so it doesn't cause a redraw (NFR2). */
+        fun drawKey(json: String): String = json.replace("\"laidOut\":true", "\"laidOut\":false")
+
         /** `{range, graph: {...}, laidOut}`. */
         fun from(o: JSONObject): TagGraph? {
             val g = o.obj("graph") ?: return null
