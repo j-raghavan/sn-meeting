@@ -5,11 +5,30 @@ import dev.jraghavan.snmeeting.model.bool
 import dev.jraghavan.snmeeting.model.int
 import dev.jraghavan.snmeeting.model.long
 import dev.jraghavan.snmeeting.model.mapObj
+import dev.jraghavan.snmeeting.model.obj
+import dev.jraghavan.snmeeting.model.str
+import dev.jraghavan.snmeeting.model.strings
+import dev.jraghavan.snmeeting.notes.canvas.DrawItem
+import dev.jraghavan.snmeeting.notes.canvas.ShapeStyle
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One stroke as the canvas draws it (`nativeInkStrokesForDraw`): world points `[x, y, …]`. */
-class DrawStroke(val id: Int, val tool: Int, val width: Float, val argb: Int, val atMs: Long?, val pts: FloatArray) {
+/**
+ * One stroke as the canvas draws it (`nativeInkStrokesForDraw`, `nativeCanvasForDraw`): world
+ * points `[x, y, …]`, and (F21) its style ids, group and link from `items.json`.
+ */
+class DrawStroke(
+    val id: Int,
+    val tool: Int,
+    val width: Float,
+    val argb: Int,
+    val atMs: Long?,
+    val pts: FloatArray,
+    val style: ShapeStyle? = null,
+    val groupId: String? = null,
+) {
+    val ref get() = "s:$id"
+
     val highlighter get() = tool == NoteTool.HIGHLIGHTER.core
 
     /** The stroke's world box, grown by half its width. */
@@ -42,22 +61,66 @@ class DrawStroke(val id: Int, val tool: Int, val width: Float, val argb: Int, va
                 argb = argb,
                 atMs = o.long("atMs"),
                 pts = FloatArray(pts.length()) { (pts.opt(it) as? Number)?.toFloat() ?: 0f },
+                style = o.obj("style")?.let(ShapeStyle::from),
+                groupId = o.str("groupId"),
             )
         }
     }
 }
 
-/** `nativeInkStrokesForDraw`: the strokes in view, the ink's bounds and the history state. */
-data class InkView(val strokes: List<DrawStroke>, val bounds: WorldRect?, val canUndo: Boolean, val canRedo: Boolean) {
+/** F21-FR1: one paint-ordered thing on the canvas: a stroke or an item. */
+sealed interface DrawEntry {
+    val ref: String
+
+    data class Ink(val stroke: DrawStroke) : DrawEntry {
+        override val ref get() = stroke.ref
+    }
+
+    data class Thing(val item: DrawItem) : DrawEntry {
+        override val ref get() = item.ref
+    }
+}
+
+/**
+ * `nativeInkStrokesForDraw` / `nativeCanvasForDraw`: what is in view in paint order, the
+ * content's bounds, the history state and (F21) the selection and whether items can be edited.
+ */
+data class InkView(
+    val strokes: List<DrawStroke>,
+    val bounds: WorldRect?,
+    val canUndo: Boolean,
+    val canRedo: Boolean,
+    val entries: List<DrawEntry> = strokes.map { DrawEntry.Ink(it) },
+    val selection: List<String> = emptyList(),
+    val selectionBounds: WorldRect? = null,
+    val itemsOk: Boolean = true,
+) {
+    val items: List<DrawItem> get() = entries.mapNotNull { (it as? DrawEntry.Thing)?.item }
+
     companion object {
         val EMPTY = InkView(emptyList(), null, canUndo = false, canRedo = false)
 
-        fun from(o: JSONObject): InkView = InkView(
-            strokes = o.arr("strokes").mapObj(DrawStroke::from),
-            bounds = rect(o.arr("bounds")),
-            canUndo = o.bool("canUndo") ?: false,
-            canRedo = o.bool("canRedo") ?: false,
-        )
+        fun from(o: JSONObject): InkView {
+            val entries = o.arr("entries")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    val e = a.opt(i) as? JSONObject ?: return@mapNotNull null
+                    val ref = e.str("ref") ?: return@mapNotNull null
+                    e.obj("stroke")?.let(DrawStroke::from)?.let { DrawEntry.Ink(it) }
+                        ?: e.obj("item")?.let { DrawItem.from(ref, it) }?.let { DrawEntry.Thing(it) }
+                }
+            }
+            val strokes = entries?.mapNotNull { (it as? DrawEntry.Ink)?.stroke } ?: o.arr("strokes").mapObj(DrawStroke::from)
+            return InkView(
+                strokes = strokes,
+                bounds = rect(o.arr("bounds")),
+                canUndo = o.bool("canUndo") ?: false,
+                canRedo = o.bool("canRedo") ?: false,
+                entries = entries ?: strokes.map { DrawEntry.Ink(it) },
+                selection = o.arr("selection").strings(),
+                selectionBounds = rect(o.arr("selectionBounds")),
+                itemsOk = o.bool("itemsOk") ?: true,
+            )
+        }
 
         /** `[x0, y0, x1, y1]` from the core, or null. */
         fun rect(a: JSONArray?): WorldRect? =

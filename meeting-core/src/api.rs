@@ -373,6 +373,12 @@ pub fn ink_strokes(id: &str, layer: &str, rect: [f32; 4]) -> String {
     with_app(|app| app.ink_strokes_json(id, layer, rect))
 }
 
+/// `nativeCanvasForDraw(id, x0, y0, x1, y1)` (F21-FR1): the canvas's strokes and items in a
+/// world rectangle, in paint order.
+pub fn canvas_for_draw(id: &str, rect: [f32; 4]) -> String {
+    with_app(|app| app.canvas_for_draw_json(id, rect))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))

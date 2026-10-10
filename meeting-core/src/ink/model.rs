@@ -285,6 +285,29 @@ impl InkLayer {
         created_at_ms: u64,
         rec_ms: Option<u64>,
     ) -> InkResult<StrokeId> {
+        let s = self.new_stroke(tool, color, width, points, created_at_ms, rec_ms)?;
+        let id = s.id;
+        self.strokes.push(s.clone());
+        self.push(Edit::Add(s));
+        Ok(id)
+    }
+
+    fn push(&mut self, e: Edit) {
+        self.undo.push(e);
+        self.redo.clear();
+    }
+
+    /// F21-FR1: a validated stroke with the next id, **not** added: the canvas's scene
+    /// (`crate::canvas::Scene`) places it and keeps the one undo history for strokes and items.
+    pub fn new_stroke(
+        &mut self,
+        tool: Tool,
+        color: InkColor,
+        width: f32,
+        points: Vec<InkPoint>,
+        created_at_ms: u64,
+        rec_ms: Option<u64>,
+    ) -> InkResult<Stroke> {
         if !tool.is_ink() {
             return Err(InkError::NonFinite("tool (an eraser draws nothing)"));
         }
@@ -296,7 +319,7 @@ impl InkLayer {
         }
         let id = StrokeId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
-        let s = Stroke {
+        Ok(Stroke {
             id,
             tool,
             color,
@@ -304,15 +327,33 @@ impl InkLayer {
             points,
             created_at_ms,
             rec_ms,
-        };
-        self.strokes.push(s.clone());
-        self.push(Edit::Add(s));
-        Ok(id)
+        })
     }
 
-    fn push(&mut self, e: Edit) {
-        self.undo.push(e);
-        self.redo.clear();
+    /// F21-FR1: take the strokes in `ids` out, outside this layer's own history; each with the
+    /// index it had, ascending.
+    pub fn take(&mut self, ids: &[StrokeId]) -> Vec<(usize, Stroke)> {
+        let mut out = Vec::new();
+        let mut index = 0;
+        self.strokes.retain(|s| {
+            let gone = ids.contains(&s.id);
+            if gone {
+                out.push((index, s.clone()));
+            }
+            index += 1;
+            !gone
+        });
+        out
+    }
+
+    /// F21-FR1: put strokes back at their indices (ascending), outside this layer's history.
+    /// New ids continue past any stroke put back.
+    pub fn put(&mut self, at: &[(usize, Stroke)]) {
+        for (index, s) in at {
+            let i = (*index).min(self.strokes.len());
+            self.strokes.insert(i, s.clone());
+            self.next_id = self.next_id.max(s.id.0.saturating_add(1));
+        }
     }
 
     /// The strokes within `radius` of `(x, y)`, bottom to top. Non-destructive.

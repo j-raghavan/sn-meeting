@@ -992,6 +992,23 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkStroke
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasForDraw<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    x0: jfloat,
+    y0: jfloat,
+    x1: jfloat,
+    y1: jfloat,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::canvas_for_draw(&id, [x0, y0, x1, y1]))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkSave<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,

@@ -13,6 +13,9 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewTreeObserver
+import dev.jraghavan.snmeeting.notes.canvas.ImageSource
+import dev.jraghavan.snmeeting.notes.canvas.ItemPainter
+import dev.jraghavan.snmeeting.notes.canvas.StylePalette
 import kotlin.math.hypot
 
 /**
@@ -55,12 +58,18 @@ class NotesCanvasView(
         /** The viewport moved: the visible strokes are fetched again. */
         fun viewportChanged(v: Viewport)
         val penWidthPx: Float
-        /** F17-FR13: every stroke within [bounds], for the minimap's thumbnail. */
-        fun allStrokes(bounds: WorldRect, done: (List<DrawStroke>) -> Unit) = done(emptyList())
+        /** F17-FR13: everything within [bounds], for the minimap's thumbnail (F21: items too). */
+        fun allEntries(bounds: WorldRect, done: (List<DrawEntry>) -> Unit) = done(emptyList())
     }
 
     var viewport = Viewport(0.0, 0.0, 1.0)
         private set
+
+    /** F21-FR11: where image items' pixels come from (the page's [canvas.ImageCache]). */
+    var images: ImageSource = ImageSource.NONE
+        set(v) { field = v; painter = ItemPainter(v) }
+    /** F21: draws items in their style, each colour its own e-ink grey (F21-FR6). */
+    private var painter = ItemPainter(images)
     private var ink: InkView = InkView.EMPTY
     /** Playback position for the emphasis (F17-FR7), or null when not playing. */
     var positionMs: Long? = null
@@ -472,27 +481,12 @@ class NotesCanvasView(
         canvas.drawColor(Color.WHITE)
         val v = viewport
         val z = v.zoom.toFloat()
-        for (s in ink.strokes) {
-            val muted = Emphasis.muted(s, positionMs)
-            val color = when {
-                muted -> MUTED
-                s.highlighter -> Color.argb(96, 0, 0, 0)
-                else -> s.argb or 0xFF000000.toInt()
+        val ctx = ItemPainter.Context(v, StylePalette.EINK)
+        for (e in ink.entries) {
+            when (e) {
+                is DrawEntry.Ink -> drawStroke(canvas, e.stroke, z, v)
+                is DrawEntry.Thing -> painter.draw(canvas, e.item, ctx)
             }
-            inkPaint.color = color; dotPaint.color = color
-            inkPaint.strokeWidth = (s.width * z).coerceAtLeast(1f)
-            if (s.pts.size == 2) {
-                canvas.drawCircle(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat(),
-                    inkPaint.strokeWidth / 2, dotPaint)
-                continue
-            }
-            drawPath.reset()
-            drawPath.moveTo(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat())
-            var i = 2
-            while (i + 1 < s.pts.size) {
-                drawPath.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2
-            }
-            canvas.drawPath(drawPath, inkPaint)
         }
         val live = buffer
         if (gesture == Gesture.DRAW && !overlayInks() && live != null && live.size > 1) {
@@ -524,6 +518,32 @@ class NotesCanvasView(
         }
     }
 
+    /** A stroke at its width, muted during playback after the position (F17-FR7); a stroke
+     *  with style ids in its own e-ink grey (F21-FR6). */
+    private fun drawStroke(canvas: Canvas, s: DrawStroke, z: Float, v: Viewport) {
+        val muted = Emphasis.muted(s, positionMs)
+        val color = when {
+            muted -> MUTED
+            s.highlighter -> Color.argb(96, 0, 0, 0)
+            s.style != null -> StylePalette.EINK.stroke(s.style.color)
+            else -> s.argb or 0xFF000000.toInt()
+        }
+        inkPaint.color = color; dotPaint.color = color
+        inkPaint.strokeWidth = (s.width * z).coerceAtLeast(1f)
+        if (s.pts.size == 2) {
+            canvas.drawCircle(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat(),
+                inkPaint.strokeWidth / 2, dotPaint)
+            return
+        }
+        drawPath.reset()
+        drawPath.moveTo(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat())
+        var i = 2
+        while (i + 1 < s.pts.size) {
+            drawPath.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2
+        }
+        canvas.drawPath(drawPath, inkPaint)
+    }
+
     private fun box(canvas: Canvas, r: WorldRect, paint: Paint) {
         val v = viewport
         canvas.drawRect(v.screenX(r.left).toFloat() - 4, v.screenY(r.top).toFloat() - 4,
@@ -540,8 +560,8 @@ class NotesCanvasView(
     private val thumbInk = Paint().apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; isAntiAlias = true }
     private val thumbDot = Paint().apply { style = Paint.Style.FILL; isAntiAlias = true }
 
-    /** Every stroke, fetched for the thumbnail; null until fetched or once the ink changes. */
-    private var thumbStrokes: List<DrawStroke>? = null
+    /** Everything, fetched for the thumbnail; null until fetched or once the ink changes. */
+    private var thumbStrokes: List<DrawEntry>? = null
     private var thumbFetching = false
     private var thumb: Bitmap? = null
     /** What [thumb] was drawn for: its size and fit (the bar's side moves it, not its fit). */
@@ -557,7 +577,7 @@ class NotesCanvasView(
             } else {
                 if (!thumbFetching) {
                     thumbFetching = true
-                    host.allStrokes(b) { all -> thumbFetching = false; thumbStrokes = all; thumbKey = null; if (minimapShown()) invalidate() }
+                    host.allEntries(b) { all -> thumbFetching = false; thumbStrokes = all; thumbKey = null; if (minimapShown()) invalidate() }
                 }
                 return thumb
             }
@@ -570,15 +590,22 @@ class NotesCanvasView(
         return thumb
     }
 
-    /** The strokes themselves, scaled into the thumbnail; highlighter as a light grey band. */
-    private fun renderThumb(f: MinimapFrame, strokes: List<DrawStroke>): Bitmap {
+    /** The strokes themselves, scaled into the thumbnail; highlighter as a light grey band;
+     *  items as the painter draws them (F21). */
+    private fun renderThumb(f: MinimapFrame, entries: List<DrawEntry>): Bitmap {
         val bmp = Bitmap.createBitmap(f.width.toInt().coerceAtLeast(1), f.height.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         val v = f.fit
         val z = v.zoom.toFloat()
         val path = Path()
-        for (s in strokes) {
+        val thumbPainter = ItemPainter(images)
+        val ctx = ItemPainter.Context(v, StylePalette.EINK)
+        for (e in entries) {
+            val s = when (e) {
+                is DrawEntry.Ink -> e.stroke
+                is DrawEntry.Thing -> { thumbPainter.draw(c, e.item, ctx); continue }
+            }
             if (s.pts.size < 2) continue
             val color = if (s.highlighter) Color.rgb(205, 205, 205) else s.argb or 0xFF000000.toInt()
             thumbInk.color = color; thumbDot.color = color

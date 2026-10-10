@@ -4,19 +4,22 @@
 //! `StylusInkController.kt:87-94`). Coordinates are world units (R20); times recording-clock ms.
 use super::App;
 use crate::api::error_json;
-use crate::ink::{BBox, InkColor, InkLayer, InkPoint, Stroke, StrokeId, Tool};
+use crate::canvas::draw::{bbox_json, refs_json, stroke_json};
+use crate::canvas::{Ref, Scene};
+use crate::ink::{BBox, InkColor, InkLayer, InkPoint, Tool};
 use crate::notes::{self, Layer, View};
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-/// One open ink layer: where it is saved, the ink, and whether it changed since.
+/// One open ink layer: where it is saved, its scene (F21-FR1: strokes and items with one
+/// undo history; the Minutes layer has strokes only), and whether it changed since.
 #[derive(Debug)]
-struct Open {
-    dir: PathBuf,
-    ink: InkLayer,
-    dirty: bool,
+pub(crate) struct Open {
+    pub(crate) dir: PathBuf,
+    pub(crate) scene: Scene,
+    pub(crate) dirty: bool,
 }
 
 /// The ink layers open now, by meeting and layer.
@@ -36,18 +39,6 @@ const HIGHLIGHT: InkColor = InkColor {
     b: 0,
     a: 64,
 };
-
-/// `[x0, y0, x1, y1]`, or `null`.
-fn bbox_json(b: Option<BBox>) -> Value {
-    b.map_or(Value::Null, |b| json!([b.x0, b.y0, b.x1, b.y1]))
-}
-
-/// A stroke as the view draws it: `{id, tool, width, color, atMs, pts: [x, y, …]}`.
-fn stroke_json(s: &Stroke) -> Value {
-    let pts: Vec<f32> = s.points.iter().flat_map(|p| [p.x, p.y]).collect();
-    json!({"id": s.id.0, "tool": s.tool.code(), "width": s.width,
-           "color": [s.color.r, s.color.g, s.color.b, s.color.a], "atMs": s.rec_ms, "pts": pts})
-}
 
 /// `[x, y, pressure, t]` per point (F17-FR4) as ink points, the stroke's recording time
 /// (its first point's `t`; negative is untimed) and nothing else. `None` when malformed.
@@ -78,16 +69,21 @@ fn pairs(xy: &[f32]) -> Option<Vec<(f32, f32)>> {
     Some(xy.chunks_exact(2).map(|p| (p[0], p[1])).collect())
 }
 
-/// A JSON list of stroke ids.
-fn ids_of(json: &str) -> Option<Vec<StrokeId>> {
+/// A JSON list of stroke ids, as stroke refs.
+fn ids_of(json: &str) -> Option<Vec<Ref>> {
     let v: Vec<u32> = serde_json::from_str(json).ok()?;
-    Some(v.into_iter().map(StrokeId).collect())
+    Some(v.into_iter().map(Ref::Stroke).collect())
+}
+
+/// The stroke ids among `refs` (the F17 calls answer in stroke ids).
+fn stroke_ids(refs: &[Ref]) -> Vec<u32> {
+    refs.iter().filter_map(Ref::stroke).map(|s| s.0).collect()
 }
 
 impl App {
     /// Run `f` on `id`'s open `layer`, loading it first. A layer that can't be read is never
     /// opened, so nothing can save over it.
-    fn with_ink<T>(
+    pub(crate) fn with_ink<T>(
         &self,
         id: &str,
         layer: Layer,
@@ -100,12 +96,15 @@ impl App {
         let key = (id.to_owned(), layer);
         if !open.contains_key(&key) {
             let dir = self.library().find(id).map_err(|e| e.to_string())?.dir;
-            let ink = notes::load(&dir, id, layer)?;
+            let scene = match layer {
+                Layer::Canvas => notes::load_scene(&dir, id, 1)?.0,
+                Layer::Minutes => Scene::load(notes::load(&dir, id, layer)?, Ok(None)).0,
+            };
             open.insert(
                 key.clone(),
                 Open {
                     dir,
-                    ink,
+                    scene,
                     dirty: false,
                 },
             );
@@ -114,12 +113,15 @@ impl App {
         Ok(f(o))
     }
 
-    /// `nativeNotesOpen(id)`: opens the canvas and replies `{view, clock, bounds, strokes}`,
-    /// with the last viewport (`null`: fit the ink) and the ink's bounds (`null`: none yet).
+    /// `nativeNotesOpen(id)`: opens the canvas and replies `{view, clock, bounds, strokes,
+    /// items, imagesDir}`, with the last viewport (`null`: fit the content), the content's
+    /// bounds (`null`: none yet) and where image items' copies are (F21-FR11).
     pub fn notes_open_json(&self, id: &str) -> String {
         let r = self.with_ink(id, Layer::Canvas, |o| {
+            let images = notes::folder(&o.dir, id).join(notes::IMAGES);
             json!({"view": notes::read_view(&o.dir, id), "clock": "recording-ms",
-                   "bounds": bbox_json(o.ink.bounds()), "strokes": o.ink.strokes().len()})
+                   "bounds": bbox_json(o.scene.bounds()), "strokes": o.scene.ink().strokes().len(),
+                   "items": o.scene.doc().items.len(), "imagesDir": images.to_string_lossy()})
         });
         r.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
@@ -151,12 +153,14 @@ impl App {
         };
         let now = u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0);
         let r = self.with_ink(id, layer, |o| {
-            let id = o
-                .ink
-                .add(tool, color, width, pts, now, rec)
+            let st = o
+                .scene
+                .new_stroke(tool, color, width, pts, now, rec)
                 .map_err(|e| e.to_string())?;
+            let bbox = st.bounds();
+            let sid = o.scene.add_stroke(st, None);
             o.dirty = true;
-            Ok::<_, String>((id, o.ink.get(id).map(Stroke::bounds)))
+            Ok::<_, String>((sid, Some(bbox)))
         });
         let (sid, bbox) = match r.and_then(|x| x) {
             Ok(v) => v,
@@ -169,7 +173,7 @@ impl App {
     }
 
     /// Name the notes folder in the sidecar on the first stroke (Data Model `notes`).
-    fn declare_notes(&self, id: &str) -> Result<(), String> {
+    pub(crate) fn declare_notes(&self, id: &str) -> Result<(), String> {
         let _w = self.write_lock();
         let lib = self.library();
         let has = lib
@@ -193,38 +197,39 @@ impl App {
             return error_json("an eraser path is [x, y] pairs on a known layer");
         };
         let out = self.with_ink(id, layer, |o| {
-            let hit = o.ink.hit_by_path(&path, r);
-            let bbox = o.ink.bounds_of(&hit);
-            let gone = o.ink.delete_strokes(&hit);
+            let (gone, bbox) = o.scene.erase(&path, r);
             o.dirty |= !gone.is_empty();
-            json!({"erased": gone.iter().map(|s| s.0).collect::<Vec<_>>(), "bbox": bbox_json(bbox)})
+            json!({"erased": stroke_ids(&gone), "refs": refs_json(&gone), "bbox": bbox_json(bbox)})
         });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
-    /// `nativeInkUndo` / `nativeInkRedo`: `{changed, bbox, canUndo, canRedo}`.
+    /// `nativeInkUndo` / `nativeInkRedo`: `{changed, bbox, canUndo, canRedo}`. On the canvas
+    /// they are scene-wide: strokes and items share one history (F21-FR1).
     pub fn ink_history_json(&self, id: &str, layer: &str, redo: bool) -> String {
         let Some(layer) = Layer::from_id(layer) else {
             return error_json("unknown layer");
         };
         let out = self.with_ink(id, layer, |o| {
-            let r = if redo { o.ink.redo() } else { o.ink.undo() };
+            let r = if redo { o.scene.redo() } else { o.scene.undo() };
             o.dirty |= r.is_some();
             json!({"changed": r.is_some(), "bbox": bbox_json(r.flatten()),
-                   "canUndo": o.ink.can_undo(), "canRedo": o.ink.can_redo()})
+                   "canUndo": o.scene.can_undo(), "canRedo": o.scene.can_redo()})
         });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
-    /// `nativeInkLasso`: the strokes a loop (world `[x, y, …]`) takes, `{ids, bbox}`.
+    /// `nativeInkLasso`: the strokes a loop (world `[x, y, …]`) takes, `{ids, refs, bbox}`;
+    /// they become the selection.
     pub fn ink_lasso_json(&self, id: &str, layer: &str, xy: &[f32]) -> String {
         let (Some(layer), Some(poly)) = (Layer::from_id(layer), pairs(xy)) else {
             return error_json("a lasso is [x, y] pairs on a known layer");
         };
         let out = self.with_ink(id, layer, |o| {
-            let ids = crate::ink::select_in_polygon(&o.ink, &poly);
-            let bbox = crate::ink::selection_bounds(&o.ink, &ids);
-            json!({"ids": ids.iter().map(|s| s.0).collect::<Vec<_>>(), "bbox": bbox_json(bbox)})
+            let refs = o.scene.lasso(&poly);
+            let bbox = o.scene.bounds_of(&refs);
+            o.scene.selection.clone_from(&refs);
+            json!({"ids": stroke_ids(&refs), "refs": refs_json(&refs), "bbox": bbox_json(bbox)})
         });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
@@ -232,30 +237,26 @@ impl App {
     /// `nativeInkMove`: moves a lasso selection (`[id]` JSON) by `(dx, dy)` world units, one
     /// undo step. `{moved, bbox}`, the area before and after.
     pub fn ink_move_json(&self, id: &str, layer: &str, ids: &str, dx: f32, dy: f32) -> String {
-        let (Some(layer), Some(ids)) = (Layer::from_id(layer), ids_of(ids)) else {
+        let (Some(layer), Some(refs)) = (Layer::from_id(layer), ids_of(ids)) else {
             return error_json("a move needs a known layer and a list of stroke ids");
         };
         let out = self.with_ink(id, layer, |o| {
-            let before = o.ink.bounds_of(&ids);
-            let moved = o.ink.move_strokes(&ids, dx, dy);
-            o.dirty |= moved;
-            let after = o.ink.bounds_of(&ids);
-            let area = before.zip(after).map(|(a, b)| a.union(b));
-            json!({"moved": moved, "bbox": bbox_json(area)})
+            let area = o.scene.move_refs(&refs, f64::from(dx), f64::from(dy));
+            o.dirty |= area.is_some();
+            json!({"moved": area.is_some(), "bbox": bbox_json(area)})
         });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
     /// `nativeInkDelete`: deletes a lasso selection, one undo step. `{deleted: [id], bbox}`.
     pub fn ink_delete_json(&self, id: &str, layer: &str, ids: &str) -> String {
-        let (Some(layer), Some(ids)) = (Layer::from_id(layer), ids_of(ids)) else {
+        let (Some(layer), Some(refs)) = (Layer::from_id(layer), ids_of(ids)) else {
             return error_json("a delete needs a known layer and a list of stroke ids");
         };
         let out = self.with_ink(id, layer, |o| {
-            let bbox = o.ink.bounds_of(&ids);
-            let gone = o.ink.delete_strokes(&ids);
+            let (gone, bbox) = o.scene.delete(&refs);
             o.dirty |= !gone.is_empty();
-            json!({"deleted": gone.iter().map(|s| s.0).collect::<Vec<_>>(), "bbox": bbox_json(bbox)})
+            json!({"deleted": stroke_ids(&gone), "bbox": bbox_json(bbox)})
         });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
@@ -265,16 +266,30 @@ impl App {
         let Some(layer) = Layer::from_id(layer) else {
             return error_json("unknown layer");
         };
-        let r = BBox {
-            x0: rect[0],
-            y0: rect[1],
-            x1: rect[2],
-            y1: rect[3],
-        };
+        let r = rect_of(rect);
         let out = self.with_ink(id, layer, |o| {
-            let list: Vec<Value> = o.ink.strokes_in(r).into_iter().map(stroke_json).collect();
-            json!({"strokes": list, "bounds": bbox_json(o.ink.bounds()),
-                   "canUndo": o.ink.can_undo(), "canRedo": o.ink.can_redo()})
+            let s = &o.scene;
+            let list: Vec<Value> = s
+                .order()
+                .iter()
+                .filter_map(|r| r.stroke())
+                .filter_map(|sid| s.ink().get(sid))
+                .filter(|st| st.bounds().meets(r))
+                .map(|st| stroke_json(st, s.doc().extras.get(&st.id.0)))
+                .collect();
+            json!({"strokes": list, "bounds": bbox_json(s.bounds()),
+                   "canUndo": s.can_undo(), "canRedo": s.can_redo()})
+        });
+        out.map_or_else(|e| error_json(&e), |v| v.to_string())
+    }
+
+    /// `nativeCanvasForDraw(id, x0, y0, x1, y1)` (F21-FR1): the canvas's strokes and items
+    /// meeting the world rectangle, in paint order, arrow ends resolved, with the history
+    /// state and the selection.
+    pub fn canvas_for_draw_json(&self, id: &str, rect: [f32; 4]) -> String {
+        let r = rect_of(rect);
+        let out = self.with_ink(id, Layer::Canvas, |o| {
+            crate::canvas::draw::for_draw(&o.scene, r)
         });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
@@ -288,7 +303,7 @@ impl App {
             return error_json("unknown layer");
         };
         let hit = match self.with_ink(id, layer, |o| {
-            o.ink.top_hit(x, y, r).map(|s| (s.id.0, s.rec_ms))
+            o.scene.ink().top_hit(x, y, r).map(|s| (s.id.0, s.rec_ms))
         }) {
             Ok(h) => h,
             Err(e) => return error_json(&e),
@@ -319,10 +334,17 @@ impl App {
             if !o.dirty || id.is_some_and(|i| i != mid) {
                 continue;
             }
-            match notes::save(&o.dir, mid, *layer, &o.ink) {
-                Ok(()) => {
+            let r = match layer {
+                Layer::Canvas => notes::save_scene(&o.dir, mid, 1, &mut o.scene),
+                Layer::Minutes => {
+                    let ink = InkLayer::from_strokes(o.scene.ink().strokes().to_vec());
+                    notes::save(&o.dir, mid, *layer, &ink).map(|()| true)
+                }
+            };
+            match r {
+                Ok(wrote) => {
                     o.dirty = false;
-                    saved += 1;
+                    saved += usize::from(wrote);
                 }
                 Err(e) => error = Some(format!("The notes can't be saved ({:?})", e.kind())),
             }
@@ -372,5 +394,15 @@ impl App {
             let _ = notes::write_view(&dir, id, View { cx, cy, zoom });
         }
         json!({"saved": n}).to_string()
+    }
+}
+
+/// A world rectangle from `[x0, y0, x1, y1]`.
+fn rect_of(r: [f32; 4]) -> BBox {
+    BBox {
+        x0: r[0],
+        y0: r[1],
+        x1: r[2],
+        y1: r[3],
     }
 }

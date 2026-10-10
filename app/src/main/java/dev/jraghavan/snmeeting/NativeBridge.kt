@@ -122,7 +122,7 @@ object NativeBridge {
     // Short calls: run them on CoreJobs.
 
     /** Opens [id]'s canvas: `{view: {cx, cy, zoom}|null, clock: "recording-ms", bounds:
-     *  [x0, y0, x1, y1]|null, strokes}`. A damaged canvas file is an `{error}`, never saved over. */
+     *  [x0, y0, x1, y1]|null, strokes, items}`. A damaged canvas file is an `{error}`, never saved over. */
     external fun nativeNotesOpen(id: String): String
 
     /** F17-FR4: one whole stroke, `[x, y, pressure, t]` per point, `t` recording-clock ms or -1
@@ -151,6 +151,14 @@ object NativeBridge {
     /** The strokes meeting a world rectangle, in paint order: `{strokes: [{id, tool, width,
      *  color: [r, g, b, a], atMs, pts: [x, y, …]}], bounds, canUndo, canRedo}`. */
     external fun nativeInkStrokesForDraw(id: String, layer: String, x0: Float, y0: Float, x1: Float, y1: Float): String
+
+    // Notes tools as sn-canvas (F21, ADR D21). The canvas is a scene: strokes and items with
+    // one undo history, owned by the core; `ref` is "s:<strokeId>" or "i:<itemId>".
+
+    /** F21-FR1: the canvas's strokes and items meeting a world rectangle, in paint order, bound
+     *  arrow ends resolved: `{entries: [{ref, stroke: {…}} | {ref, item: {…}}], bounds,
+     *  canUndo, canRedo, selection: [ref], selectionBounds, itemsOk}`. */
+    external fun nativeCanvasForDraw(id: String, x0: Float, y0: Float, x1: Float, y1: Float): String
 
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,

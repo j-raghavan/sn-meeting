@@ -1,0 +1,263 @@
+//! F21 (M16) through the notes files and the app: the scene (`canvas.inkbin` v2 plus
+//! `items.json`), its one history, and what the canvas draws.
+mod libcommon;
+
+use libcommon::*;
+use meeting::app::App;
+use meeting::canvas::Ref;
+use meeting::notes::{self, Layer};
+use serde_json::{Value, json};
+use std::path::PathBuf;
+
+struct Fx {
+    _e: Env,
+    app: App,
+    id: String,
+    dir: PathBuf,
+}
+
+fn fixture() -> Fx {
+    let e = Env::new();
+    let app = e.app();
+    let id = begin(&app, T0)["id"].as_str().unwrap().to_owned();
+    Fx {
+        dir: e.export(),
+        _e: e,
+        app,
+        id,
+    }
+}
+
+fn stroke(f: &Fx, x: f32, y: f32, t: f32) -> Value {
+    let pts = [x, y, 0.5, t, x + 40.0, y, 0.7, t + 16.0];
+    parse(&f.app.ink_stroke_json(&f.id, "canvas", 0, 3.0, &pts))
+}
+
+fn items_path(f: &Fx) -> PathBuf {
+    notes::folder(&f.dir, &f.id).join(notes::ITEMS)
+}
+
+/// One item of each type, a bound arrow, a link, an unknown field and an unknown type.
+fn every_item() -> Value {
+    let style =
+        json!({"color": "blue", "opacity": 1.0, "fill": "semi", "dash": "draw", "size": "m"});
+    json!([
+        {"id": "rect1", "type": "rectangle", "x": 0.0, "y": 0.0, "width": 100.0, "height": 50.0,
+         "rotation": 0.0, "style": style, "recMs": 1000, "createdAt": "2026-10-09T10:00:00-07:00",
+         "groupId": "g-1", "futureField": {"a": 1}},
+        {"id": "ell1", "type": "ellipse", "x": 300.0, "y": 0.0, "width": 80.0, "height": 80.0,
+         "rotation": 0.5, "style": style, "recMs": null},
+        {"id": "line1", "type": "line", "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0,
+         "rotation": 0.0, "start": {"x": 0.0, "y": 200.0, "bind": null},
+         "end": {"x": 90.0, "y": 210.0, "bind": null}, "style": style, "recMs": null},
+        {"id": "arr1", "type": "arrow", "x": 0.0, "y": 0.0, "width": 0.0, "height": 0.0,
+         "rotation": 0.0, "start": {"x": 50.0, "y": 25.0, "bind": "i:rect1"},
+         "end": {"x": 340.0, "y": 40.0, "bind": "i:ell1"}, "style": style, "recMs": null,
+         "link": {"kind": "meeting", "target": "meeting-20261008-090000"}},
+        {"id": "text1", "type": "text", "x": 0.0, "y": 400.0, "width": 320.0, "height": 40.0,
+         "rotation": 0.0, "style": style, "text": "Budget owner?", "recMs": 761000},
+        {"id": "note1", "type": "note", "x": 400.0, "y": 400.0, "width": 200.0, "height": 200.0,
+         "rotation": 0.0, "style": style, "text": "Ask Sam", "recMs": null},
+        {"id": "tab1", "type": "table", "x": 0.0, "y": 700.0, "width": 320.0, "height": 96.0,
+         "rotation": 0.0, "style": style, "recMs": null,
+         "table": {"rows": 2, "cols": 2, "cells": ["a", "b", "c", "d"],
+                   "rowMinHeights": [48.0, 48.0], "cellHeights": [0.0, 0.0, 0.0, 0.0],
+                   "cellRecMs": [null, null, null, null]}},
+        {"id": "img1", "type": "image", "x": 600.0, "y": 0.0, "width": 160.0, "height": 120.0,
+         "rotation": 0.0, "style": style, "recMs": null,
+         "image": {"file": "img1.jpg", "width": 1600, "height": 1200}},
+        {"id": "odd1", "type": "sparkle", "x": 900.0, "y": 0.0, "width": 10.0, "height": 10.0,
+         "rotation": 0.0, "style": style, "recMs": null, "glitter": true}
+    ])
+}
+
+/// F21-AC1: 3 strokes and one item of each type, plus an unknown field and an unknown type,
+/// round-trip; `canvas.inkbin` is byte-identical to the file written before the items came,
+/// and the v2 decoder still reads it.
+#[test]
+fn every_item_round_trips_beside_an_untouched_inkbin() {
+    let f = fixture();
+    for i in 0..3 {
+        #[allow(clippy::cast_precision_loss)]
+        stroke(&f, 0.0, 1000.0 + 50.0 * i as f32, 1000.0 * i as f32);
+    }
+    assert_eq!(
+        parse(&f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0)),
+        json!({"saved": 1})
+    );
+    let inkbin = notes::path(&f.dir, &f.id, Layer::Canvas);
+    let before = std::fs::read(&inkbin).unwrap();
+    assert!(!items_path(&f).exists(), "strokes alone need no items.json");
+    let file = json!({"version": 1, "order": [], "items": every_item(), "strokes": {},
+                      "envelopeExtra": "kept"});
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+
+    let (mut scene, report) = notes::load_scene(&f.dir, &f.id, 1).unwrap();
+    assert_eq!(report.dropped + report.stale, 0);
+    assert_eq!(scene.doc().items.len(), 9);
+    assert!(
+        scene
+            .move_refs(&[Ref::Item("note1".into())], 10.0, 0.0)
+            .is_some()
+    );
+    assert!(scene.undo().is_some());
+    assert!(notes::save_scene(&f.dir, &f.id, 1, &mut scene).unwrap());
+    assert_eq!(
+        std::fs::read(&inkbin).unwrap(),
+        before,
+        "canvas.inkbin untouched"
+    );
+    assert!(meeting::ink::decode_layer(&before).is_ok());
+
+    let saved: Value = serde_json::from_slice(&std::fs::read(items_path(&f)).unwrap()).unwrap();
+    assert_eq!(
+        saved["items"],
+        every_item(),
+        "every item, unknown field and type included"
+    );
+    assert_eq!(saved["envelopeExtra"], "kept");
+    assert_eq!(
+        saved["order"],
+        json!([
+            "s:0", "s:1", "s:2", "i:rect1", "i:ell1", "i:line1", "i:arr1", "i:text1", "i:note1",
+            "i:tab1", "i:img1", "i:odd1"
+        ])
+    );
+    let (again, _) = notes::load_scene(&f.dir, &f.id, 1).unwrap();
+    assert_eq!(again.doc(), scene.doc());
+    assert!(
+        !notes::save_scene(&f.dir, &f.id, 1, &mut scene).unwrap(),
+        "nothing to write"
+    );
+
+    // The app draws them in paint order, ends resolved, the unknown type as unknown.
+    let all = parse(
+        &f.app
+            .canvas_for_draw_json(&f.id, [-5000.0, -5000.0, 5000.0, 5000.0]),
+    );
+    let entries = all["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 12);
+    let arrow = &entries[6]["item"];
+    assert_eq!(arrow["bound"], json!([true, true]));
+    assert_eq!(arrow["ends"][0], 100.0, "on rect1's right edge");
+    assert_eq!(entries[11]["item"]["known"], false);
+    assert_eq!(all["itemsOk"], true);
+    let open = parse(&f.app.notes_open_json(&f.id));
+    assert_eq!(
+        (open["strokes"].clone(), open["items"].clone()),
+        (json!(3), json!(9))
+    );
+}
+
+/// F21-AC2: `items.json` names stroke 7, which a build without F21 erased: its entries are
+/// dropped on load, nothing else changes, and the next save names it nowhere.
+#[test]
+fn references_to_an_erased_stroke_are_dropped() {
+    let f = fixture();
+    for i in 0..3 {
+        #[allow(clippy::cast_precision_loss)]
+        stroke(&f, 100.0 * i as f32, 0.0, -1.0);
+    }
+    f.app.ink_save_json(&f.id);
+    let file = json!({"version": 1, "order": ["s:2", "s:7", "s:0", "i:rect1", "s:1"],
+        "items": [every_item()[0]],
+        "strokes": {"7": {"groupId": "g-1", "link": null}, "1": {"groupId": "g-1", "link": null}}});
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    let (mut scene, report) = notes::load_scene(&f.dir, &f.id, 1).unwrap();
+    assert_eq!(report.stale, 2);
+    let order: Vec<String> = scene.order().iter().map(ToString::to_string).collect();
+    assert_eq!(order, ["s:2", "s:0", "i:rect1", "s:1"]);
+    assert_eq!(scene.doc().extras.len(), 1);
+    assert_eq!(
+        scene.item("rect1").unwrap().group_id.as_deref(),
+        Some("g-1")
+    );
+    assert!(notes::save_scene(&f.dir, &f.id, 1, &mut scene).unwrap());
+    let text = std::fs::read_to_string(items_path(&f)).unwrap();
+    assert!(!text.contains("s:7") && !text.contains("\"7\""), "{text}");
+}
+
+/// F21-FR1: an unreadable `items.json` refuses item edits and is never written; strokes keep
+/// working.
+#[test]
+fn an_unreadable_items_file_is_kept_and_strokes_still_work() {
+    let f = fixture();
+    stroke(&f, 0.0, 0.0, -1.0);
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    std::fs::write(items_path(&f), b"{\"version\": 1, oops").unwrap();
+    assert_eq!(stroke(&f, 0.0, 100.0, -1.0)["strokeId"], 1);
+    let drawn = parse(
+        &f.app
+            .canvas_for_draw_json(&f.id, [-500.0, -500.0, 500.0, 500.0]),
+    );
+    assert_eq!(drawn["itemsOk"], false);
+    assert_eq!(parse(&f.app.ink_save_json(&f.id)), json!({"saved": 1}));
+    assert_eq!(
+        std::fs::read(items_path(&f)).unwrap(),
+        b"{\"version\": 1, oops"
+    );
+    assert_eq!(
+        notes::load(&f.dir, &f.id, Layer::Canvas)
+            .unwrap()
+            .strokes()
+            .len(),
+        2
+    );
+    // A folder where items.json should be is unreadable too.
+    let g = fixture();
+    std::fs::create_dir_all(items_path(&g)).unwrap();
+    let (s, _) = notes::load_scene(&g.dir, &g.id, 1).unwrap();
+    assert!(!s.items_ok());
+    assert!(
+        parse(&g.app.canvas_for_draw_json("../x", [0.0; 4]))
+            .get("error")
+            .is_some()
+    );
+}
+
+/// F21-FR1: undo and redo are scene-wide; the stroke calls answer in stroke ids still.
+#[test]
+fn one_history_for_strokes_and_items() {
+    let f = fixture();
+    let file = json!({"version": 1, "items": [every_item()[0]]});
+    std::fs::create_dir_all(notes::folder(&f.dir, &f.id)).unwrap();
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    stroke(&f, 0.0, 300.0, 5.0);
+    let lasso = [-10.0, 290.0, 60.0, 290.0, 60.0, 310.0, -10.0, 310.0];
+    let sel = parse(&f.app.ink_lasso_json(&f.id, "canvas", &lasso));
+    assert_eq!(
+        (sel["ids"].clone(), sel["refs"].clone()),
+        (json!([0]), json!(["s:0"]))
+    );
+    let drawn = parse(
+        &f.app
+            .canvas_for_draw_json(&f.id, [-500.0, -500.0, 500.0, 500.0]),
+    );
+    assert_eq!(drawn["selection"], json!(["s:0"]));
+    assert_eq!(
+        drawn["entries"][0]["ref"], "i:rect1",
+        "the file's item under the new stroke"
+    );
+    assert_eq!(drawn["entries"][1]["ref"], "s:0");
+    let u = parse(&f.app.ink_history_json(&f.id, "canvas", false));
+    assert_eq!(u["changed"], true);
+    let drawn = parse(
+        &f.app
+            .canvas_for_draw_json(&f.id, [-500.0, -500.0, 500.0, 500.0]),
+    );
+    assert_eq!(
+        drawn["selection"],
+        json!([]),
+        "an undone stroke leaves the selection"
+    );
+    assert_eq!(drawn["canRedo"], true);
+    // Minutes ink is a layer of its own with its own history.
+    let pts = [0.0, 0.0, 1.0, -1.0];
+    f.app.ink_stroke_json(&f.id, "minutes", 0, 3.0, &pts);
+    let m = parse(
+        &f.app
+            .ink_strokes_json(&f.id, "minutes", [-10.0, -10.0, 10.0, 10.0]),
+    );
+    assert_eq!(m["strokes"].as_array().unwrap().len(), 1);
+    assert_eq!(parse(&f.app.ink_save_json(&f.id)), json!({"saved": 2}));
+}

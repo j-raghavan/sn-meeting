@@ -2,6 +2,10 @@
 //! `canvas.inkbin` (the Notes tab's infinite canvas, one world-space layer), `minutes.inkbin`
 //! (the Minutes tab's ink area, F17-FR10) and `view.json` (the canvas's last viewport). The
 //! ink files change only from user input (INV12); every write is atomic (tmp, fsync, rename).
+//!
+//! F21-FR1 (D21): the canvas's items, per-stroke extras and paint order go in a sibling
+//! `items.json`, so `canvas.inkbin` stays v2 and a build without F21 keeps reading it. Canvas
+//! n ≥ 2 of a meeting lives in `canvas-<n>/` with the same files (F21-FR12, OQ32).
 pub mod png;
 pub mod regions;
 
@@ -17,6 +21,10 @@ pub const CANVAS: &str = "canvas.inkbin";
 pub const MINUTES: &str = "minutes.inkbin";
 /// The canvas's last viewport.
 pub const VIEW: &str = "view.json";
+/// F21-FR1: the canvas's items beside its strokes.
+pub const ITEMS: &str = "items.json";
+/// F21-FR11: copies of inserted images, shared by every canvas of the meeting.
+pub const IMAGES: &str = "images";
 /// The sidecar's `notes.format` (OQ14/OQ28 proposed: `.inkbin` v2).
 pub const FORMAT: &str = "inkbin-2";
 /// A notes file bigger than this is not ours (a dense 3-hour canvas is a few MB).
@@ -70,6 +78,71 @@ pub fn load(dir: &Path, id: &str, layer: Layer) -> Result<InkLayer, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(InkLayer::new()),
         Err(e) => Err(format!("The notes can't be read ({:?})", e.kind())),
     }
+}
+
+/// F21-FR12: the folder canvas `n` of `id` lives in: the notes folder for canvas 1 (today's
+/// paths), `canvas-<n>/` inside it for the others.
+pub fn canvas_dir(dir: &Path, id: &str, n: u32) -> PathBuf {
+    let f = folder(dir, id);
+    if n <= 1 {
+        f
+    } else {
+        f.join(format!("canvas-{n}"))
+    }
+}
+
+/// F21-FR1: canvas `n` as a scene: its strokes (an unreadable `.inkbin` is an error, as
+/// [`load`]) and its `items.json` (missing: no items; unreadable: the scene refuses item
+/// edits and never writes it).
+pub fn load_scene(
+    dir: &Path,
+    id: &str,
+    n: u32,
+) -> Result<(crate::canvas::Scene, crate::canvas::LoadReport), String> {
+    let at = canvas_dir(dir, id, n);
+    let ink = match crate::atomic::read_capped(&at.join(CANVAS), MAX_INK_BYTES) {
+        Ok(b) => ink::decode_layer(&b).map_err(|e| format!("The notes can't be read: {e}"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => InkLayer::new(),
+        Err(e) => return Err(format!("The notes can't be read ({:?})", e.kind())),
+    };
+    let items =
+        match crate::atomic::read_capped(&at.join(ITEMS), crate::canvas::scene::MAX_ITEMS_BYTES) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("{:?}", e.kind())),
+        };
+    Ok(crate::canvas::Scene::load(ink, items))
+}
+
+/// F21-FR1: write what changed of canvas `n`: `canvas.inkbin` only when strokes changed,
+/// `items.json` when it is needed and differs. Whether anything was written.
+pub fn save_scene(
+    dir: &Path,
+    id: &str,
+    n: u32,
+    scene: &mut crate::canvas::Scene,
+) -> std::io::Result<bool> {
+    if !crate::sidecar::is_valid_id(id) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "invalid meeting id",
+        ));
+    }
+    let at = canvas_dir(dir, id, n);
+    let items = scene.items_to_save();
+    if !scene.strokes_dirty() && items.is_none() {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(&at)?;
+    if scene.strokes_dirty() {
+        crate::atomic::write_atomic(&at.join(CANVAS), &ink::encode_layer(scene.ink()))?;
+        scene.strokes_saved();
+    }
+    if let Some(b) = items {
+        crate::atomic::write_atomic(&at.join(ITEMS), &b)?;
+        scene.items_saved(b);
+    }
+    Ok(true)
 }
 
 /// Write `layer` atomically, creating the notes folder if needed.
@@ -246,6 +319,42 @@ mod tests {
         std::fs::create_dir_all(path(d.path(), ID, Layer::Minutes)).unwrap();
         assert!(
             load(d.path(), ID, Layer::Minutes).is_err(),
+            "a folder in its place"
+        );
+    }
+
+    /// F21-FR1 / FR12: scenes load from and save to canvas n's folder; a damaged `.inkbin`
+    /// refuses the scene, and nothing is written for a bad id.
+    #[test]
+    fn scenes_live_in_their_canvas_folder() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(canvas_dir(d.path(), ID, 1), folder(d.path(), ID));
+        assert_eq!(
+            canvas_dir(d.path(), ID, 3),
+            folder(d.path(), ID).join("canvas-3")
+        );
+        let (mut s, _) = load_scene(d.path(), ID, 2).unwrap();
+        assert!(s.is_empty());
+        let p = InkPoint::new(1.0, 2.0, 1.0, None, None, 0).unwrap();
+        let st = s
+            .new_stroke(Tool::Pen, InkColor::BLACK, 2.0, vec![p], 1, Some(9))
+            .unwrap();
+        s.add_stroke(st, None);
+        assert!(save_scene(d.path(), "../x", 2, &mut s).is_err());
+        assert!(save_scene(d.path(), ID, 2, &mut s).unwrap());
+        assert!(!save_scene(d.path(), ID, 2, &mut s).unwrap());
+        let (back, _) = load_scene(d.path(), ID, 2).unwrap();
+        assert_eq!(back.ink().strokes()[0].rec_ms, Some(9));
+        std::fs::write(canvas_dir(d.path(), ID, 2).join(CANVAS), b"INKB\x09").unwrap();
+        assert!(
+            load_scene(d.path(), ID, 2)
+                .unwrap_err()
+                .contains("can't be read")
+        );
+        std::fs::remove_file(canvas_dir(d.path(), ID, 2).join(CANVAS)).unwrap();
+        std::fs::create_dir_all(canvas_dir(d.path(), ID, 2).join(CANVAS)).unwrap();
+        assert!(
+            load_scene(d.path(), ID, 2).is_err(),
             "a folder in its place"
         );
     }

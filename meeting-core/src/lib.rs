@@ -3,6 +3,7 @@ pub mod api;
 pub mod app;
 pub mod atomic;
 pub mod calendar;
+pub mod canvas;
 pub mod chunk;
 pub mod ink;
 pub mod jobs;

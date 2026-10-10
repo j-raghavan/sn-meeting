@@ -14,6 +14,7 @@ import dev.jraghavan.snmeeting.NativeBridge
 import dev.jraghavan.snmeeting.ScreenScope
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
+import dev.jraghavan.snmeeting.model.str
 import dev.jraghavan.snmeeting.record.LiveClock
 import org.json.JSONObject
 
@@ -69,6 +70,9 @@ class NotesPage(
     /** F17-FR14: dialogs wait while the pen is in use (a dialog takes the pen's claim). */
     val dialogs = DialogGate({ SystemClock.uptimeMillis() })
     private val dialogTick = Runnable { dialogs.tick() }
+    /** F21-FR11: the canvas's image copies, decoded for drawing. */
+    val images = dev.jraghavan.snmeeting.notes.canvas.ImageCache()
+
     /** The lasso selection's stroke ids (`[id, …]`), while there is one. */
     private var selected = "[]"
 
@@ -119,9 +123,9 @@ class NotesPage(
             host.listenAt(seek, hit.lineN)
         }
         override fun viewportChanged(v: Viewport) = fetch(InkBake.Event.VIEWPORT_SETTLED)
-        override fun allStrokes(bounds: WorldRect, done: (List<DrawStroke>) -> Unit) = scope.core({
-            NativeBridge.nativeInkStrokesForDraw(id, LAYER, bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat())
-        }) { json -> done(CoreJson.obj(json, InkView::from).getOrNull()?.strokes.orEmpty()) }
+        override fun allEntries(bounds: WorldRect, done: (List<DrawEntry>) -> Unit) = scope.core({
+            NativeBridge.nativeCanvasForDraw(id, bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat())
+        }) { json -> done(CoreJson.obj(json, InkView::from).getOrNull()?.entries.orEmpty()) }
     })
 
     /** F17-FR14: the zoom pill's controls the hints point at. */
@@ -244,8 +248,8 @@ class NotesPage(
         val o = IntArray(2).also { hints.getLocationInWindow(it) }
         val c = IntArray(2).also { canvas.getLocationInWindow(it) }
         val v = canvas.viewport
-        return canvas.inkView.strokes.any { s ->
-            val w = s.bounds
+        val boxes = canvas.inkView.strokes.map { it.bounds } + canvas.inkView.items.map { it.bounds }
+        return boxes.any { w ->
             val sl = v.screenX(w.left) + c[0] - o[0]; val sr = v.screenX(w.right) + c[0] - o[0]
             val st = v.screenY(w.top) + c[1] - o[1]; val sb = v.screenY(w.bottom) + c[1] - o[1]
             sl < r && l < sr && st < b && t < sb
@@ -253,6 +257,7 @@ class NotesPage(
     }
 
     init {
+        canvas.images = images
         canvas.inkHoles = { listOf(zoomPill) } // F17-FR4: the pen never inks over the pill
         // F17-FR13: the minimap card sits under the zoom pill when the bar leaves it that corner.
         canvas.minimapTop = { if (canvas.barOnLeft) 0 else zoomPill.bottom }
@@ -312,6 +317,7 @@ class NotesPage(
                 is CoreResult.Ok -> {
                     opened = true
                     val o = r.value
+                    o.str("imagesDir")?.let { images.folder = java.io.File(it) }
                     canvas.post {
                         val w = canvas.width.toDouble(); val h = canvas.height.toDouble()
                         val v = o.optJSONObject("view")
@@ -327,7 +333,7 @@ class NotesPage(
                         canvas.setViewport(next)
                         if (front) canvas.claimPen("open")
                         // F17-FR14: an empty canvas opens with the hints, one with ink without them.
-                        if (o.optInt("strokes", 0) == 0) hints.show()
+                        if (o.optInt("strokes", 0) == 0 && o.optInt("items", 0) == 0) hints.show()
                     }
                 }
                 is CoreResult.Err -> dialogs.show { InkDialog.error(a, "The notes can't be opened", r.message) }
@@ -385,7 +391,7 @@ class NotesPage(
         val r = v.visible(canvas.width.toDouble(), canvas.height.toDouble())
         val m = maxOf(r.width, r.height) / 2
         scope.core({
-            NativeBridge.nativeInkStrokesForDraw(id, LAYER, (r.left - m).toFloat(), (r.top - m).toFloat(),
+            NativeBridge.nativeCanvasForDraw(id, (r.left - m).toFloat(), (r.top - m).toFloat(),
                 (r.right + m).toFloat(), (r.bottom + m).toFloat())
         }) { json ->
             CoreJson.obj(json, InkView::from).getOrNull()?.let {
