@@ -48,6 +48,7 @@ class TagGraphView(
         color = Color.WHITE; typeface = Typeface.MONOSPACE; textAlign = Paint.Align.CENTER
     }
     private val beside = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; typeface = Typeface.MONOSPACE }
+    private val paper = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL }
 
     /** A new graph: drawn fitted. The same nodes again keep the zoom and pan. */
     fun show(g: TagGraph) {
@@ -83,20 +84,30 @@ class TagGraphView(
             line.strokeWidth = TagGraphMath.strokePx(e.shared, density * (if (interactive) 1.5 else 1.0)).toFloat()
             c.drawLine(v.x(a.x).toFloat(), v.y(a.y).toFloat(), v.x(b.x).toFloat(), v.y(b.y).toFloat(), line)
         }
-        g.nodes.forEachIndexed { i, n ->
-            val r = TagGraphMath.radiusPx(n.r, v, min, max).toFloat()
-            val cx = v.x(n.x).toFloat(); val cy = v.y(n.y).toFloat()
-            c.drawCircle(cx, cy, r, fill)
-            if (i == selected) c.drawCircle(cx, cy, r + 7 * density, ring)
-            if (r < labelR) return@forEachIndexed
+        val spots = g.nodes.map { n -> TagGraphMath.Spot(v.x(n.x), v.y(n.y), TagGraphMath.radiusPx(n.r, v, min, max)) }
+        // Circles first, then every label on top, so no circle hides a name.
+        beside.textSize = 13f * density
+        val pad = 3f * density
+        val widths = g.nodes.mapIndexed { i, n ->
+            val s = spots[i]; val r = s.r.toFloat()
+            c.drawCircle(s.cx.toFloat(), s.cy.toFloat(), r, fill)
+            if (i == selected) c.drawCircle(s.cx.toFloat(), s.cy.toFloat(), r + 7 * density, ring)
+            if (r < labelR) return@mapIndexed null
             val text = TagGraphMath.label(n)
             inside.textSize = (r / 3f).coerceIn(11f * density, 20f * density)
-            if (TagGraphMath.fitsInside(inside.measureText(text), r.toDouble())) {
-                c.drawText(text, cx, cy + inside.textSize / 3f, inside)
-            } else {
-                beside.textSize = 13f * density
-                c.drawText(text, cx + r + 6 * density, cy + beside.textSize / 3f, beside)
-            }
+            if (TagGraphMath.fitsInside(inside.measureText(text), s.r)) {
+                c.drawText(text, s.cx.toFloat(), s.cy.toFloat() + inside.textSize / 3f, inside)
+                null
+            } else (beside.measureText(text) + 2 * pad).toDouble()
+        }
+        val lineH = beside.descent() - beside.ascent()
+        val boxes = TagGraphMath.placeLabels(spots, widths, (lineH + pad).toDouble(), g.nodes.map { it.count },
+            width, height, 4.0 * density, force = interactive)
+        boxes.forEachIndexed { i, b ->
+            if (b == null) return@forEachIndexed
+            // A white card under the name keeps it readable over the lines.
+            c.drawRect(b.l.toFloat(), b.t.toFloat(), b.r.toFloat(), b.b.toFloat(), paper)
+            c.drawText(TagGraphMath.label(g.nodes[i]), b.l.toFloat() + pad, b.t.toFloat() + pad / 2 - beside.ascent(), beside)
         }
     }
 

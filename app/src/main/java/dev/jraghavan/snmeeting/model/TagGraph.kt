@@ -102,6 +102,53 @@ object TagGraphMath {
     fun label(n: TagNode): String = "${Tags.shown(n.name)}  ${n.count}"
     fun fitsInside(textWidth: Float, radiusPx: Double): Boolean = textWidth <= radiusPx * 1.7
 
+    /** A circle on screen. */
+    data class Spot(val cx: Double, val cy: Double, val r: Double)
+
+    /** A label's box on screen. */
+    data class Box(val l: Double, val t: Double, val r: Double, val b: Double) {
+        fun overlaps(o: Box) = l < o.r && o.l < r && t < o.b && o.t < b
+        fun within(w: Int, h: Int) = l >= 0 && t >= 0 && r <= w && b <= h
+        fun covers(c: Spot) = hypot(c.cx.coerceIn(l, r) - c.cx, c.cy.coerceIn(t, b) - c.cy) < c.r
+        fun shiftedInto(w: Int, h: Int): Box {
+            val dx = if (l < 0) -l else if (r > w) maxOf(w - r, -l) else 0.0
+            val dy = if (t < 0) -t else if (b > h) maxOf(h - b, -t) else 0.0
+            return Box(l + dx, t + dy, r + dx, b + dy)
+        }
+    }
+
+    /**
+     * Where the labels beside their circles go, so none is cut off by the view's edge, drawn
+     * under another circle, or drawn over another label. [widths] (null: no label beside this
+     * circle, it's inside or too small) and [height] are the label boxes in px. Tags with more
+     * recordings ([counts]) choose first; each tries right, left, below and above its circle and
+     * takes the first spot inside the view that covers no other circle and no placed label.
+     * With no clear spot, [force] (the full Tag Graph) takes the spot that covers least, kept
+     * on screen; Home's small panel leaves that label out (the full graph shows it).
+     */
+    fun placeLabels(
+        circles: List<Spot>, widths: List<Double?>, height: Double, counts: List<Int>,
+        w: Int, h: Int, gap: Double, force: Boolean,
+    ): List<Box?> {
+        val out = arrayOfNulls<Box>(circles.size)
+        val placed = mutableListOf<Box>()
+        circles.indices.sortedByDescending { counts[it] }.forEach { i ->
+            val tw = widths[i] ?: return@forEach
+            val c = circles[i]
+            val tries = listOf(
+                Box(c.cx + c.r + gap, c.cy - height / 2, c.cx + c.r + gap + tw, c.cy + height / 2),
+                Box(c.cx - c.r - gap - tw, c.cy - height / 2, c.cx - c.r - gap, c.cy + height / 2),
+                Box(c.cx - tw / 2, c.cy + c.r + gap, c.cx + tw / 2, c.cy + c.r + gap + height),
+                Box(c.cx - tw / 2, c.cy - c.r - gap - height, c.cx + tw / 2, c.cy - c.r - gap),
+            )
+            fun clashes(b: Box) = circles.indices.count { it != i && b.covers(circles[it]) } + placed.count { b.overlaps(it) }
+            val box = tries.firstOrNull { it.within(w, h) && clashes(it) == 0 }
+                ?: if (force) tries.map { it.shiftedInto(w, h) }.minByOrNull { clashes(it) } else null
+            if (box != null) { out[i] = box; placed += box }
+        }
+        return out.toList()
+    }
+
     /** F20-FR7's legend under the graph. */
     const val LEGEND = "Bigger circle = more recordings  ·  lines join tags used together  ·  tap a tag"
 

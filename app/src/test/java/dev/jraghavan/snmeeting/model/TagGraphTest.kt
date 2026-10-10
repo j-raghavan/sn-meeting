@@ -82,4 +82,61 @@ class TagGraphTest {
         assertTrue(!TagGraphMath.fitsInside(90f, 50.0))
         assertEquals(listOf("all", "3m"), TagGraphMath.Range.values().map { it.id })
     }
+
+    private fun spot(x: Double, y: Double, r: Double = 20.0) = TagGraphMath.Spot(x, y, r)
+
+    @Test
+    fun a_label_near_the_right_edge_goes_to_the_left_and_stays_on_screen() {
+        val b = TagGraphMath.placeLabels(listOf(spot(380.0, 100.0)), listOf(80.0), 16.0, listOf(1), 400, 200, 4.0, false).single()!!
+        assertTrue(b.within(400, 200))
+        assertTrue("left of the circle", b.r <= 380.0 - 20.0)
+    }
+
+    @Test
+    fun labels_cover_no_other_circle_and_no_other_label() {
+        // Two circles side by side: the right-hand label of the first would run into the second.
+        val circles = listOf(spot(100.0, 100.0), spot(170.0, 100.0), spot(135.0, 150.0))
+        val boxes = TagGraphMath.placeLabels(circles, listOf(60.0, 60.0, 60.0), 16.0, listOf(3, 2, 1), 400, 300, 4.0, false)
+        boxes.forEachIndexed { i, b ->
+            b!!
+            assertTrue(b.within(400, 300))
+            circles.indices.filter { it != i }.forEach { j -> assertTrue("label $i covers circle $j", !b.covers(circles[j])) }
+            boxes.indices.filter { it != i }.forEach { j -> assertTrue("labels $i and $j overlap", !b.overlaps(boxes[j]!!)) }
+        }
+    }
+
+    @Test
+    fun a_label_inside_its_circle_or_on_a_small_circle_gets_no_box() {
+        val boxes = TagGraphMath.placeLabels(listOf(spot(100.0, 100.0), spot(250.0, 100.0)), listOf(null, 60.0), 16.0, listOf(5, 1), 400, 200, 4.0, false)
+        assertNull(boxes[0])
+        assertTrue(boxes[1] != null)
+    }
+
+    @Test
+    fun with_no_clear_spot_home_leaves_the_label_out_and_the_full_graph_keeps_it_on_screen() {
+        // A circle filling a small view: every spot beside it is off screen.
+        val c = listOf(spot(50.0, 50.0, 45.0))
+        assertNull(TagGraphMath.placeLabels(c, listOf(80.0), 16.0, listOf(1), 100, 100, 4.0, false).single())
+        val b = TagGraphMath.placeLabels(c, listOf(80.0), 16.0, listOf(1), 100, 100, 4.0, true).single()!!
+        assertTrue(b.within(100, 100))
+    }
+
+    @Test
+    fun the_tag_with_more_recordings_gets_the_first_choice() {
+        // Two circles one above the other: both labels want the right-hand side, where they'd overlap.
+        val circles = listOf(spot(100.0, 100.0), spot(100.0, 110.0))
+        val boxes = TagGraphMath.placeLabels(circles, listOf(40.0, 40.0), 16.0, listOf(1, 9), 400, 200, 4.0, false)
+        assertTrue("busy tag on its right", boxes[1]!!.l >= 100.0 + 20.0)
+        assertTrue("quiet tag on its left", boxes[0]!!.r <= 100.0 - 20.0)
+        assertTrue(!boxes[0]!!.overlaps(boxes[1]!!))
+    }
+
+    @Test
+    fun a_box_shifted_into_the_view_keeps_its_size() {
+        val b = TagGraphMath.Box(-10.0, 90.0, 30.0, 110.0).shiftedInto(100, 100)
+        assertEquals(TagGraphMath.Box(0.0, 80.0, 40.0, 100.0), b)
+        assertEquals(TagGraphMath.Box(10.0, 10.0, 20.0, 20.0), TagGraphMath.Box(10.0, 10.0, 20.0, 20.0).shiftedInto(100, 100))
+        // Wider than the view: its start stays on screen.
+        assertEquals(0.0, TagGraphMath.Box(-10.0, 0.0, 110.0, 10.0).shiftedInto(100, 100).l, 1e-9)
+    }
 }
