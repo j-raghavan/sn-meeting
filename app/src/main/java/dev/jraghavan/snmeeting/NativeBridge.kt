@@ -160,6 +160,10 @@ object NativeBridge {
      *  canUndo, canRedo, selection: [ref], selectionBounds, itemsOk}`. */
     external fun nativeCanvasForDraw(id: String, x0: Float, y0: Float, x1: Float, y1: Float): String
 
+    /** F21: one gesture on the canvas (`{op, …}`: `clear`, `restoreCleared`, …), one undo step:
+     *  `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`. */
+    external fun nativeCanvasEdit(id: String, opJson: String): String
+
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
      *  atMs: null}`; none `{strokeId: null}`. */

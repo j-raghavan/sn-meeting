@@ -1009,6 +1009,21 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasFor
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeCanvasEdit<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    op_json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let op_json: String = op_json.try_to_string(env)?;
+        env.new_string(crate::api::canvas_edit(&id, &op_json))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkSave<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,

@@ -330,6 +330,13 @@ impl InkLayer {
         })
     }
 
+    /// F21: the next stroke id, reserved (a restored stroke's new id, OQ34).
+    pub fn next_id(&mut self) -> StrokeId {
+        let id = StrokeId(self.next_id);
+        self.next_id = self.next_id.saturating_add(1);
+        id
+    }
+
     /// F21-FR1: take the strokes in `ids` out, outside this layer's own history; each with the
     /// index it had, ascending.
     pub fn take(&mut self, ids: &[StrokeId]) -> Vec<(usize, Stroke)> {

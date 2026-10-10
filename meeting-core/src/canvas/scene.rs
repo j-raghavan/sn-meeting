@@ -13,7 +13,7 @@ use super::geom::{self, Pt, Shape};
 use super::item::{Item, Ref, StrokeExtra};
 use crate::ink::{BBox, InkLayer, Stroke, StrokeId};
 use serde_json::{Map, Value, json};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// The steps Undo can go back (F21-FR1 [Recommendation]).
 pub const HISTORY_CAP: usize = 200;
@@ -505,15 +505,27 @@ impl Scene {
             .collect();
         let area = self.step(|s| {
             let ids: Vec<StrokeId> = refs.iter().filter_map(Ref::stroke).collect();
-            let removed = s.ink.take(&ids);
             s.remove_from_doc(&refs);
+            let removed = s.ink.take(&ids);
             (removed, Vec::new())
         });
         (refs, area)
     }
 
-    /// Take `refs` out of the item side: items, extras and order entries.
+    /// Take `refs` out of the item side: items, extras and order entries. An arrow end bound
+    /// to something removed is freed at its last centre (`CanvasCore.kt:347-372`).
     fn remove_from_doc(&mut self, refs: &[Ref]) {
+        let centres: Vec<(Ref, Pt)> = refs
+            .iter()
+            .filter_map(|r| self.shape_of(r).map(|s| (r.clone(), s.centre())))
+            .collect();
+        for it in &mut self.doc.items {
+            for e in [it.start.as_mut(), it.end.as_mut()].into_iter().flatten() {
+                if let Some((_, c)) = centres.iter().find(|(r, _)| Some(r) == e.bind.as_ref()) {
+                    (e.x, e.y, e.bind) = (c.x, c.y, None);
+                }
+            }
+        }
         self.doc.order.retain(|r| !has(refs, r));
         self.doc
             .items
@@ -575,16 +587,121 @@ impl Scene {
         (removed, added)
     }
 
-    /// An eraser sweep through `path` with radius `r`: every stroke it touches, as one step
-    /// (F17; items join in F21-FR3). The refs erased, in paint order.
+    /// The group `r` belongs to, if any.
+    #[must_use]
+    pub fn group_of(&self, r: &Ref) -> Option<&str> {
+        match r {
+            Ref::Stroke(n) => self.doc.extras.get(n).and_then(|e| e.group_id.as_deref()),
+            Ref::Item(i) => self.item(i).and_then(|it| it.group_id.as_deref()),
+        }
+    }
+
+    /// `refs` and every other member of their groups (groups don't nest; a member's whole
+    /// group joins, `CanvasActions.kt:56-97`), in paint order.
+    #[must_use]
+    pub fn with_groups(&self, refs: &[Ref]) -> Vec<Ref> {
+        let groups: Vec<&str> = refs.iter().filter_map(|r| self.group_of(r)).collect();
+        self.doc
+            .order
+            .iter()
+            .filter(|r| has(refs, r) || self.group_of(r).is_some_and(|g| groups.contains(&g)))
+            .cloned()
+            .collect()
+    }
+
+    /// F21-FR3: an eraser sweep through `path` with radius `r`: every stroke and item it
+    /// touches (item outlines, `hit::touches`), and their groups, as one step. The refs
+    /// erased, in paint order.
     pub fn erase(&mut self, path: &[(f32, f32)], radius: f32) -> (Vec<Ref>, Option<BBox>) {
-        let hit: Vec<Ref> = self
+        let mut hit: Vec<Ref> = self
             .ink
             .hit_by_path(path, radius)
             .into_iter()
             .map(|s| Ref::Stroke(s.0))
             .collect();
-        self.delete(&hit)
+        if self.items_ok {
+            let pts = super::hit::densify(path, radius);
+            for it in &self.doc.items {
+                let ends = self.ends(it);
+                if pts
+                    .iter()
+                    .any(|p| super::hit::touches(it, ends, *p, f64::from(radius)))
+                {
+                    hit.push(Ref::Item(it.id.clone()));
+                }
+            }
+        }
+        let all = self.with_groups(&hit);
+        self.delete(&all)
+    }
+
+    /// F21-FR3: Clear canvas: every stroke and item of this canvas out, as one step that Undo
+    /// brings back identically (ids, times, order, groups, bindings, links). `None` when
+    /// there was nothing to clear (or items can't be edited: the canvas is then left alone).
+    pub fn clear(&mut self) -> Option<BBox> {
+        if !self.items_ok || self.is_empty() {
+            return None;
+        }
+        let all = self.doc.order.clone();
+        self.delete(&all).1
+    }
+
+    /// OQ34: put a cleared canvas's content back (from its backup) on top of this one, as one
+    /// step. Ids that are taken here get fresh ones, and bindings, groups and the order follow.
+    pub fn absorb(&mut self, other: &Scene) -> Option<BBox> {
+        if !self.items_ok || other.is_empty() {
+            return None;
+        }
+        self.step(|s| {
+            let mut strokes: HashMap<u32, u32> = HashMap::new();
+            let mut added = Vec::new();
+            for st in other.ink.strokes() {
+                let mut n = st.clone();
+                n.id = s.ink.next_id();
+                strokes.insert(st.id.0, n.id.0);
+                added.push((s.ink.strokes().len() + added.len(), n));
+            }
+            s.ink.put(&added);
+            let mut items: HashMap<String, String> = HashMap::new();
+            for it in &other.doc.items {
+                let id = if s.item(&it.id).is_some() || items.values().any(|v| *v == it.id) {
+                    s.fresh_id()
+                } else {
+                    it.id.clone()
+                };
+                items.insert(it.id.clone(), id);
+            }
+            let map = |r: &Ref| -> Option<Ref> {
+                match r {
+                    Ref::Stroke(n) => strokes.get(n).map(|m| Ref::Stroke(*m)),
+                    Ref::Item(i) => items.get(i).map(|m| Ref::Item(m.clone())),
+                }
+            };
+            for it in &other.doc.items {
+                let mut n = it.clone();
+                n.id.clone_from(&items[&it.id]);
+                for e in [n.start.as_mut(), n.end.as_mut()].into_iter().flatten() {
+                    e.bind = e.bind.as_ref().and_then(map);
+                }
+                s.doc.items.push(n);
+            }
+            for (id, e) in &other.doc.extras {
+                s.doc.extras.insert(strokes[id], e.clone());
+            }
+            s.doc.order.extend(other.doc.order.iter().filter_map(map));
+            (Vec::new(), added)
+        })
+    }
+
+    /// An item id no item here has: 8 hex digits, as `items.json`'s.
+    #[must_use]
+    pub fn fresh_id(&self) -> String {
+        loop {
+            let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_owned();
+            if self.item(&id).is_none() {
+                return id;
+            }
+        }
     }
 
     /// The strokes a lasso loop takes (F17), as refs in paint order.
@@ -852,6 +969,102 @@ pub(crate) mod tests {
         assert_eq!(lassoed, vec![Ref::Stroke(0)]);
         assert_eq!(s.bounds_of(&lassoed).unwrap().x1, 101.0);
         assert!(s.bounds().is_some());
+    }
+
+    /// F21-AC3: 2 items and 3 strokes under one sweep go as one step; Undo puts all five
+    /// back in their paint order, and the arrow bound to the erased rectangle is frozen at its
+    /// last centre, then bound again by the Undo.
+    #[test]
+    fn one_sweep_takes_items_and_strokes_and_frees_bound_arrows() {
+        let mut s = empty();
+        pen(&mut s, &[(0.0, 0.0), (0.0, 100.0)], Some(1));
+        let mut a = rect("a", 50.0, 0.0);
+        a.style = Style::default().with("fill", "solid");
+        with_item(&mut s, a);
+        pen(&mut s, &[(200.0, 0.0), (200.0, 100.0)], Some(2));
+        with_item(&mut s, rect("b", 250.0, 0.0));
+        pen(&mut s, &[(400.0, 0.0), (400.0, 100.0)], None);
+        let mut ar = Item::new("ar", "arrow", Style::default());
+        ar.start = Some(End {
+            x: 0.0,
+            y: 0.0,
+            bind: Some(Ref::Item("a".into())),
+        });
+        ar.end = Some(End {
+            x: 900.0,
+            y: 900.0,
+            bind: None,
+        });
+        with_item(&mut s, ar);
+        let before: Vec<String> = order(&s);
+        // Across the strokes, through a's inside (filled) and b's left edge.
+        let (gone, area) = s.erase(&[(-10.0, 30.0), (410.0, 30.0)], 3.0);
+        assert_eq!(gone.len(), 5, "{gone:?}");
+        assert!(area.is_some());
+        let freed = s.item("ar").unwrap().start.clone().unwrap();
+        assert_eq!(
+            (freed.x, freed.y, freed.bind),
+            (100.0, 25.0, None),
+            "frozen at a's centre"
+        );
+        assert_eq!(order(&s), ["i:ar"]);
+        s.undo();
+        assert_eq!(order(&s), before);
+        let back = s.item("ar").unwrap().start.clone().unwrap();
+        assert_eq!(back.bind, Some(Ref::Item("a".into())), "bound again");
+        // An unfilled shape's inside is not it.
+        let (gone, _) = s.erase(&[(300.0, 25.0)], 3.0);
+        assert!(gone.is_empty());
+    }
+
+    #[test]
+    fn a_group_member_erases_its_whole_group() {
+        let mut s = empty();
+        let st = pen(&mut s, &[(0.0, 0.0), (10.0, 0.0)], None);
+        let mut far = rect("far", 5000.0, 5000.0);
+        far.group_id = Some("g".into());
+        with_item(&mut s, far);
+        s.doc.extras.insert(
+            st.0,
+            StrokeExtra {
+                group_id: Some("g".into()),
+                ..StrokeExtra::default()
+            },
+        );
+        assert_eq!(s.group_of(&Ref::Stroke(st.0)), Some("g"));
+        let (gone, _) = s.erase(&[(5.0, 0.0)], 3.0);
+        assert_eq!(gone, vec![Ref::Stroke(0), Ref::Item("far".into())]);
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn clear_is_one_step_and_a_backup_can_be_absorbed() {
+        let mut s = empty();
+        assert_eq!(s.clear(), None, "nothing to clear");
+        pen(&mut s, &[(0.0, 0.0)], Some(5));
+        with_item(&mut s, rect("a", 0.0, 0.0));
+        let kept = s.clone();
+        assert!(s.clear().is_some());
+        assert!(s.is_empty());
+        s.undo();
+        assert_eq!(s.doc(), kept.doc());
+        s.redo();
+        // Absorbing the backup gives fresh ids where they are taken.
+        pen(&mut s, &[(9.0, 9.0)], None);
+        with_item(&mut s, rect("a", 1.0, 1.0));
+        assert!(s.absorb(&kept).is_some());
+        assert_eq!(s.ink().strokes().len(), 2);
+        assert_eq!(s.doc().items.len(), 2);
+        assert_ne!(s.doc().items[1].id, "a");
+        assert_eq!(s.ink().strokes()[1].rec_ms, Some(5), "times come back");
+        assert_ne!(s.ink().strokes()[1].id, s.ink().strokes()[0].id);
+        s.undo();
+        assert_eq!(s.ink().strokes().len(), 1);
+        assert_eq!(s.absorb(&empty()), None);
+        let (mut broken, _) = Scene::load(InkLayer::new(), Err("io".into()));
+        pen(&mut broken, &[(0.0, 0.0)], None);
+        assert_eq!(broken.clear(), None);
+        assert_eq!(broken.absorb(&kept), None);
     }
 
     #[test]

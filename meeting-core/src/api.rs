@@ -379,6 +379,11 @@ pub fn canvas_for_draw(id: &str, rect: [f32; 4]) -> String {
     with_app(|app| app.canvas_for_draw_json(id, rect))
 }
 
+/// `nativeCanvasEdit(id, opJson)` (F21): one gesture on the canvas, one undo step.
+pub fn canvas_edit(id: &str, op: &str) -> String {
+    with_app(|app| app.canvas_edit_json(id, op))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))

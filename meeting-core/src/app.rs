@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 mod agenda;
 mod calendar;
+mod canvas;
 mod live;
 mod notes;
 mod run;

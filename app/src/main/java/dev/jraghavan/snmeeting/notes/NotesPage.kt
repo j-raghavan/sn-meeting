@@ -220,6 +220,14 @@ class NotesPage(
      *  tool's ink state, so the change costs one redraw. */
     private fun pickTool(t: NoteTool) {
         hideHints()
+        // F21-FR3: the Eraser tapped again while it is the tool offers Clear canvas beside it.
+        if (t == NoteTool.ERASER && tool == NoteTool.ERASER && panels.open != ToolBarModel.Panel.ERASER &&
+            canvas.inkView.bounds != null) {
+            val anchor = bar.anchors["eraser"] ?: return
+            panels.show(ToolBarModel.Panel.ERASER, anchor, panels.rows(listOf(MoreMenu.Entry.CLEAR.label)) { askClear() })
+            refreshBar()
+            return
+        }
         tool = t
         if (t.isShape) lastShape = t
         clearSelection()
@@ -247,7 +255,9 @@ class NotesPage(
 
     /** F21-FR12: ⋮, with what applies now. */
     private fun moreMenu(): View {
-        val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus))
+        val ink = canvas.inkView
+        val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus,
+            hasContent = ink.bounds != null, canRestore = ink.canRestore))
         return panels.rows(entries.map { it.label }) { i -> more(entries[i]) }
     }
 
@@ -262,9 +272,34 @@ class NotesPage(
                 showStrip(strip.state) // F17-AC8: hidden, or back with the newest lines
             }
             MoreMenu.Entry.REFRESH -> canvas.fullRefresh()
+            MoreMenu.Entry.CLEAR -> askClear()
+            MoreMenu.Entry.RESTORE -> edit("""{"op":"restoreCleared"}""")
             else -> Unit
         }
         refreshBar()
+    }
+
+    /**
+     * F21-FR3: "Clear this canvas?" (InkDialog), asked for by the user: it opens only with no
+     * stroke in progress (a request with the pen down is dropped, EC32). Closing it re-claims
+     * the pen and bakes once.
+     */
+    private fun askClear() {
+        panels.close()
+        dialogs.explicit {
+            InkDialog.confirm(a, CLEAR_TITLE, CLEAR_BODY, CLEAR_YES, onClose = {
+                claim("focus")
+                canvas.bake(InkBake.Event.PANEL_CLOSED)
+            }) { edit("""{"op":"clear"}""") }
+        }
+        refreshBar()
+    }
+
+    /** F21: one gesture on the canvas through the core (one undo step), then what is in view
+     *  is fetched again and baked, and the deferred save armed. */
+    private fun edit(op: String) {
+        clearSelection()
+        changed(InkBake.Event.EDIT) { NativeBridge.nativeCanvasEdit(id, op) }
     }
 
     /** F21-FR2: the selection section's actions. */
@@ -487,6 +522,9 @@ class NotesPage(
 
     companion object {
         const val LAYER = "canvas"
+        const val CLEAR_TITLE = "Clear this canvas?"
+        const val CLEAR_BODY = "Everything on this canvas is removed. Undo brings it back."
+        const val CLEAR_YES = "Clear canvas"
         const val SAVE_MS = 1_500L
         /** inkread's default nib (`StylusInkController.PEN_WIDTHS[2]`): matches the firmware's. */
         const val PEN_WIDTH_PX = 9f

@@ -261,3 +261,137 @@ fn one_history_for_strokes_and_items() {
     assert_eq!(m["strokes"].as_array().unwrap().len(), 1);
     assert_eq!(parse(&f.app.ink_save_json(&f.id)), json!({"saved": 2}));
 }
+
+fn edit(f: &Fx, op: Value) -> Value {
+    parse(&f.app.canvas_edit_json(&f.id, &op.to_string()))
+}
+
+/// F21-AC4 / OQ34: Clear canvas on 40 timed strokes and 5 items (an image, a group, a bound
+/// arrow, a link) is one step that rewrites both files; Undo restores everything identically
+/// and the image stays. After a restart the hidden backup restores it.
+#[test]
+fn clear_canvas_is_one_step_and_survives_a_restart() {
+    let f = fixture();
+    for i in 0..40 {
+        #[allow(clippy::cast_precision_loss)]
+        stroke(&f, 0.0, 2000.0 + 20.0 * i as f32, 1000.0 * i as f32);
+    }
+    f.app.ink_save_json(&f.id);
+    let all = every_item();
+    let five = json!([all[0], all[1], all[3], all[7], all[4]]);
+    let file =
+        json!({"version": 1, "items": five, "strokes": {"3": {"groupId": "g-1", "link": null}}});
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    let images = notes::folder(&f.dir, &f.id).join(notes::IMAGES);
+    std::fs::create_dir_all(&images).unwrap();
+    std::fs::write(images.join("img1.jpg"), b"\xff\xd8\xff jpeg").unwrap();
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    let before_ink = std::fs::read(notes::path(&f.dir, &f.id, Layer::Canvas)).unwrap();
+    let draw = |f: &Fx| parse(&f.app.canvas_for_draw_json(&f.id, [-1e6, -1e6, 1e6, 1e6]));
+    assert_eq!(draw(&f)["canRestore"], false);
+    let before = draw(&f)["entries"].clone();
+    assert_eq!(before.as_array().unwrap().len(), 45);
+
+    let r = edit(&f, json!({"op": "clear"}));
+    assert!(r["dirty"].is_array() && r["canUndo"] == true, "{r}");
+    assert_eq!(draw(&f)["entries"], json!([]));
+    assert_eq!(draw(&f)["canRestore"], true);
+    assert_eq!(parse(&f.app.ink_save_json(&f.id)), json!({"saved": 1}));
+    let cleared: Value = serde_json::from_slice(&std::fs::read(items_path(&f)).unwrap()).unwrap();
+    assert_eq!(cleared["items"], json!([]));
+    assert!(
+        notes::load(&f.dir, &f.id, Layer::Canvas)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        edit(&f, json!({"op": "clear"}))["dirty"],
+        Value::Null,
+        "nothing left to clear"
+    );
+
+    let u = parse(&f.app.ink_history_json(&f.id, "canvas", false));
+    assert_eq!(u["changed"], true);
+    f.app.ink_save_json(&f.id);
+    assert_eq!(
+        std::fs::read(notes::path(&f.dir, &f.id, Layer::Canvas)).unwrap(),
+        before_ink
+    );
+    assert_eq!(
+        draw(&f)["entries"],
+        before,
+        "ids, times, order, groups, bindings and the link, identically"
+    );
+    assert!(images.join("img1.jpg").exists());
+
+    // Cleared again, then the app restarts: Undo is gone, the backup is not.
+    edit(&f, json!({"op": "clear"}));
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    std::fs::remove_file(images.join("img1.jpg")).unwrap();
+    let h = parse(&f.app.ink_history_json(&f.id, "canvas", false));
+    assert_eq!(h["changed"], false);
+    let r = edit(&f, json!({"op": "restoreCleared"}));
+    assert!(r["dirty"].is_array(), "{r}");
+    let d = draw(&f);
+    assert_eq!(d["entries"].as_array().unwrap().len(), 45);
+    assert!(
+        images.join("img1.jpg").exists(),
+        "the image came back from the backup"
+    );
+    assert!(
+        edit(&f, json!({"op": "zap"}))["error"]
+            .as_str()
+            .unwrap()
+            .contains("unknown")
+    );
+    assert!(
+        parse(&f.app.canvas_edit_json(&f.id, "nope"))
+            .get("error")
+            .is_some()
+    );
+    std::fs::remove_dir_all(notes::folder(&f.dir, &f.id).join(notes::CLEARED)).unwrap();
+    assert!(
+        edit(&f, json!({"op": "restoreCleared"}))["error"]
+            .as_str()
+            .unwrap()
+            .contains("no cleared")
+    );
+}
+
+#[test]
+fn edits_are_refused_while_items_json_is_unreadable() {
+    let f = fixture();
+    stroke(&f, 0.0, 0.0, -1.0);
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    std::fs::write(items_path(&f), b"junk").unwrap();
+    assert!(
+        edit(&f, json!({"op": "clear"}))["error"]
+            .as_str()
+            .unwrap()
+            .contains("can't be read")
+    );
+    assert!(
+        parse(&f.app.canvas_edit_json("../x", "{}"))
+            .get("error")
+            .is_some()
+    );
+    // A backup that can't be written leaves the canvas as it was.
+    let g = fixture();
+    stroke(&g, 0.0, 0.0, -1.0);
+    let notes_dir = notes::folder(&g.dir, &g.id);
+    std::fs::create_dir_all(&notes_dir).unwrap();
+    std::fs::write(notes_dir.join(notes::CLEARED), b"a file in its place").unwrap();
+    assert!(
+        edit(&g, json!({"op": "clear"}))["error"]
+            .as_str()
+            .unwrap()
+            .contains("can't be cleared")
+    );
+    assert_eq!(
+        parse(&g.app.canvas_for_draw_json(&g.id, [-9.0, -9.0, 99.0, 99.0]))["entries"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

@@ -145,6 +145,76 @@ pub fn save_scene(
     Ok(true)
 }
 
+/// OQ34: the hidden backup Clear canvas keeps until the next Clear, so it can be undone after
+/// a restart: `cleared/` with the canvas's `canvas.inkbin`, `items.json`, the images its
+/// items show and `cleared.json` (which canvas, when).
+pub const CLEARED: &str = "cleared";
+const CLEARED_META: &str = "cleared.json";
+
+/// Keep canvas `n`'s content as the one backup, replacing any earlier one.
+pub fn save_cleared(
+    dir: &Path,
+    id: &str,
+    n: u32,
+    scene: &crate::canvas::Scene,
+) -> std::io::Result<()> {
+    let notes = folder(dir, id);
+    let to = notes.join(CLEARED);
+    match std::fs::remove_dir_all(&to) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e),
+        _ => {}
+    }
+    std::fs::create_dir_all(to.join(IMAGES))?;
+    crate::atomic::write_atomic(&to.join(CANVAS), &ink::encode_layer(scene.ink()))?;
+    crate::atomic::write_atomic(&to.join(ITEMS), &scene.items_json())?;
+    for it in &scene.doc().items {
+        if let Some(img) = &it.image {
+            let from = notes.join(IMAGES).join(&img.file);
+            if from.is_file() {
+                std::fs::copy(&from, to.join(IMAGES).join(&img.file))?;
+            }
+        }
+    }
+    let at = chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+    let meta = json!({"version": 1, "canvas": n, "clearedAt": at});
+    crate::atomic::write_atomic(&to.join(CLEARED_META), meta.to_string().as_bytes())
+}
+
+/// Which canvas the backup holds, if there is a readable one.
+pub fn cleared_canvas(dir: &Path, id: &str) -> Option<u32> {
+    let b =
+        crate::atomic::read_capped(&folder(dir, id).join(CLEARED).join(CLEARED_META), 4096).ok()?;
+    let v: Value = serde_json::from_slice(&b).ok()?;
+    v.get("canvas")?
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+}
+
+/// The backup of canvas `n` as a scene, its images copied back into `images/` where they
+/// are missing; `None` without one.
+pub fn load_cleared(dir: &Path, id: &str, n: u32) -> Option<crate::canvas::Scene> {
+    if cleared_canvas(dir, id) != Some(n) {
+        return None;
+    }
+    let notes = folder(dir, id);
+    let from = notes.join(CLEARED);
+    let ink =
+        ink::decode_layer(&crate::atomic::read_capped(&from.join(CANVAS), MAX_INK_BYTES).ok()?)
+            .ok()?;
+    let items =
+        crate::atomic::read_capped(&from.join(ITEMS), crate::canvas::scene::MAX_ITEMS_BYTES).ok();
+    let (scene, _) = crate::canvas::Scene::load(ink, Ok(items));
+    for it in &scene.doc().items {
+        if let Some(img) = &it.image {
+            let to = notes.join(IMAGES).join(&img.file);
+            if !to.exists() && std::fs::create_dir_all(notes.join(IMAGES)).is_ok() {
+                let _ = std::fs::copy(from.join(IMAGES).join(&img.file), &to);
+            }
+        }
+    }
+    Some(scene)
+}
+
 /// Write `layer` atomically, creating the notes folder if needed.
 pub fn save(dir: &Path, id: &str, layer: Layer, ink: &InkLayer) -> std::io::Result<()> {
     if !crate::sidecar::is_valid_id(id) {

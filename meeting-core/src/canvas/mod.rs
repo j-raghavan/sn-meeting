@@ -7,6 +7,7 @@
 //! measures text, decodes image headers and draws what [`draw`] hands it.
 pub mod draw;
 pub mod geom;
+pub mod hit;
 pub mod item;
 pub mod scene;
 pub mod style;

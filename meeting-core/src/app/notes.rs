@@ -283,17 +283,6 @@ impl App {
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
-    /// `nativeCanvasForDraw(id, x0, y0, x1, y1)` (F21-FR1): the canvas's strokes and items
-    /// meeting the world rectangle, in paint order, arrow ends resolved, with the history
-    /// state and the selection.
-    pub fn canvas_for_draw_json(&self, id: &str, rect: [f32; 4]) -> String {
-        let r = rect_of(rect);
-        let out = self.with_ink(id, Layer::Canvas, |o| {
-            crate::canvas::draw::for_draw(&o.scene, r)
-        });
-        out.map_or_else(|e| error_json(&e), |v| v.to_string())
-    }
-
     /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7, Listen): the topmost stroke within `r` of the
     /// world point. A timed one gives where playback starts (`max(0, t − 2 s)`, placed in its
     /// segment) and the transcript line spoken at `t`: `{strokeId, atMs, seekMs, segIndex,
@@ -398,7 +387,7 @@ impl App {
 }
 
 /// A world rectangle from `[x0, y0, x1, y1]`.
-fn rect_of(r: [f32; 4]) -> BBox {
+pub(crate) fn rect_of(r: [f32; 4]) -> BBox {
     BBox {
         x0: r[0],
         y0: r[1],

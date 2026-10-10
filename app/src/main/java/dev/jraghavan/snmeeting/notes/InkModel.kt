@@ -94,6 +94,8 @@ data class InkView(
     val selection: List<String> = emptyList(),
     val selectionBounds: WorldRect? = null,
     val itemsOk: Boolean = true,
+    /** OQ34: a cleared canvas's backup can be restored. */
+    val canRestore: Boolean = false,
 ) {
     val items: List<DrawItem> get() = entries.mapNotNull { (it as? DrawEntry.Thing)?.item }
 
@@ -119,6 +121,7 @@ data class InkView(
                 selection = o.arr("selection").strings(),
                 selectionBounds = rect(o.arr("selectionBounds")),
                 itemsOk = o.bool("itemsOk") ?: true,
+                canRestore = o.bool("canRestore") ?: false,
             )
         }
 

@@ -23,6 +23,17 @@ class DialogGate(private val now: () -> Long, private val idleMs: Long = IDLE_MS
         if (idle()) dialog() else waiting.addLast(dialog)
     }
 
+    /**
+     * F21-FR3 / EC32: a dialog the user asked for (Clear canvas). F17-FR14 allows it, but only
+     * with no stroke in progress: it opens at once with the pen up (no 1.5 s wait), and a
+     * request made with the pen down is dropped, never queued. Whether it opened.
+     */
+    fun explicit(dialog: () -> Unit): Boolean {
+        if (penDown) return false
+        dialog()
+        return true
+    }
+
     /** Opens what waited, once the canvas is idle. */
     fun tick() {
         if (!idle()) return
