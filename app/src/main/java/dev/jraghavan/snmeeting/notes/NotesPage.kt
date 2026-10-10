@@ -237,6 +237,7 @@ class NotesPage(
     private fun togglePanel(panel: ToolBarModel.Panel, anchor: View) {
         hideHints()
         if (panels.open == panel) { panels.close(); refreshBar(); return }
+        if (panel == ToolBarModel.Panel.STYLE) styleAnchor = anchor
         val content = when (panel) {
             ToolBarModel.Panel.SHAPES -> panels.icons(NoteTool.SHAPES.map { Triple(bar.iconFor(it), it.label, it == tool) }) { i ->
                 pickTool(NoteTool.SHAPES[i])
@@ -245,10 +246,41 @@ class NotesPage(
                 pickTool(NoteTool.INSERTS[i])
             }
             ToolBarModel.Panel.MORE -> moreMenu()
+            ToolBarModel.Panel.STYLE -> stylePanel()
             else -> return
         }
         panels.show(panel, anchor, content)
         refreshBar()
+    }
+
+    /** F21-FR6: the style panel for the selection (or, with none, the default). */
+    private val stylePanelView = dev.jraghavan.snmeeting.notes.canvas.StylePanel(a, ui)
+    private var styleAnchor: View? = null
+
+    private fun stylePanel(): View {
+        val v = canvas.inkView
+        val picked = v.selection.mapNotNull { r -> v.entries.firstOrNull { it.ref == r } }
+        val kinds = picked.map { e -> if (e is DrawEntry.Thing) e.item.type else "stroke" }.toSet()
+        val shown = picked.firstNotNullOfOrNull { e ->
+            when (e) {
+                is DrawEntry.Thing -> e.item.style
+                is DrawEntry.Ink -> e.stroke.style
+            }
+        } ?: v.defaultStyle
+        return stylePanelView.build(shown, kinds) { prop, value ->
+            val q = CoreJson.quote(value)
+            if (canvas.inkView.selection.isEmpty()) {
+                edit("""{"op":"setDefaultStyle","property":"$prop","value":$q}""")
+            } else {
+                edit("""{"op":"restyle","property":"$prop","value":$q}""", keepSelection = true)
+            }
+        }
+    }
+
+    /** F21-FR6: after a pick the panel shows the new style (one redraw of the panel). */
+    private fun refreshStylePanel() {
+        val anchor = styleAnchor ?: return
+        if (panels.open == ToolBarModel.Panel.STYLE) panels.show(ToolBarModel.Panel.STYLE, anchor, stylePanel())
     }
 
     /** F21-FR12: ⋮, with what applies now. */
@@ -309,6 +341,7 @@ class NotesPage(
             ToolBarModel.Act.DELETE -> edit("""{"op":"delete"}""")
             ToolBarModel.Act.DUPLICATE -> edit("""{"op":"duplicate"}""", keepSelection = true)
             ToolBarModel.Act.DONE -> clearSelection()
+            ToolBarModel.Act.STYLE -> togglePanel(ToolBarModel.Panel.STYLE, anchor)
             ToolBarModel.Act.GROUP -> edit("""{"op":"group"}""", keepSelection = true)
             ToolBarModel.Act.UNGROUP -> edit("""{"op":"ungroup"}""", keepSelection = true)
             ToolBarModel.Act.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
@@ -468,7 +501,7 @@ class NotesPage(
         val ink = canvas.inkView
         bar.render(ToolBarModel.State(tool, prefs.collapsed, recording, ink.canUndo, ink.canRedo,
             host.timer(), host.cost(), host.playing(), host.canPlay(), prefs.focus,
-            lastShape = lastShape, open = panels.open,
+            lastShape = lastShape, style = ink.defaultStyle, open = panels.open,
             selection = selectionState()))
     }
 
@@ -565,7 +598,8 @@ class NotesPage(
                 canvas.show(it, event)
                 placeMarks()
                 // Undo and Redo light up or grey out; a selection swaps the tools for its actions.
-                if (history || selection) refreshBar()
+                if (history || selection || it.defaultStyle != before.defaultStyle) refreshBar()
+                if (event == InkBake.Event.EDIT) refreshStylePanel()
             }
         }
     }

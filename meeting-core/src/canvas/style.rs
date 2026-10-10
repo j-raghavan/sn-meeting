@@ -164,6 +164,25 @@ impl Style {
     }
 }
 
+/// F21-FR6: whether `property` applies to a thing of `kind` (`stroke` for ink): fill to
+/// rectangles, ellipses and sticky notes; outline to shapes and images (`none` to images
+/// alone); on strokes colour, opacity and size; on text colour and size.
+#[must_use]
+pub fn applies(kind: &str, property: &str, value: &str) -> bool {
+    match property {
+        "color" => true,
+        "opacity" => kind != "text",
+        "size" => kind != "image",
+        "fill" => matches!(kind, "rectangle" | "ellipse" | "note"),
+        "dash" => match kind {
+            "image" => true,
+            "rectangle" | "ellipse" | "line" | "arrow" => value != "none",
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -217,6 +236,17 @@ mod tests {
             (bad.stroke_width(), bad.font_size(), bad.rgb()),
             (3.5, 24.0, 0)
         );
+    }
+
+    #[test]
+    fn options_apply_where_the_spec_says() {
+        assert!(applies("stroke", "color", "red") && applies("stroke", "size", "l"));
+        assert!(!applies("stroke", "fill", "solid") && !applies("stroke", "dash", "dashed"));
+        assert!(applies("note", "fill", "semi") && !applies("text", "fill", "semi"));
+        assert!(applies("text", "size", "l") && !applies("text", "opacity", "0.5"));
+        assert!(applies("image", "dash", "none") && !applies("rectangle", "dash", "none"));
+        assert!(applies("arrow", "dash", "dotted") && !applies("table", "dash", "dotted"));
+        assert!(!applies("image", "size", "l") && !applies("x", "glow", "1"));
     }
 
     #[test]

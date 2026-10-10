@@ -213,6 +213,11 @@ impl Scene {
         &self.doc
     }
 
+    /// The item side, for a step's edit.
+    pub(crate) fn doc_mut(&mut self) -> &mut Doc {
+        &mut self.doc
+    }
+
     /// Whether `items.json` was readable (item edits allowed).
     #[must_use]
     pub fn items_ok(&self) -> bool {
@@ -264,9 +269,13 @@ impl Scene {
 
     /// Run `f` as one step: it may change strokes through the returned lists and the item
     /// side freely. Nothing changed records nothing. The area changed, or `None`.
-    fn step(&mut self, f: impl FnOnce(&mut Scene) -> (Placed, Placed)) -> Option<BBox> {
+    pub(crate) fn step(&mut self, f: impl FnOnce(&mut Scene) -> (Placed, Placed)) -> Option<BBox> {
         let before = self.doc.clone();
-        let (removed, added) = f(self);
+        let (mut removed, mut added) = f(self);
+        if removed == added {
+            // Strokes taken out and put back unchanged: no change to record.
+            (removed, added) = (Vec::new(), Vec::new());
+        }
         let docs = (self.doc != before).then(|| Box::new((before, self.doc.clone())));
         if removed.is_empty() && added.is_empty() && docs.is_none() {
             return None;
@@ -613,7 +622,11 @@ impl Scene {
 
     /// Replace each stroke in `refs` by `f` of it, keeping its id and index: the lists a
     /// step records.
-    fn map_strokes(&mut self, refs: &[Ref], f: impl Fn(&mut Stroke)) -> (Placed, Placed) {
+    pub(crate) fn map_strokes(
+        &mut self,
+        refs: &[Ref],
+        f: impl Fn(&mut Stroke),
+    ) -> (Placed, Placed) {
         let ids: Vec<StrokeId> = refs.iter().filter_map(Ref::stroke).collect();
         let removed = self.ink.take(&ids);
         let added: Vec<(usize, Stroke)> = removed

@@ -291,6 +291,68 @@ impl Scene {
     }
 }
 
+impl Scene {
+    /// F21-FR6: one style pick on `refs` (their groups included), as one step: each takes it
+    /// where it applies (`style::applies`). A pen stroke's colour, opacity and size also set
+    /// its true RGBA and width in `.inkbin`; its style ids go in `items.json`.
+    pub fn restyle(&mut self, refs: &[Ref], property: &str, value: &str) -> Option<BBox> {
+        if !self.items_ok() {
+            return None;
+        }
+        let refs = self.with_groups(refs);
+        let ink_refs: Vec<Ref> = refs
+            .iter()
+            .filter(|r| r.stroke().is_some() && super::style::applies("stroke", property, value))
+            .cloned()
+            .collect();
+        let mut styles = Vec::new();
+        for r in &ink_refs {
+            if let Ref::Stroke(n) = r {
+                let base = self
+                    .doc()
+                    .extras
+                    .get(n)
+                    .and_then(|e| e.style.clone())
+                    .unwrap_or_default();
+                styles.push((*n, base.with(property, value)));
+            }
+        }
+        self.step(|s| {
+            let st = styles.clone();
+            let (removed, added) = s.map_strokes(&ink_refs, |stroke| {
+                if stroke.tool != crate::ink::Tool::Pen {
+                    return;
+                }
+                if let Some((_, style)) = st.iter().find(|(n, _)| *n == stroke.id.0) {
+                    stroke.color = ink_color(style);
+                    stroke.width = style.stroke_width();
+                }
+            });
+            for (n, style) in styles {
+                s.doc_mut().extras.entry(n).or_default().style = Some(style);
+            }
+            for it in &mut s.doc_mut().items {
+                if refs.contains(&Ref::Item(it.id.clone()))
+                    && it.known()
+                    && super::style::applies(&it.kind, property, value)
+                {
+                    it.style = it.style.with(property, value);
+                }
+            }
+            (removed, added)
+        })
+    }
+}
+
+/// A style's true colour as `.inkbin` keeps it (F21-FR7): its RGB, its opacity as alpha.
+#[must_use]
+pub fn ink_color(style: &super::style::Style) -> crate::ink::InkColor {
+    let rgb = style.rgb();
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // opacity is 0.1..=1
+    let a = (style.opacity * 255.0).round() as u8;
+    crate::ink::InkColor::rgba((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8, a)
+}
+
 /// A table resized to a new height: every row stretched in proportion (`TableEdits.stretch`),
 /// within the row limits, its cells' text heights as measured at the new width.
 fn stretch(n: &mut Item, cells: Option<&[f64]>) {
@@ -647,6 +709,67 @@ mod tests {
         );
         assert_eq!(broken.rotate(&three[0], Pt::new(0.0, 0.0)), None);
         assert_eq!(broken.move_end(&three[0], true, Pt::new(0.0, 0.0)), None);
+    }
+
+    /// F21-AC9 (host part): a shape and a stroke restyled blue and L in one step each; an
+    /// option that doesn't apply leaves a thing alone.
+    #[test]
+    fn a_pick_restyles_the_selection_where_it_applies() {
+        let mut s = empty();
+        with_item(&mut s, rect("a", 0.0, 0.0));
+        let st = pen(&mut s, &[(0.0, 300.0), (50.0, 300.0)], Some(3));
+        let both = [Ref::Item("a".into()), Ref::Stroke(st.0)];
+        let steps = |s: &mut Scene| {
+            let mut n = 0;
+            while s.can_undo() {
+                s.undo();
+                n += 1;
+            }
+            for _ in 0..n {
+                s.redo();
+            }
+            n
+        };
+        let before = steps(&mut s);
+        assert!(s.restyle(&both, "color", "blue").is_some());
+        assert!(s.restyle(&both, "size", "l").is_some());
+        assert_eq!(steps(&mut s), before + 2, "one step per pick");
+        assert_eq!(
+            (
+                s.item("a").unwrap().style.color,
+                s.item("a").unwrap().style.size
+            ),
+            ("blue", "l")
+        );
+        let ink = s.ink().get(st).unwrap();
+        assert_eq!(
+            (ink.color, ink.width),
+            (crate::ink::InkColor::rgba(0x44, 0x65, 0xE9, 255), 5.0)
+        );
+        assert_eq!(ink.rec_ms, Some(3));
+        let es = s.doc().extras[&st.0].style.clone().unwrap();
+        assert_eq!((es.color, es.size), ("blue", "l"));
+        assert!(s.restyle(&both, "fill", "solid").is_some());
+        assert_eq!(s.item("a").unwrap().style.fill, "solid");
+        assert_eq!(
+            s.doc().extras[&st.0].style.as_ref().unwrap().fill,
+            "none",
+            "no fill on ink"
+        );
+        assert_eq!(
+            s.restyle(&both, "dash", "none"),
+            None,
+            "nothing it applies to"
+        );
+        assert_eq!(
+            s.restyle(&both, "color", "magenta"),
+            None,
+            "unknown values change nothing"
+        );
+        let (mut broken, _) = Scene::load(InkLayer::new(), Err("io".into()));
+        assert_eq!(broken.restyle(&both, "color", "red"), None);
+        let half = crate::canvas::style::Style::default().with("opacity", "0.5");
+        assert_eq!(ink_color(&half).a, 128);
     }
 
     #[test]

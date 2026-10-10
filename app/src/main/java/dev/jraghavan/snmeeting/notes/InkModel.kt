@@ -96,6 +96,8 @@ data class InkView(
     val itemsOk: Boolean = true,
     /** OQ34: a cleared canvas's backup can be restored. */
     val canRestore: Boolean = false,
+    /** F21-FR6: the style new items and strokes take. */
+    val defaultStyle: ShapeStyle = ShapeStyle.DEFAULT,
 ) {
     val items: List<DrawItem> get() = entries.mapNotNull { (it as? DrawEntry.Thing)?.item }
 
@@ -122,6 +124,7 @@ data class InkView(
                 selectionBounds = rect(o.arr("selectionBounds")),
                 itemsOk = o.bool("itemsOk") ?: true,
                 canRestore = o.bool("canRestore") ?: false,
+                defaultStyle = ShapeStyle.from(o.obj("defaultStyle")),
             )
         }
 

@@ -516,3 +516,46 @@ fn handles_arrange_and_group() {
         Value::Null
     );
 }
+
+/// F21-AC9 (host part): a shape and a stroke restyled blue, then L, one step each; the
+/// default becomes {color: blue, size: l, …} and survives a restart.
+#[test]
+fn a_style_pick_restyles_and_becomes_the_default() {
+    let f = fixture();
+    let file = json!({"version": 1, "items": [every_item()[0]]});
+    std::fs::create_dir_all(notes::folder(&f.dir, &f.id)).unwrap();
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    stroke(&f, 0.0, 300.0, 5.0);
+    edit(&f, json!({"op": "select", "refs": ["i:rect1", "s:0"]}));
+    let r = edit(
+        &f,
+        json!({"op": "restyle", "property": "color", "value": "blue"}),
+    );
+    assert!(r["dirty"].is_array(), "{r}");
+    assert!(
+        edit(
+            &f,
+            json!({"op": "restyle", "property": "size", "value": "l"})
+        )["dirty"]
+            .is_array()
+    );
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e5, -1e5, 1e5, 1e5]));
+    assert_eq!(d["entries"][1]["stroke"]["style"]["color"], "blue");
+    assert_eq!(d["entries"][1]["stroke"]["width"], 5.0);
+    assert_eq!(d["defaultStyle"]["color"], "blue");
+    assert_eq!(d["defaultStyle"]["size"], "l");
+    let again = f._e.app();
+    let s = parse(&again.get_settings_json());
+    assert_eq!(s["settings"]["notes"]["defaultStyle"]["size"], "l", "{s}");
+    assert!(
+        edit(
+            &f,
+            json!({"op": "setDefaultStyle", "property": "opacity", "value": 0.5})
+        )["dirty"]
+            .is_null()
+    );
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [0.0; 4]));
+    assert_eq!(d["defaultStyle"]["opacity"], 0.5);
+    assert!(edit(&f, json!({"op": "restyle", "property": "color"}))["error"].is_string());
+    assert!(edit(&f, json!({"op": "restyle", "value": "red"}))["error"].is_string());
+}

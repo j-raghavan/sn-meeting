@@ -6,7 +6,7 @@ use crate::api::error_json;
 use crate::canvas::draw::{bbox_json, refs_json};
 use crate::canvas::edits::{Corner, Measured};
 use crate::canvas::geom::Pt;
-use crate::canvas::{Ref, Scene};
+use crate::canvas::{Ref, Scene, Style};
 use crate::ink::BBox;
 use crate::notes::{self, Layer};
 use serde_json::{Value, json};
@@ -22,6 +22,20 @@ fn num(op: &Value, k: &str) -> Result<f64, String> {
         .and_then(Value::as_f64)
         .filter(|v| v.is_finite())
         .ok_or_else(|| format!("{k} must be a number"))
+}
+
+/// A style pick: `{property, value}` (a number value is taken as its text).
+fn pick(op: &Value) -> Result<(String, String), String> {
+    let p = op
+        .get("property")
+        .and_then(Value::as_str)
+        .ok_or("property is needed")?;
+    let v = match op.get("value") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        _ => return Err("value is needed".into()),
+    };
+    Ok((p.to_owned(), v))
 }
 
 /// The op's one `ref`.
@@ -109,6 +123,10 @@ impl App {
             v["canRestore"] = json!(notes::cleared_canvas(&o.dir, id) == Some(1));
             v
         });
+        let out = out.map(|mut v| {
+            v["defaultStyle"] = self.default_style().to_value();
+            v
+        });
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
@@ -165,6 +183,16 @@ impl App {
                 }
                 "group" => o.scene.group(&refs).map(|(_, a)| a),
                 "ungroup" => o.scene.ungroup(&refs),
+                // F21-FR6: a style pick restyles the selection and becomes the default.
+                "restyle" | "setDefaultStyle" => {
+                    let (p, v) = pick(&op)?;
+                    if name == "restyle" {
+                        let all = o.scene.with_groups(&refs);
+                        o.scene.restyle(&all, &p, &v)
+                    } else {
+                        None
+                    }
+                }
                 "front" => o.scene.arrange(&refs, true),
                 "back" => o.scene.arrange(&refs, false),
                 // F21-FR3: the backup goes first; without it, nothing is cleared (OQ34).
@@ -187,9 +215,40 @@ impl App {
             o.dirty |= dirty.is_some();
             Ok(edit_reply(&o.scene, dirty))
         });
-        match out {
-            Ok(Ok(v)) => v.to_string(),
-            Ok(Err(e)) | Err(e) => error_json(&e),
+        let reply = match out {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) | Err(e) => return error_json(&e),
+        };
+        if (name == "restyle" || name == "setDefaultStyle")
+            && let Ok((p, v)) = pick(&op)
+            && let Err(e) = self.set_default_style(&p, &v)
+        {
+            return e;
         }
+        reply.to_string()
+    }
+
+    /// F21-FR6: the style new items and strokes take (`settings.json` → `notes.defaultStyle`).
+    pub(crate) fn default_style(&self) -> Style {
+        self.settings()
+            .0
+            .notes
+            .extra
+            .get("defaultStyle")
+            .map(Style::from_value)
+            .unwrap_or_default()
+    }
+
+    /// F21-FR6: a pick becomes the default, across meetings and restarts.
+    fn set_default_style(&self, property: &str, value: &str) -> Result<(), String> {
+        let next = self.default_style().with(property, value);
+        if next == self.default_style() {
+            return Ok(());
+        }
+        self.commit_settings(|cur| {
+            let mut n = cur.clone();
+            n.notes.extra.insert("defaultStyle".into(), next.to_value());
+            Ok(n)
+        })
     }
 }
