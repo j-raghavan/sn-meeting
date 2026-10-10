@@ -180,9 +180,10 @@ class MeetingActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 // Home: the meeting page finishes; a recording carries on (F17-FR12).
-                addView(ui.backControl("Home"))
-                addView(View(this@MeetingActivity).apply { setBackgroundColor(ui.ink) },
-                    LinearLayout.LayoutParams(maxOf(1, ui.dp(1)), ui.dp(28)).apply { marginEnd = ui.dim(16) })
+                // The house button needs no extra keyline; space it from the tabs.
+                addView(ui.backControl("Home").apply {
+                    (layoutParams as LinearLayout.LayoutParams).marginEnd = ui.dim(22)
+                })
                 addView(tabNotes)
                 addView(ui.eyebrow("|", ui.textMuted).apply { setPadding(ui.dim(12), 0, ui.dim(12), 0) })
                 addView(tabMinutes)

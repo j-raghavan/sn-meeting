@@ -27,6 +27,7 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 |------|--------|---------|
 | `res/drawable/ic_settings.xml` (gear) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_search.xml` (magnifier, Search) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_home.xml` (house, back to Home) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_tool_{pen,highlighter,eraser}.xml`, `ic_sel_{undo,redo}.xml` (notes tools, via inkread) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_tool_lasso.xml` (lasso, from inkread) | inkread (same author) | AGPL-3.0-only |
 | `res/drawable/ic_tool_listen.xml` (speaker, the Listen tool) | Material Design Icons (Google) | Apache License 2.0 |

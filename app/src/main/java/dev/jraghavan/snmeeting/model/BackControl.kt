@@ -11,7 +11,14 @@ object BackControl {
     /** The chevron's size: bold, at least 24 dp. */
     const val CHEVRON_DP = 28
 
-    fun label(to: String): String = to.trim().uppercase()
+    /** What the button says to accessibility services: "Back to Home". */
+    fun label(to: String): String = "Back to " + to.trim().lowercase().replaceFirstChar { it.uppercase() }
+
+    /** The house icon's size (owner, 2026-10-09: "Just Home Icon, Pressable"; no border). */
+    const val ICON_DP = 34
+
+    /** The pressable area around the icon, never under the touch minimum. */
+    const val BUTTON_DP = 56
 
     /** The touch area in px at [density], never under 48 dp. */
     fun touchPx(density: Float): Int = kotlin.math.ceil(MIN_TOUCH_DP * density).toInt()

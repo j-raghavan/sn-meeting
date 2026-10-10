@@ -6,8 +6,10 @@ import org.junit.Test
 
 class BackControlTest { // F17-FR1 (device finding 2026-10-09)
     @Test fun aLabelledChevronWithA48dpTarget() {
-        assertEquals("HOME", BackControl.label("Home"))
-        assertEquals("BACK", BackControl.label(" back "))
+        // Owner, 2026-10-09: "‹ HOME" was too small; it is now a house icon in an outlined button.
+        assertEquals("Back to Home", BackControl.label(" HOME "))
+        assertTrue(BackControl.ICON_DP >= 24)
+        assertTrue(BackControl.BUTTON_DP >= BackControl.MIN_TOUCH_DP)
         assertEquals("‹", BackControl.CHEVRON)
         assertTrue(BackControl.CHEVRON_DP >= 24)
         assertEquals(90, BackControl.touchPx(1.875f)) // the Manta's density: 48 dp

@@ -298,25 +298,25 @@ class Inkwell(private val activity: Activity) {
         }
 
     /**
-     * The back control: a bold chevron and a mono word ("‹ HOME"), padded to a touch area of at
-     * least 48 × 48 dp (model.BackControl); it finishes the screen.
+     * The back control: just a house icon, no border (owner, 2026-10-09: "Just Home Icon,
+     * Pressable"), in a pressable area of at least 56 dp, never under the 48 dp touch minimum
+     * (model.BackControl); it finishes the screen.
      */
-    fun backControl(to: String, onBack: () -> Unit = { activity.finish() }): View = LinearLayout(activity).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        val min = dev.jraghavan.snmeeting.model.BackControl.touchPx(density)
-        minimumWidth = min; minimumHeight = min
-        setPadding(0, dp(6), dp(14), dp(6))
-        addView(TextView(activity).apply {
-            text = dev.jraghavan.snmeeting.model.BackControl.CHEVRON
-            textSize = dev.jraghavan.snmeeting.model.BackControl.CHEVRON_DP.toFloat()
-            typeface = serifBold; setTextColor(ink); includeFontPadding = false
-        })
-        addView(eyebrow(dev.jraghavan.snmeeting.model.BackControl.label(to)).apply { setPadding(dp(8), 0, 0, 0) })
-        contentDescription = "Back to $to"
-        isClickable = true
-        setOnClickListener { onBack() }
-    }
+    fun backControl(to: String, onBack: () -> Unit = { activity.finish() }): View =
+        android.widget.ImageView(activity).apply {
+            val bc = dev.jraghavan.snmeeting.model.BackControl
+            setImageResource(R.drawable.ic_home)
+            setColorFilter(ink)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            val size = maxOf(dp(bc.BUTTON_DP), bc.touchPx(density))
+            val pad = (size - dp(bc.ICON_DP)) / 2
+            setPadding(pad, pad, pad, pad)
+            minimumWidth = size; minimumHeight = size
+            layoutParams = LinearLayout.LayoutParams(size, size)
+            contentDescription = bc.label(to)
+            isClickable = true
+            setOnClickListener { onBack() }
+        }
 
     /** Screen header: the back control on the left, small wordmark centred (meeting, settings, templates). */
     fun header(back: String): View = LinearLayout(activity).apply {
