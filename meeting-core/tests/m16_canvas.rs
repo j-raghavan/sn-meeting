@@ -276,7 +276,7 @@ fn clear_canvas_is_one_step_and_survives_a_restart() {
         #[allow(clippy::cast_precision_loss)]
         stroke(&f, 0.0, 2000.0 + 20.0 * i as f32, 1000.0 * i as f32);
     }
-    f.app.ink_save_json(&f.id);
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
     let all = every_item();
     let five = json!([all[0], all[1], all[3], all[7], all[4]]);
     let file =
@@ -327,7 +327,10 @@ fn clear_canvas_is_one_step_and_survives_a_restart() {
     // Cleared again, then the app restarts: Undo is gone, the backup is not.
     edit(&f, json!({"op": "clear"}));
     f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
-    std::fs::remove_file(images.join("img1.jpg")).unwrap();
+    assert!(
+        !images.join("img1.jpg").exists(),
+        "no canvas refers to it once closed"
+    );
     let h = parse(&f.app.ink_history_json(&f.id, "canvas", false));
     assert_eq!(h["changed"], false);
     let r = edit(&f, json!({"op": "restoreCleared"}));
@@ -764,4 +767,123 @@ fn tables_through_the_app() {
             .get("error")
             .is_some()
     );
+}
+
+const JPEG: &[u8] = &[
+    0xFF, 0xD8, 0xFF, 0xE0, 0, 16, b'J', b'F', b'I', b'F', 0, 1, 0xFF, 0xD9,
+];
+
+fn images_dir(f: &Fx) -> PathBuf {
+    notes::folder(&f.dir, &f.id).join(notes::IMAGES)
+}
+
+fn image_files(f: &Fx) -> Vec<String> {
+    let mut v: Vec<String> = std::fs::read_dir(images_dir(f))
+        .map(|d| {
+            d.flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    v.sort();
+    v
+}
+
+/// F21-AC11: a real JPEG named photo.JPEG is copied byte for byte to images/<itemId>.jpg with
+/// its pixel size; text named .png, a 25 MB file, a 60 MP image, a symlink and a `../` name are
+/// each refused with a message and nothing is written. Unreferenced copies go at close.
+#[test]
+fn images_are_checked_copied_and_cleaned_up() {
+    let f = fixture();
+    let src = tempfile::tempdir().unwrap();
+    let photo = src.path().join("photo.JPEG");
+    std::fs::write(&photo, JPEG).unwrap();
+    let view = r#"{"rect": [0, 0, 1000, 1000], "recMs": 5000}"#;
+    let r =
+        parse(
+            &f.app
+                .canvas_import_image_json(&f.id, photo.to_str().unwrap(), 1600, 1200, view),
+        );
+    let item = r["itemId"].as_str().unwrap().to_owned();
+    assert!(r["dirty"].is_array());
+    assert_eq!(
+        std::fs::read(images_dir(&f).join(format!("{item}.jpg"))).unwrap(),
+        JPEG
+    );
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e4, -1e4, 1e4, 1e4]));
+    let it = &d["entries"][0]["item"];
+    assert_eq!(
+        it["image"],
+        json!({"file": format!("{item}.jpg"), "width": 1600, "height": 1200})
+    );
+    assert_eq!(
+        (it["width"].clone(), it["recMs"].clone()),
+        (json!(600.0), json!(5000))
+    );
+
+    let before = image_files(&f);
+    let text = src.path().join("text.png");
+    std::fs::write(&text, b"just some words").unwrap();
+    let big = src.path().join("big.png");
+    let mut b = b"\x89PNG\r\n\x1a\n".to_vec();
+    b.resize(25 * 1024 * 1024, 0);
+    std::fs::write(&big, b).unwrap();
+    let link = src.path().join("link.jpg");
+    std::os::unix::fs::symlink(&photo, &link).unwrap();
+    let dotdot = format!(
+        "{}/../{}/photo.JPEG",
+        src.path().display(),
+        src.path().file_name().unwrap().to_string_lossy()
+    );
+    for (p, w, h, says) in [
+        (text.to_str().unwrap().to_owned(), 10, 10, "isn't the image"),
+        (big.to_str().unwrap().to_owned(), 10, 10, "20 MB"),
+        (
+            photo.to_str().unwrap().to_owned(),
+            10_000,
+            6_000,
+            "50 megapixels",
+        ),
+        (link.to_str().unwrap().to_owned(), 10, 10, "plain image"),
+        (dotdot, 10, 10, "isn't allowed"),
+        ("/nope/x.gif".to_owned(), 10, 10, "PNG, JPG and WebP"),
+        ("/nope/x.png".to_owned(), 10, 10, "can't be read"),
+        (photo.to_str().unwrap().to_owned(), 0, 10, "can't be read"),
+    ] {
+        let e = parse(&f.app.canvas_import_image_json(&f.id, &p, w, h, view));
+        assert!(e["error"].as_str().unwrap_or("").contains(says), "{p}: {e}");
+    }
+    assert_eq!(image_files(&f), before, "nothing written");
+    assert!(
+        parse(
+            &f.app
+                .canvas_import_image_json(&f.id, photo.to_str().unwrap(), 1, 1, "x")
+        )["error"]
+            .is_string()
+    );
+    assert!(
+        parse(
+            &f.app
+                .canvas_import_image_json(&f.id, photo.to_str().unwrap(), 1, 1, "{}")
+        )["error"]
+            .is_string()
+    );
+    assert!(
+        parse(
+            &f.app
+                .canvas_import_image_json(&f.id, photo.to_str().unwrap(), -1, 1, view)
+        )["error"]
+            .is_string()
+    );
+
+    // A second copy whose item is undone is deleted when the page closes; the first stays.
+    let r2 = parse(
+        &f.app
+            .canvas_import_image_json(&f.id, photo.to_str().unwrap(), 16, 12, view),
+    );
+    assert!(r2["itemId"].is_string());
+    assert_eq!(image_files(&f).len(), 2);
+    f.app.ink_history_json(&f.id, "canvas", false);
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    assert_eq!(image_files(&f), vec![format!("{item}.jpg")]);
 }

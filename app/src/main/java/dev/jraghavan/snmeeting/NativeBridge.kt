@@ -174,6 +174,12 @@ object NativeBridge {
      *  `segOffsetMs`, `lineN`). */
     external fun nativeCanvasHit(id: String, x: Float, y: Float, r: Float): String
 
+    /** F21-FR11: insert the image at [srcPath] ([pxW] × [pxH] from its header): the core checks
+     *  it (extension against first bytes, ≤ 20 MB, ≤ 50 MP, no links), copies it into the notes
+     *  folder's `images/` and places it in the view (`{rect: [x0, y0, x1, y1], recMs}`), one undo
+     *  step. `{itemId, dirty, selection, canUndo, canRedo}` or `{error}`. */
+    external fun nativeCanvasImportImage(id: String, srcPath: String, pxW: Int, pxH: Int, viewJson: String): String
+
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
      *  atMs: null}`; none `{strokeId: null}`. */

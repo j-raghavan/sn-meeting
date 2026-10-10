@@ -199,6 +199,89 @@ impl App {
         v.to_string()
     }
 
+    /// `nativeCanvasImportImage(id, srcPath, pxW, pxH, viewJson)` (F21-FR11): the core checks
+    /// the picked file (Security), copies it to `images/<itemId>.<ext>` and places the item in
+    /// the view (`viewJson`: `{rect: [x0, y0, x1, y1], recMs}`), one step. `{itemId}` (with the
+    /// edit reply) or `{error}`; nothing is written when it is refused.
+    pub fn canvas_import_image_json(
+        &self,
+        id: &str,
+        src: &str,
+        w: i32,
+        h: i32,
+        view: &str,
+    ) -> String {
+        let Ok(view) = serde_json::from_str::<Value>(view) else {
+            return error_json("the view must be JSON");
+        };
+        let (Ok(w), Ok(h)) = (u32::try_from(w), u32::try_from(h)) else {
+            return error_json("That image can't be read");
+        };
+        let rect = match floats(&view, "rect").filter(|r| r.len() == 4) {
+            Some(r) => BBox {
+                x0: r[0],
+                y0: r[1],
+                x1: r[2],
+                y1: r[3],
+            },
+            None => return error_json("the view needs rect: [x0, y0, x1, y1]"),
+        };
+        let (bytes, ext) = match crate::canvas::image::read_checked(std::path::Path::new(src), w, h)
+        {
+            Ok(v) => v,
+            Err(e) => return error_json(&e),
+        };
+        let made_style = self.default_style();
+        let created = now_local();
+        let made = Made {
+            style: made_style,
+            rec_ms: view.get("recMs").and_then(Value::as_u64),
+            created_at: &created,
+        };
+        let out = self.with_ink(id, Layer::Canvas, |o| -> Result<Value, String> {
+            if !o.scene.items_ok() {
+                return Err("The canvas's shapes can't be read, so they can't be changed".into());
+            }
+            let item_id = o.scene.fresh_id();
+            let file = format!("{item_id}.{ext}");
+            let dir = notes::folder(&o.dir, id).join(notes::IMAGES);
+            std::fs::create_dir_all(&dir)
+                .and_then(|()| crate::atomic::write_atomic(&dir.join(&file), &bytes))
+                .map_err(|e| format!("The image can't be copied ({:?})", e.kind()))?;
+            let r = o
+                .scene
+                .create_image(&item_id, &file, w, h, rect, &made)
+                .ok_or("The image can't be placed")?;
+            o.dirty = true;
+            let mut v = edit_reply(&o.scene, o.scene.bounds_of_ref(&r));
+            v["itemId"] = json!(item_id);
+            Ok(v)
+        });
+        match out {
+            Ok(Ok(v)) => v.to_string(),
+            Ok(Err(e)) | Err(e) => error_json(&e),
+        }
+    }
+
+    /// F21-FR11: when the page closes (and its undo history goes), image copies no canvas
+    /// refers to are deleted. Nothing is deleted while any `items.json` can't be read.
+    pub(crate) fn clean_images(&self, id: &str, dir: &std::path::Path, scene: &Scene) {
+        if !scene.items_ok() {
+            return;
+        }
+        let keep = scene.image_files();
+        let images = notes::folder(dir, id).join(notes::IMAGES);
+        let Ok(list) = std::fs::read_dir(&images) else {
+            return;
+        };
+        for e in list.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if crate::canvas::item::is_image_name(&name) && !keep.contains(&name) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+
     /// `nativeCanvasEdit(id, opJson)` (F21): one user gesture on the canvas, one undo step.
     /// `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`.
     pub fn canvas_edit_json(&self, id: &str, op: &str) -> String {

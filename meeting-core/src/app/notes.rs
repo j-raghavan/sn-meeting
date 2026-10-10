@@ -401,6 +401,9 @@ impl App {
             return error_json(&e);
         }
         let mut open = self.ink.lock();
+        if let Some(o) = open.get(&(id.to_owned(), Layer::Canvas)) {
+            self.clean_images(id, &o.dir, &o.scene);
+        }
         let dir = open
             .get(&(id.to_owned(), Layer::Canvas))
             .map(|o| o.dir.clone());

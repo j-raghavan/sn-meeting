@@ -9,6 +9,7 @@ pub mod draw;
 pub mod edits;
 pub mod geom;
 pub mod hit;
+pub mod image;
 pub mod item;
 pub mod scene;
 pub mod style;

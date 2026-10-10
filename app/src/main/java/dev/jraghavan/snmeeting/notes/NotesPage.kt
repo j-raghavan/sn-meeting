@@ -20,6 +20,7 @@ import dev.jraghavan.snmeeting.notes.canvas.Handles
 import dev.jraghavan.snmeeting.notes.canvas.TextLayout
 import dev.jraghavan.snmeeting.record.LiveClock
 import org.json.JSONObject
+import java.io.File
 
 /**
  * DEVICE-UNVERIFIED (wiring of views; the rules are in the pure classes it uses). Layout B's
@@ -272,8 +273,9 @@ class NotesPage(
             ToolBarModel.Panel.SHAPES -> panels.icons(NoteTool.SHAPES.map { Triple(bar.iconFor(it), it.label, it == tool) }) { i ->
                 pickTool(NoteTool.SHAPES[i])
             }
-            ToolBarModel.Panel.INSERT -> panels.icons(NoteTool.INSERTS.map { Triple(bar.iconFor(it), it.label, it == tool) }) { i ->
-                pickTool(NoteTool.INSERTS[i])
+            ToolBarModel.Panel.INSERT -> panels.icons(NoteTool.INSERTS.map { Triple(bar.iconFor(it), it.label, it == tool) } +
+                Triple(dev.jraghavan.snmeeting.R.drawable.ic_cv_tool_image, "Image", false)) { i ->
+                if (i < NoteTool.INSERTS.size) pickTool(NoteTool.INSERTS[i]) else pickImage()
             }
             ToolBarModel.Panel.MORE -> moreMenu()
             ToolBarModel.Panel.STYLE -> stylePanel()
@@ -454,6 +456,46 @@ class NotesPage(
             val v = if (k == "row") row else col
             target = null
             edit("""{"op":"$op","ref":${CoreJson.quote(ref)},"$k":$v}""", keepSelection = true)
+        }
+    }
+
+    /**
+     * F21-FR11: Insert ▸ Image: an Inkwell list of the images in shared storage, newest first
+     * (asked for by the user, so it opens with the pen up). The core checks and copies the pick
+     * and places it in the view; closing the list re-claims the pen and bakes.
+     */
+    private fun pickImage() {
+        panels.close()
+        scope.core({
+            dev.jraghavan.snmeeting.notes.canvas.ImageFiles.list(android.os.Environment.getExternalStorageDirectory()).joinToString("\n") { it.path }
+        }) { paths ->
+            val files = paths.lines().filter { it.isNotEmpty() }.map(::File)
+            dialogs.explicit {
+                if (files.isEmpty()) {
+                    InkDialog.error(a, "No images", "There are no PNG, JPG or WebP images in Pictures, Download, INBOX, SCREENSHOT or EXPORT.")
+                    return@explicit
+                }
+                android.app.AlertDialog.Builder(a, dev.jraghavan.snmeeting.R.style.InkDialog).setTitle("Insert an image")
+                    .setItems(files.map { it.name }.toTypedArray()) { _, i -> insertImage(files[i]) }
+                    .setNegativeButton("CANCEL", null)
+                    .setOnDismissListener { claim("focus"); canvas.bake(InkBake.Event.PANEL_CLOSED) }
+                    .show()
+            }
+        }
+    }
+
+    private fun insertImage(f: java.io.File) {
+        val v = canvas.viewport.visible(canvas.width.toDouble(), canvas.height.toDouble())
+        val view = """{"rect":[${v.left},${v.top},${v.right},${v.bottom}]${recMs()}}"""
+        scope.core({
+            val (w, h) = dev.jraghavan.snmeeting.notes.canvas.ImageCache.sizeOf(f) ?: (0 to 0)
+            NativeBridge.nativeCanvasImportImage(id, f.path, w, h, view)
+        }) { json ->
+            if (!reportError(json, "Couldn't insert that image")) {
+                images.retry()
+                fetch(InkBake.Event.EDIT)
+                scheduleSave()
+            }
         }
     }
 

@@ -394,6 +394,11 @@ pub fn canvas_hit(id: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.canvas_hit_json(id, x, y, r))
 }
 
+/// `nativeCanvasImportImage(id, srcPath, pxW, pxH, viewJson)` (F21-FR11): check, copy, place.
+pub fn canvas_import_image(id: &str, src: &str, w: i32, h: i32, view: &str) -> String {
+    with_app(|app| app.canvas_import_image_json(id, src, w, h, view))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))

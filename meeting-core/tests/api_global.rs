@@ -84,6 +84,10 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("canvasEdit", api::canvas_edit("x", "{}")),
         ("canvasHit", api::canvas_hit("x", 0.0, 0.0, 1.0)),
         (
+            "canvasImportImage",
+            api::canvas_import_image("x", "/x.png", 1, 1, "{}"),
+        ),
+        (
             "inkStrokeStyled",
             api::ink_stroke_styled("x", 0, "{}", &[0.0; 4]),
         ),

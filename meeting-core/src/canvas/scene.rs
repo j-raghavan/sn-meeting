@@ -929,6 +929,16 @@ impl Scene {
         area
     }
 
+    /// F21-FR11: every image file this canvas refers to now.
+    #[must_use]
+    pub fn image_files(&self) -> HashSet<String> {
+        self.doc
+            .items
+            .iter()
+            .filter_map(|it| it.image.as_ref().map(|i| i.file.clone()))
+            .collect()
+    }
+
     // ---- saving --------------------------------------------------------------------------
 
     /// Whether `.inkbin` changed since it was last saved.
