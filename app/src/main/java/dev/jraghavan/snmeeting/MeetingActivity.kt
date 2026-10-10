@@ -167,7 +167,7 @@ class MeetingActivity : Activity() {
     private fun skeleton(): View {
         tabNotes = tabLabel("Notes", NOTES)
         tabMinutes = tabLabel("Minutes", MINUTES)
-        topTimer = ui.eyebrow("").apply { gravity = Gravity.END }
+        topTimer = ui.eyebrow("").apply { gravity = Gravity.END; isSingleLine = true; maxLines = 1 }
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -260,11 +260,8 @@ class MeetingActivity : Activity() {
     /** "● 0:12:41" while recording; else the meeting's date and length (F17-FR1). */
     private fun showClock() {
         val since = recordingHere()
-        val text = if (since != null) {
-            "●  " + clockText()
-        } else {
-            view?.let { v -> MeetingHeader.of(v.meeting, v.cost).let { h -> listOf(h.stamp, h.length).filter { it.isNotEmpty() }.joinToString("  ·  ") } }.orEmpty()
-        }
+        val text = dev.jraghavan.snmeeting.notes.TopBar.right(
+            since?.let { LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), it) })
         val bar = clockText()
         val draw: () -> Unit = {
             if (topTimer.text.toString() != text) topTimer.text = text

@@ -38,4 +38,10 @@ class ToolBarModelTest { // F17-FR2, F17-AC1 / AC1b
         assertEquals(Item.Tool(NoteTool.LISTEN, selected = true, enabled = true), items.first { it is Item.Tool && it.tool == NoteTool.LISTEN })
         assertTrue(items.contains(Item.Options(true)))
     }
+
+    @Test fun theTopBarShowsOnlyTheTimerAndOnlyWhileRecording() { // F17-FR1 (device finding 2026-10-09)
+        assertEquals("●  12:41", TopBar.right(761_000))
+        assertEquals("●  1:02:10", TopBar.right(3_730_000))
+        assertEquals("", TopBar.right(null))
+    }
 }

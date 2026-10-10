@@ -6,6 +6,15 @@ package dev.jraghavan.snmeeting.notes
  * thin strip with the current tool, the expand handle and the timer. **Mark and Stop (or Play
  * and the position when not recording) are at the bottom in both states.**
  */
+/**
+ * F17-FR1's top bar, right side (owner, 2026-10-09): only the recording timer, "● 12:41",
+ * while this meeting records; empty otherwise (the date and length are the Minutes header's).
+ */
+object TopBar {
+    fun right(recordingMs: Long?): String =
+        recordingMs?.let { "●  " + dev.jraghavan.snmeeting.model.CalendarFormat.length(it) } ?: ""
+}
+
 object ToolBarModel {
     data class State(
         val tool: NoteTool,
