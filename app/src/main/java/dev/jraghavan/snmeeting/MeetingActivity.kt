@@ -566,6 +566,17 @@ class MeetingActivity : Activity() {
                 addView(ui.spacer(ui.dim(14)))
                 addView(cards.todos(m.todos, ::setDone))
             }
+            // F17-FR8: while recording, the Minutes tab lists the marks; the AI fills it at Stop.
+            if (m.status == Status.RECORDING) {
+                addView(ui.spacer(ui.dim(36)))
+                addView(ui.eyebrowItalic("Minutes"))
+                addView(ui.spacer(ui.dim(10)))
+                addView(ui.note(FILLS_IN, 17f, ui.textMuted).apply { typeface = ui.serifItalic })
+                if (m.marks.isNotEmpty()) {
+                    addView(ui.spacer(ui.dim(14)))
+                    addView(marksCard(m.marks))
+                }
+            }
             if (m.marks.isNotEmpty() && m.status != Status.RECORDING) {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("Marks"))
@@ -658,6 +669,7 @@ class MeetingActivity : Activity() {
             (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't add the mark", it.message) }
             fetchLive()
             notes?.setMarks(view?.meeting?.marks.orEmpty().map { it.atMs } + at) // ◆ beside the latest stroke
+            load() // F17-FR8: the Minutes tab lists it (redrawn behind the Notes tab)
         }
     }
 
@@ -724,6 +736,8 @@ class MeetingActivity : Activity() {
         const val MINUTES = "minutes"
         /** How often the live transcript is read while recording, besides the lane's own news. */
         const val LIVE_POLL_MS = 5_000L
+        /** F17-FR8: the Minutes tab's line while recording. */
+        const val FILLS_IN = "Fills in when you stop"
         /** F17-FR3: how long Mark reads "Marked 0:12:41". */
         const val MARKED_MS = 2_000L
     }
