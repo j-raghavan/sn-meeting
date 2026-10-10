@@ -66,6 +66,8 @@
             android:exported="false"
             android:screenOrientation="portrait"
             android:windowSoftInputMode="adjustResize" />
+        <!-- The Tag Graph (spec F20-FR7). Not exported. -->
+        <activity android:name=".TagGraphActivity" android:exported="false" android:screenOrientation="portrait" />
         <!-- Rates editor (spec F16-FR4). Not exported. -->
         <activity android:name=".RatesActivity" android:exported="false" android:screenOrientation="portrait" />
         <activity

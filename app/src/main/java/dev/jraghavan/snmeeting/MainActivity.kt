@@ -183,6 +183,12 @@ class MainActivity : Activity(), HomeLists.Actions {
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                // F20-FR7: the Tag Graph, next to ⌕.
+                addView(ui.eyebrow("Tags").apply {
+                    gravity = Gravity.CENTER; minWidth = ui.dp(48); minHeight = ui.dp(40)
+                    contentDescription = "Tag Graph"
+                    isClickable = true; setOnClickListener { TagGraphActivity.open(this@MainActivity, null) }
+                }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, ui.dp(40)).apply { marginEnd = ui.dp(8) })
                 addView(icon(R.drawable.ic_search, "Search") {
                     startActivity(Intent(this@MainActivity, SearchActivity::class.java)); overridePendingTransition(0, 0)
                 }, LinearLayout.LayoutParams(ui.dp(40), ui.dp(40)))

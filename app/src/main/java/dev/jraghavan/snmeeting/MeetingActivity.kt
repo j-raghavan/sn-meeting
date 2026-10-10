@@ -620,7 +620,7 @@ class MeetingActivity : Activity() {
             linkLine(v.meeting)?.let { addView(it, ui.fullWidth()) }
             // F20-FR4: the meeting's tags as pills, and "＋ tag", once it is no longer recording.
             if (v.meeting.status != Status.RECORDING) {
-                addView(TagPills.row(this@MeetingActivity, ui, v.meeting.tags, ::removeTag, ::addTag).apply {
+                addView(TagPills.row(this@MeetingActivity, ui, v.meeting.tags, ::removeTag, ::addTag) { TagGraphActivity.open(this@MeetingActivity, it) }.apply {
                     setPadding(0, ui.dim(12), 0, 0)
                 }, ui.fullWidth())
             }
