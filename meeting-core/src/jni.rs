@@ -2,8 +2,8 @@
 //! `EnvUnowned::with_env` wraps the closure in `catch_unwind` (jni-0.22.4 env.rs:4793-4812);
 //! `api::guarded` already turns core panics into `{"error":…}`, so this is the second net.
 use jni::EnvUnowned;
-use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jboolean, jint, jlong};
+use jni::objects::{JByteArray, JClass, JFloatArray, JString};
+use jni::sys::{jboolean, jfloat, jint, jlong};
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeVersion<'local>(
@@ -822,6 +822,200 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Rebuil
         let journal: String = journal.try_to_string(env)?;
         let pieces: String = pieces_json.try_to_string(env)?;
         env.new_string(crate::api::mp4_rebuild(&path, &journal, &pieces))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// A Java float[] as a Vec (F17-FR4's batched points).
+fn floats(env: &jni::Env, a: &JFloatArray) -> jni::errors::Result<Vec<f32>> {
+    let mut v = vec![0f32; a.len(env)?];
+    a.get_region(env, 0, &mut v)?;
+    Ok(v)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeNotesOpen<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::notes_open(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkStroke<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    tool: jint,
+    width: jfloat,
+    points_xypt: JFloatArray<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        let points_xypt = floats(env, &points_xypt)?;
+        env.new_string(crate::api::ink_stroke(
+            &id,
+            &layer,
+            tool,
+            width,
+            &points_xypt,
+        ))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkErase<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    points_xy: JFloatArray<'local>,
+    r: jfloat,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        let points_xy = floats(env, &points_xy)?;
+        env.new_string(crate::api::ink_erase(&id, &layer, &points_xy, r))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkUndo<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        env.new_string(crate::api::ink_history(&id, &layer, false))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkRedo<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        env.new_string(crate::api::ink_history(&id, &layer, true))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkLasso<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    loop_xy: JFloatArray<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        let loop_xy = floats(env, &loop_xy)?;
+        env.new_string(crate::api::ink_lasso(&id, &layer, &loop_xy))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkMove<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    ids_json: JString<'local>,
+    dx: jfloat,
+    dy: jfloat,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        let ids_json: String = ids_json.try_to_string(env)?;
+        env.new_string(crate::api::ink_move(&id, &layer, &ids_json, dx, dy))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkDelete<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    ids_json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        let ids_json: String = ids_json.try_to_string(env)?;
+        env.new_string(crate::api::ink_delete(&id, &layer, &ids_json))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkStrokesForDraw<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    layer: JString<'local>,
+    x0: jfloat,
+    y0: jfloat,
+    x1: jfloat,
+    y1: jfloat,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let layer: String = layer.try_to_string(env)?;
+        env.new_string(crate::api::ink_strokes(&id, &layer, [x0, y0, x1, y1]))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkSave<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::ink_save(&id))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeNotesClose<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    cx: jfloat,
+    cy: jfloat,
+    zoom: jfloat,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        env.new_string(crate::api::notes_close(&id, cx, cy, zoom))
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }

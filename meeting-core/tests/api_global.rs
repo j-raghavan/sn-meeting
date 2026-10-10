@@ -62,6 +62,23 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ("agenda", api::agenda("2026-10-09", "2026-10-09")),
         ("event", api::event("0123abcd:u:-")),
         ("linkEvent", api::link_event("x", "")),
+        ("notesOpen", api::notes_open("x")),
+        (
+            "inkStroke",
+            api::ink_stroke("x", "canvas", 0, 1.0, &[0.0; 4]),
+        ),
+        ("inkErase", api::ink_erase("x", "canvas", &[0.0; 2], 1.0)),
+        ("inkUndo", api::ink_history("x", "canvas", false)),
+        ("inkRedo", api::ink_history("x", "canvas", true)),
+        ("inkLasso", api::ink_lasso("x", "canvas", &[0.0; 6])),
+        ("inkMove", api::ink_move("x", "canvas", "[]", 1.0, 1.0)),
+        ("inkDelete", api::ink_delete("x", "canvas", "[]")),
+        (
+            "inkStrokesForDraw",
+            api::ink_strokes("x", "canvas", [0.0; 4]),
+        ),
+        ("inkSave", api::ink_save("x")),
+        ("notesClose", api::notes_close("x", 0.0, 0.0, 1.0)),
         (
             "beginMeetingForEvent",
             api::begin_meeting_for_event(0, "{}", "{}", ""),

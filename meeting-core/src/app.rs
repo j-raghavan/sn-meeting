@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 mod agenda;
 mod calendar;
 mod live;
+mod notes;
 mod run;
 mod search;
 mod spend;
@@ -50,6 +51,8 @@ pub struct App {
     pub calendar: crate::calendar::Calendar,
     /// F15-FR5: per meeting, the lock held while its chunks are being sent (lane or job).
     lanes: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// F17-FR4 / FR5: the ink layers of the pages open now, flushed on a deferred timer.
+    ink: notes::OpenInk,
 }
 
 #[derive(Debug)]
@@ -88,6 +91,7 @@ impl App {
             notes: crate::notes_text::NotesSource::canvas(),
             calendar: Default::default(),
             lanes: Mutex::default(),
+            ink: Default::default(),
         }
     }
 

@@ -32,6 +32,8 @@ Each adapted file names its origin in its header.
 | Meetings file | Adapted from | License |
 |---------------|--------------|---------|
 | `meeting-core/src/ink/{mod,model,codec,select}.rs` | inkread `inkread-ink/src/{lib,model,codec,select}.rs` (world coordinates, recording-clock stroke times, `.inkbin` v2) | AGPL-3.0-only |
+| `app/.../notes/TouchArbiter.kt` (`TouchArbiter`, `Contact`, `PointerInput`) | sn-canvas `android/app/src/main/java/com/sncanvas/canvas/TouchArbiter.kt` | MIT (notice below) |
+| `app/.../notes/TouchArbiter.kt` (`PalmRule`), `app/.../notes/NoteTool.kt` (`forPen`) | inkread `PalmFilter.kt`, `ToolPalette.kt` (`Tool.forStylus`) | AGPL-3.0-only |
 
 ## Rust crates linked into `libmeeting.so`
 
@@ -220,6 +222,32 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 | SQLite 3.53.2 (with FTS5) | libsqlite3-sys 0.38.2, feature `bundled` (the search index, F19) | Public domain (https://www.sqlite.org/copyright.html) |
 
 ## License notices
+
+### MIT — sn-canvas (adapted Kotlin files listed under "Adapted source code")
+
+```
+MIT License
+
+Copyright (c) 2026 JRaghavan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 The licenses above that require their notice to accompany a binary, other than MIT and
 Apache-2.0 (whose texts are at https://opensource.org/license/mit and

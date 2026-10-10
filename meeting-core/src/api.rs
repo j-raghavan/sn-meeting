@@ -331,6 +331,58 @@ pub fn delete_mark(id: &str, mark_id: &str) -> String {
     with_app(|app| app.delete_mark_json(id, mark_id))
 }
 
+// Notes (F17). Ink calls are short: they run on the CoreJobs thread.
+
+/// `nativeNotesOpen(id)` (F17-FR5): `{view, clock, bounds, strokes}`.
+pub fn notes_open(id: &str) -> String {
+    with_app(|app| app.notes_open_json(id))
+}
+
+/// `nativeInkStroke(id, layer, tool, width, xypt)` (F17-FR4): one batched stroke.
+pub fn ink_stroke(id: &str, layer: &str, tool: i32, width: f32, xypt: &[f32]) -> String {
+    with_app(|app| app.ink_stroke_json(id, layer, tool, width, xypt))
+}
+
+/// `nativeInkErase(id, layer, xy, r)`: an eraser sweep, one undo step.
+pub fn ink_erase(id: &str, layer: &str, xy: &[f32], r: f32) -> String {
+    with_app(|app| app.ink_erase_json(id, layer, xy, r))
+}
+
+/// `nativeInkUndo` / `nativeInkRedo` (F13-FR5).
+pub fn ink_history(id: &str, layer: &str, redo: bool) -> String {
+    with_app(|app| app.ink_history_json(id, layer, redo))
+}
+
+/// `nativeInkLasso(id, layer, loopXy)`: the strokes a loop takes.
+pub fn ink_lasso(id: &str, layer: &str, xy: &[f32]) -> String {
+    with_app(|app| app.ink_lasso_json(id, layer, xy))
+}
+
+/// `nativeInkMove(id, layer, idsJson, dx, dy)`: moves a lasso selection.
+pub fn ink_move(id: &str, layer: &str, ids: &str, dx: f32, dy: f32) -> String {
+    with_app(|app| app.ink_move_json(id, layer, ids, dx, dy))
+}
+
+/// `nativeInkDelete(id, layer, idsJson)`: deletes a lasso selection.
+pub fn ink_delete(id: &str, layer: &str, ids: &str) -> String {
+    with_app(|app| app.ink_delete_json(id, layer, ids))
+}
+
+/// `nativeInkStrokesForDraw(id, layer, x0, y0, x1, y1)`: the strokes in a world rectangle.
+pub fn ink_strokes(id: &str, layer: &str, rect: [f32; 4]) -> String {
+    with_app(|app| app.ink_strokes_json(id, layer, rect))
+}
+
+/// `nativeInkSave(id)` (F17-FR5): the deferred flush.
+pub fn ink_save(id: &str) -> String {
+    with_app(|app| app.ink_save_json(id))
+}
+
+/// `nativeNotesClose(id, cx, cy, zoom)`: saves the ink and the viewport, lets the layers go.
+pub fn notes_close(id: &str, cx: f32, cy: f32, zoom: f32) -> String {
+    with_app(|app| app.notes_close_json(id, f64::from(cx), f64::from(cy), f64::from(zoom)))
+}
+
 /// F15-FR1 (D14 revised 2026-10-09): the near-live recorder's `.m4a` files, written by the
 /// core because `MediaMuxer.stop()` aborts the process on the Manta's firmware. Pure: no
 /// `nativeInit` needed; the capture thread calls these directly.

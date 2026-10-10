@@ -117,6 +117,47 @@ object NativeBridge {
      *  quick; it needs no [nativeInit], so the recorder's capture thread calls it directly. */
     external fun nativeChunkPlan(id: String, rmsJson: String): String
 
+    // Notes (F17). World coordinates (screen px at 100 %); times on the recording clock. A
+    // `layer` is "canvas" (the Notes tab) or "minutes" (the Minutes tab's ink area, F17-FR10).
+    // Short calls: run them on CoreJobs.
+
+    /** Opens [id]'s canvas: `{view: {cx, cy, zoom}|null, clock: "recording-ms", bounds:
+     *  [x0, y0, x1, y1]|null, strokes}`. A damaged canvas file is an `{error}`, never saved over. */
+    external fun nativeNotesOpen(id: String): String
+
+    /** F17-FR4: one whole stroke, `[x, y, pressure, t]` per point, `t` recording-clock ms or -1
+     *  (untimed); [tool] 0 pen, 1 highlighter. The first stroke names the notes in the sidecar.
+     *  `{strokeId, bbox, atMs}`. Kept in memory until [nativeInkSave]. */
+    external fun nativeInkStroke(id: String, layer: String, tool: Int, width: Float, pointsXypt: FloatArray): String
+
+    /** An eraser sweep through `[x, y, …]` with radius [r], one undo step. `{erased: [id], bbox}`. */
+    external fun nativeInkErase(id: String, layer: String, pointsXy: FloatArray, r: Float): String
+
+    /** F13-FR5: `{changed, bbox, canUndo, canRedo}`. */
+    external fun nativeInkUndo(id: String, layer: String): String
+
+    /** F13-FR5: `{changed, bbox, canUndo, canRedo}`. */
+    external fun nativeInkRedo(id: String, layer: String): String
+
+    /** The strokes a lasso loop `[x, y, …]` takes (enclosed or crossed): `{ids, bbox}`. */
+    external fun nativeInkLasso(id: String, layer: String, loopXy: FloatArray): String
+
+    /** Moves the strokes `[id, …]` by ([dx], [dy]), one undo step: `{moved, bbox}`. */
+    external fun nativeInkMove(id: String, layer: String, idsJson: String, dx: Float, dy: Float): String
+
+    /** Deletes the strokes `[id, …]`, one undo step: `{deleted: [id], bbox}`. */
+    external fun nativeInkDelete(id: String, layer: String, idsJson: String): String
+
+    /** The strokes meeting a world rectangle, in paint order: `{strokes: [{id, tool, width,
+     *  color: [r, g, b, a], atMs, pts: [x, y, …]}], bounds, canUndo, canRedo}`. */
+    external fun nativeInkStrokesForDraw(id: String, layer: String, x0: Float, y0: Float, x1: Float, y1: Float): String
+
+    /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
+    external fun nativeInkSave(id: String): String
+
+    /** The page goes: the ink is saved, the viewport kept (centre and zoom), the layers let go. */
+    external fun nativeNotesClose(id: String, cx: Float, cy: Float, zoom: Float): String
+
     // Near-live audio files (F15-FR1, D14 revised 2026-10-09). MediaMuxer.stop() aborts the
     // process on the Manta's firmware, so the core writes the .m4a files. Pure: no nativeInit.
 
