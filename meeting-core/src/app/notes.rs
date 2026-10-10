@@ -137,6 +137,30 @@ impl App {
         width: f32,
         xypt: &[f32],
     ) -> String {
+        self.stroke_json(id, layer, tool, width, None, xypt)
+    }
+
+    /// `nativeInkStrokeStyled(id, tool, styleJson, xypt)` (F21-FR7): a canvas stroke drawn with
+    /// a style: the Pen's colour (true RGBA in `.inkbin`), opacity and size (its nominal
+    /// width), its style ids in `items.json`. The Highlighter is unchanged.
+    pub fn ink_stroke_styled_json(&self, id: &str, tool: i32, style: &str, xypt: &[f32]) -> String {
+        let Ok(v) = serde_json::from_str::<Value>(style) else {
+            return error_json("the style must be JSON");
+        };
+        let st = crate::canvas::Style::from_value(&v);
+        let width = st.stroke_width();
+        self.stroke_json(id, "canvas", tool, width, Some(st), xypt)
+    }
+
+    fn stroke_json(
+        &self,
+        id: &str,
+        layer: &str,
+        tool: i32,
+        width: f32,
+        style: Option<crate::canvas::Style>,
+        xypt: &[f32],
+    ) -> String {
         let Some(layer) = Layer::from_id(layer) else {
             return error_json("unknown layer");
         };
@@ -146,10 +170,13 @@ impl App {
         let Some((pts, rec)) = points_of(xypt) else {
             return error_json("points must be [x, y, pressure, t] quadruples");
         };
+        let style = style.filter(|_| tool == Tool::Pen);
         let color = if tool == Tool::Highlighter {
             HIGHLIGHT
         } else {
-            InkColor::BLACK
+            style
+                .as_ref()
+                .map_or(InkColor::BLACK, crate::canvas::edits::ink_color)
         };
         let now = u64::try_from(chrono::Utc::now().timestamp_millis()).unwrap_or(0);
         let r = self.with_ink(id, layer, |o| {
@@ -158,7 +185,7 @@ impl App {
                 .new_stroke(tool, color, width, pts, now, rec)
                 .map_err(|e| e.to_string())?;
             let bbox = st.bounds();
-            let sid = o.scene.add_stroke(st, None);
+            let sid = o.scene.add_stroke(st, style);
             o.dirty = true;
             Ok::<_, String>((sid, Some(bbox)))
         });

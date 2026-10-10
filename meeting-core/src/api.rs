@@ -343,6 +343,11 @@ pub fn ink_stroke(id: &str, layer: &str, tool: i32, width: f32, xypt: &[f32]) ->
     with_app(|app| app.ink_stroke_json(id, layer, tool, width, xypt))
 }
 
+/// `nativeInkStrokeStyled(id, tool, styleJson, xypt)` (F21-FR7): a canvas stroke with a style.
+pub fn ink_stroke_styled(id: &str, tool: i32, style: &str, xypt: &[f32]) -> String {
+    with_app(|app| app.ink_stroke_styled_json(id, tool, style, xypt))
+}
+
 /// `nativeInkErase(id, layer, xy, r)`: an eraser sweep, one undo step.
 pub fn ink_erase(id: &str, layer: &str, xy: &[f32], r: f32) -> String {
     with_app(|app| app.ink_erase_json(id, layer, xy, r))

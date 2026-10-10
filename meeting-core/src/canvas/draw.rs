@@ -18,6 +18,11 @@ pub fn stroke_json(s: &Stroke, extra: Option<&StrokeExtra>) -> Value {
     let pts: Vec<f32> = s.points.iter().flat_map(|p| [p.x, p.y]).collect();
     let mut v = json!({"id": s.id.0, "tool": s.tool.code(), "width": s.width,
            "color": [s.color.r, s.color.g, s.color.b, s.color.a], "atMs": s.rec_ms, "pts": pts});
+    if extra.is_some_and(|e| e.style.is_some()) {
+        // F21-FR7: a styled pen stroke is drawn at each point's pressure.
+        let pr: Vec<f32> = s.points.iter().map(|p| p.pressure).collect();
+        v["pressure"] = json!(pr);
+    }
     if let Some(e) = extra {
         if let Some(st) = &e.style {
             v["style"] = st.to_value();

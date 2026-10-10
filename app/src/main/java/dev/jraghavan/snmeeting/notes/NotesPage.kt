@@ -100,7 +100,9 @@ class NotesPage(
         override fun commitStroke(tool: NoteTool, widthWorld: Float, xypt: FloatArray) = changed(
             if (tool == NoteTool.PEN) InkBake.Event.PEN_STROKE else InkBake.Event.HIGHLIGHTER_STROKE,
         ) {
-            NativeBridge.nativeInkStroke(id, LAYER, tool.core, widthWorld, xypt)
+            // F21-FR7: the Pen draws in the default style (pressure, size, colour).
+            if (tool == NoteTool.PEN) NativeBridge.nativeInkStrokeStyled(id, tool.core, canvas.inkView.defaultStyle.toJson(), xypt)
+            else NativeBridge.nativeInkStroke(id, LAYER, tool.core, widthWorld, xypt)
         }
 
         override fun erase(xy: FloatArray, radiusWorld: Float) = changed(InkBake.Event.ERASE) { NativeBridge.nativeInkErase(id, LAYER, xy, radiusWorld) }

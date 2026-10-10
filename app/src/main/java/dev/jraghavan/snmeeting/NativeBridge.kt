@@ -130,6 +130,11 @@ object NativeBridge {
      *  `{strokeId, bbox, atMs}`. Kept in memory until [nativeInkSave]. */
     external fun nativeInkStroke(id: String, layer: String, tool: Int, width: Float, pointsXypt: FloatArray): String
 
+    /** F21-FR7: a canvas stroke with a style (`{color, opacity, size, …}`): the Pen's true colour
+     *  goes in `.inkbin`, its width is the size's, its style ids go in `items.json`; [tool] 0
+     *  pen, 1 highlighter (unchanged). `{strokeId, bbox, atMs}`. */
+    external fun nativeInkStrokeStyled(id: String, tool: Int, styleJson: String, pointsXypt: FloatArray): String
+
     /** An eraser sweep through `[x, y, …]` with radius [r], one undo step. `{erased: [id], bbox}`. */
     external fun nativeInkErase(id: String, layer: String, pointsXy: FloatArray, r: Float): String
 

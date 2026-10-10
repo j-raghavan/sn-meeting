@@ -559,3 +559,40 @@ fn a_style_pick_restyles_and_becomes_the_default() {
     assert!(edit(&f, json!({"op": "restyle", "property": "color"}))["error"].is_string());
     assert!(edit(&f, json!({"op": "restyle", "value": "red"}))["error"].is_string());
 }
+
+/// F21-FR7: the Pen draws with the default style: its true colour in `.inkbin`, the size's
+/// width, the style ids beside it, each point's pressure drawn; still one timed stroke.
+#[test]
+fn styled_pen_strokes_keep_colour_size_and_time() {
+    let f = fixture();
+    let pts = [0.0, 0.0, 0.2, 761_000.0, 40.0, 0.0, 0.9, 761_016.0];
+    let style = r#"{"color":"red","opacity":0.5,"size":"xl"}"#;
+    let r = parse(&f.app.ink_stroke_styled_json(&f.id, 0, style, &pts));
+    assert_eq!(
+        (r["strokeId"].clone(), r["atMs"].clone()),
+        (json!(0), json!(761_000))
+    );
+    let h = parse(&f.app.ink_stroke_styled_json(&f.id, 1, style, &pts));
+    assert_eq!(h["strokeId"], 1);
+    let d = parse(
+        &f.app
+            .canvas_for_draw_json(&f.id, [-100.0, -100.0, 100.0, 100.0]),
+    );
+    let pen = &d["entries"][0]["stroke"];
+    assert_eq!(pen["color"], json!([0xE0, 0x31, 0x31, 128]));
+    assert_eq!(pen["width"], 10.0);
+    assert_eq!(pen["style"]["color"], "red");
+    assert_eq!(pen["pressure"].as_array().unwrap().len(), 2);
+    let hl = &d["entries"][1]["stroke"];
+    assert_eq!(
+        hl["color"],
+        json!([0, 0, 0, 64]),
+        "the highlighter is unchanged"
+    );
+    assert!(hl.get("pressure").is_none());
+    assert!(
+        parse(&f.app.ink_stroke_styled_json(&f.id, 0, "nope", &pts))
+            .get("error")
+            .is_some()
+    );
+}

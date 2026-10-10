@@ -203,6 +203,7 @@ class NotesCanvasView(
         if (next.bounds != ink.bounds || (event != null && event in InkBake.INK_CHANGES)) { thumbStrokes = null; thumbKey = null }
         val selectionMoved = next.selectionBounds != ink.selectionBounds
         ink = next
+        if (next.defaultStyle != penStyle) penStyle = next.defaultStyle
         if (event != null) bake(event) else if (selectionMoved) invalidate() // F21-FR4: one redraw
     }
 
@@ -251,6 +252,13 @@ class NotesCanvasView(
 
     /** Firmware ink on for the Pen only (inkread's applyToolInkState); the other tools draw
      *  their own band or loop, and a change to one bakes the page. */
+    /** F21-FR7: the live pen follows the default style (pressure nib, size, nearest tone). */
+    var penStyle: dev.jraghavan.snmeeting.notes.canvas.ShapeStyle? = null
+        set(v) {
+            field = v
+            if (v != null) firmware.pen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.forStyle(v)
+        }
+
     fun toolChanged(t: NoteTool) {
         if (!firmwareOn) firmwareOn = firmware.setup()
         firmware.setWritable(InkBake.overlayFor(t))
@@ -599,9 +607,22 @@ class NotesCanvasView(
         }
         inkPaint.color = color; dotPaint.color = color
         inkPaint.strokeWidth = (s.width * z).coerceAtLeast(1f)
+        val pr = s.pressure
         if (s.pts.size == 2) {
+            val w = if (pr != null) PressureWidth.of(s.width, pr[0]) * z else inkPaint.strokeWidth
             canvas.drawCircle(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat(),
-                inkPaint.strokeWidth / 2, dotPaint)
+                maxOf(w, 1f) / 2, dotPaint)
+            return
+        }
+        if (pr != null) {
+            // F21-FR7: each segment as wide as the pen pressed there.
+            var k = 0
+            while (k + 3 < s.pts.size) {
+                inkPaint.strokeWidth = (PressureWidth.of(s.width, (pr[k / 2] + pr[k / 2 + 1]) / 2) * z).coerceAtLeast(1f)
+                canvas.drawLine(v.screenX(s.pts[k].toDouble()).toFloat(), v.screenY(s.pts[k + 1].toDouble()).toFloat(),
+                    v.screenX(s.pts[k + 2].toDouble()).toFloat(), v.screenY(s.pts[k + 3].toDouble()).toFloat(), inkPaint)
+                k += 2
+            }
             return
         }
         drawPath.reset()

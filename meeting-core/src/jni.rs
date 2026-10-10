@@ -872,6 +872,29 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkStroke
 }
 
 #[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkStrokeStyled<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    tool: jint,
+    style_json: JString<'local>,
+    points_xypt: JFloatArray<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let style_json: String = style_json.try_to_string(env)?;
+        let points_xypt = floats(env, &points_xypt)?;
+        env.new_string(crate::api::ink_stroke_styled(
+            &id,
+            tool,
+            &style_json,
+            &points_xypt,
+        ))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkErase<'local>(
     mut env: EnvUnowned<'local>,
     _class: JClass<'local>,

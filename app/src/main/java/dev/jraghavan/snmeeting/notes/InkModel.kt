@@ -26,6 +26,8 @@ class DrawStroke(
     val pts: FloatArray,
     val style: ShapeStyle? = null,
     val groupId: String? = null,
+    /** F21-FR7: each point's pressure, for a styled pen stroke (null: one width). */
+    val pressure: FloatArray? = null,
 ) {
     val ref get() = "s:$id"
 
@@ -63,6 +65,8 @@ class DrawStroke(
                 pts = FloatArray(pts.length()) { (pts.opt(it) as? Number)?.toFloat() ?: 0f },
                 style = o.obj("style")?.let(ShapeStyle::from),
                 groupId = o.str("groupId"),
+                pressure = o.arr("pressure")?.let { a -> FloatArray(a.length()) { (a.opt(it) as? Number)?.toFloat() ?: 1f } }
+                    ?.takeIf { it.size * 2 == pts.length() },
             )
         }
     }

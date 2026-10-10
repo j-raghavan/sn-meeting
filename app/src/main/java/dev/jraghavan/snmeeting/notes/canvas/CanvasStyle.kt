@@ -82,6 +82,10 @@ data class ShapeStyle(
         else -> this
     }
 
+    /** The core's `style` object for this style. */
+    fun toJson(): String =
+        """{"color":"${color.id}","opacity":$opacity,"fill":"${fill.id}","dash":"${dash.id}","size":"${size.id}"}"""
+
     companion object {
         const val MIN_OPACITY = 0.1
         const val MIN_STROKE_PX = 1f
