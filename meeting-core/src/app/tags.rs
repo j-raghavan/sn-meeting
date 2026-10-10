@@ -3,10 +3,35 @@
 use super::App;
 use crate::api::error_json;
 use crate::library::LibError;
+use crate::library::MeetingSummary;
 use crate::sidecar::{self, Tag};
+use crate::tags::graph::{self, Graph};
 use crate::tags::{self, edit};
+use chrono::NaiveDate;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::{Mutex, PoisonError};
+
+/// F20-FR9: the last layout and the tags it was made from (each meeting's, newest first).
+#[derive(Debug, Default)]
+pub struct GraphCache(Mutex<Option<(Vec<Vec<String>>, Graph)>>);
+
+/// F20-FR7's filters: every recording, or those of the last three months.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Range {
+    All,
+    ThreeMonths,
+}
+
+impl Range {
+    pub fn from_id(s: &str) -> Option<Range> {
+        match s {
+            "all" => Some(Range::All),
+            "3m" => Some(Range::ThreeMonths),
+            _ => None,
+        }
+    }
+}
 
 /// The rename in progress, in the app's private folder: `{from, to}` (F20-FR4, resumable).
 pub const RENAME_FILE: &str = "tag-rename.json";
@@ -81,6 +106,57 @@ impl App {
         };
         let _ = std::fs::remove_file(self.rename_path());
         Some(n)
+    }
+
+    /// The meetings in `range` (as of `today`) with their tags, newest first.
+    fn tagged(&self, range: Range, today: NaiveDate) -> Vec<(MeetingSummary, Vec<String>)> {
+        let since = match range {
+            Range::All => i64::MIN,
+            Range::ThreeMonths => today
+                .checked_sub_months(chrono::Months::new(3))
+                .map_or(i64::MIN, |d| self.day_start_ms(d)),
+        };
+        self.library()
+            .all()
+            .into_iter()
+            .filter(|(m, _)| m.started_at_ms >= since)
+            .map(|(m, sc)| (m, sc.tags.into_iter().map(|t| t.name).collect()))
+            .collect()
+    }
+
+    /// `nativeTagGraph(range)` (F20-FR7 / FR9): `{range, graph: {nodes: [{name, count, x, y,
+    /// r}], edges: [{a, b, shared, weak}], meetings, bounds}, laidOut}`, `range` `all` or `3m`.
+    /// The layout runs (`laidOut`) only when the tags or counts changed since the last call.
+    pub fn tag_graph_json(&self, range: &str) -> String {
+        self.tag_graph_at(range, self.today())
+    }
+
+    /// `tag_graph_json` as of `today` (tests fix it).
+    pub fn tag_graph_at(&self, range: &str, today: NaiveDate) -> String {
+        let Some(r) = Range::from_id(range) else {
+            return error_json("range must be all or 3m");
+        };
+        self.resume_tag_rename();
+        let input: Vec<Vec<String>> = self
+            .tagged(r, today)
+            .into_iter()
+            .map(|(_, t)| t)
+            .filter(|t| !t.is_empty())
+            .collect();
+        let mut cache = self
+            .tag_graph
+            .0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (g, laid_out) = match cache.as_ref() {
+            Some((seen, g)) if *seen == input => (g.clone(), false),
+            _ => {
+                let g = graph::build(&input);
+                *cache = Some((input, g.clone()));
+                (g, true)
+            }
+        };
+        json!({"range": range, "graph": g, "laidOut": laid_out}).to_string()
     }
 
     /// The rename over every meeting that has `from`; a meeting without it isn't rewritten.

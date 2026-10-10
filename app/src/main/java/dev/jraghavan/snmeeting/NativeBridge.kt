@@ -173,6 +173,11 @@ object NativeBridge {
      *  exists; resumable. Rewrites sidecars: call it on the core thread. `{renamed, to}`. */
     external fun nativeRenameTag(from: String, to: String): String
 
+    /** F20-FR7 / FR9: the Tag Graph for [range] (`all` or `3m`), laid out by the core once per
+     *  set of tags and counts: `{range, graph: {nodes: [{name, count, x, y, r}], edges: [{a, b,
+     *  shared, weak}], meetings, bounds: [x0, y0, x1, y1]}, laidOut}`. Call it on the core thread. */
+    external fun nativeTagGraph(range: String): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 

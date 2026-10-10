@@ -1098,3 +1098,17 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRenameTag
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// Reads every sidecar and may lay the graph out: call it on the core thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTagGraph<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    range: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let range: String = range.try_to_string(env)?;
+        env.new_string(crate::api::tag_graph(&range))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

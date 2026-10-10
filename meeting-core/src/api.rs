@@ -537,6 +537,11 @@ pub fn rename_tag(from: &str, to: &str) -> String {
     with_app(|app| app.rename_tag_json(from, to))
 }
 
+/// `nativeTagGraph(range)` (F20-FR7 / FR9): the laid-out Tag Graph, `all` or `3m`.
+pub fn tag_graph(range: &str) -> String {
+    with_app(|app| app.tag_graph_json(range))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

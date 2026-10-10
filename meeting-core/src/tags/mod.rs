@@ -2,6 +2,7 @@
 //! the sidecar, searchable, editable and drawn as the Tag Graph.
 
 pub mod edit;
+pub mod graph;
 
 use crate::sidecar::{Sidecar, Tag, TagSource};
 use std::collections::HashMap;

@@ -55,6 +55,8 @@ pub struct App {
     lanes: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// F17-FR4 / FR5: the ink layers of the pages open now, flushed on a deferred timer.
     ink: notes::OpenInk,
+    /// F20-FR9: the last Tag Graph laid out, reused while the tags and counts are the same.
+    tag_graph: tags::GraphCache,
 }
 
 #[derive(Debug)]
@@ -94,6 +96,7 @@ impl App {
             calendar: Default::default(),
             lanes: Mutex::default(),
             ink: Default::default(),
+            tag_graph: Default::default(),
         }
     }
 
