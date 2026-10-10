@@ -218,3 +218,35 @@ fn many_hits_in_one_meeting_are_capped() {
         meeting::search::query::MAX_HITS_PER_GROUP
     );
 }
+
+/// F19-FR7 (M12 hook): a stroke written on the canvas after recognition, inside a stored
+/// region, marks that region's hits "changed since recognised"; the canvas's stamp alone
+/// brings the meeting back into the index.
+#[test]
+fn a_stroke_written_since_recognition_marks_its_region_changed() {
+    let e = Env::new();
+    let app = e.app();
+    let id = meeting(&app, T0, "budget");
+    let dir = e.export();
+    let mut sc = read_sidecar(&dir, &id);
+    sc.extra.insert(
+        "notesRecognisedAt".into(),
+        json!("2026-10-07T21:30:00-07:00"),
+    );
+    sc.extra.insert("notes".into(), meeting::notes::field(&id));
+    meeting::sidecar::write(&dir, &sc).unwrap();
+    app.index_update_json();
+    let first = parse(&app.search_json("q3", "notes", 0));
+    assert_eq!(first["groups"][0]["hits"][0]["changed"], false);
+    // A stroke inside region 0 ([0, 0, 100, 100]), written now: after notesRecognisedAt.
+    let pts = [40.0, 40.0, 1.0, -1.0, 50.0, 45.0, 1.0, -1.0];
+    assert!(
+        parse(&app.ink_stroke_json(&id, "canvas", 0, 3.0, &pts))
+            .get("error")
+            .is_none()
+    );
+    app.ink_save_json(&id);
+    app.index_update_json();
+    let after = parse(&app.search_json("q3", "notes", 0));
+    assert_eq!(after["groups"][0]["hits"][0]["changed"], true);
+}

@@ -79,11 +79,13 @@ fn stamp_of(path: &Path) -> String {
     format!("{ns}:{}", m.len())
 }
 
-/// A meeting's stamp: its sidecar's and its notes text's.
+/// A meeting's stamp: its sidecar's, its notes text's and its canvas's (new strokes mark
+/// regions "changed since recognised", F19-FR7).
 fn meeting_stamp(dir: &Path, id: &str) -> String {
     let sc = stamp_of(&dir.join(sidecar::sidecar_file_name(id)));
     let notes = stamp_of(&notes_text::path(dir, id));
-    format!("{sc}|{notes}")
+    let canvas = stamp_of(&crate::notes::path(dir, id, crate::notes::Layer::Canvas));
+    format!("{sc}|{notes}|{canvas}")
 }
 
 /// The file of one calendar link's events: `{"events": [EventDoc]}`. M13 writes it.
@@ -323,9 +325,11 @@ impl Searcher {
                     return 0;
                 };
                 let notes = notes_text::read(&notes_text::path(&dir, &id)).unwrap_or_default();
-                // M12 hook (F19-FR7): `notes_text::changed_regions(&notes, &strokes)` with the
-                // canvas strokes flagged `new` since `notesRecognisedAt`. No canvas yet: none.
-                let changed: Vec<u32> = Vec::new();
+                // F19-FR7: the stored regions holding strokes written since recognition.
+                let strokes = crate::notes::load(&dir, &id, crate::notes::Layer::Canvas)
+                    .map(|l| crate::notes::regions::boxes(&l, crate::notes::recognised_at_ms(&sc)))
+                    .unwrap_or_default();
+                let changed = notes_text::changed_regions(&notes, &strokes);
                 let start_ms = ms_of(&sc.started_at).unwrap_or_default();
                 let g = Group {
                     kind: GroupKind::Meeting,
