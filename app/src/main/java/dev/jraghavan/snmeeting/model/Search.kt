@@ -59,8 +59,9 @@ object SearchModel {
 
     /** Where a hit opens (F19-FR3). */
     sealed class Open {
-        /** The meeting, cued to [atMs] when given, scrolled to [focus] (summary, todos, transcript). */
-        data class Meeting(val id: String, val atMs: Long?, val focus: String?) : Open()
+        /** The meeting, cued to [atMs] when given, scrolled to [focus] (summary, todos, transcript),
+         *  or (F19-FR3) on its Notes tab with the line's world box [outline] centred and outlined. */
+        data class Meeting(val id: String, val atMs: Long?, val focus: String?, val outline: List<Double>? = null) : Open()
         /** An event with no meeting: its sheet (F18-FR8). */
         data class Event(val key: String, val title: String, val startMs: Long) : Open()
     }
@@ -70,12 +71,12 @@ object SearchModel {
 
     /**
      * F19-FR3. Transcript: the meeting at that moment. Minutes or to-do: the meeting at its
-     * minutes or to-dos. Notes: the meeting cued 2 s before the line was written; M12 hook: the
-     * Notes tab centred on the line, its strokes outlined. Event: M13 hook, the event sheet.
+     * minutes or to-dos. Notes: the Notes tab centred on the line, its strokes outlined, and
+     * playback cued 2 s before it was written (▶). Event: the event sheet.
      */
     fun open(g: SearchGroup, h: SearchHit): Open = when {
         g.kind == "event" -> Open.Event(g.id, title(g), g.startMs)
-        h.kind == "notes" -> Open.Meeting(g.id, h.atMs?.let { (it - NOTES_LEAD_MS).coerceAtLeast(0) }, "transcript")
+        h.kind == "notes" -> Open.Meeting(g.id, h.atMs?.let { (it - NOTES_LEAD_MS).coerceAtLeast(0) }, "notes", h.bbox)
         h.kind == "transcript" -> Open.Meeting(g.id, h.atMs, "transcript")
         h.kind == "todo" -> Open.Meeting(g.id, null, "todos")
         else -> Open.Meeting(g.id, null, "summary")
@@ -92,6 +93,8 @@ data class Span(val text: String, val bold: Boolean)
 data class SearchHit(
     val kind: String, val label: String, val unitId: String, val atMs: Long?, val time: String?,
     val snippet: List<Span>, val changed: Boolean,
+    /** A notes hit's line as a world box `[x0, y0, x1, y1]` (F19-FR3's outline). */
+    val bbox: List<Double>? = null,
 ) {
     companion object {
         fun from(o: JSONObject): SearchHit? { return SearchHit(
@@ -102,6 +105,7 @@ data class SearchHit(
             time = o.str("time"),
             snippet = o.arr("snippet").mapObj { s -> s.str("text")?.let { Span(it, s.bool("bold") == true) } },
             changed = o.bool("changed") == true,
+            bbox = o.arr("bbox")?.let { a -> (0 until a.length()).mapNotNull { (a.opt(it) as? Number)?.toDouble() } }?.takeIf { it.size == 4 },
         ) }
     }
 }

@@ -68,9 +68,12 @@ class SearchTest {
         val (m, e) = r.groups
         fun hit(kind: String, at: Long?) = m.hits[0].copy(kind = kind, atMs = at)
         val id = "meeting-20261009-100000"
-        assertEquals(SearchModel.Open.Meeting(id, 759_000, "transcript"), SearchModel.open(m, hit("notes", 761_000)))
-        assertEquals(SearchModel.Open.Meeting(id, 0, "transcript"), SearchModel.open(m, hit("notes", 500)))
-        assertEquals(SearchModel.Open.Meeting(id, null, "transcript"), SearchModel.open(m, hit("notes", null)))
+        val box = m.hits[0].bbox
+        assertEquals(listOf(1.0, 2.0, 3.0, 4.0), box)
+        assertNull(m.hits[1].bbox)
+        assertEquals(SearchModel.Open.Meeting(id, 759_000, "notes", box), SearchModel.open(m, hit("notes", 761_000)))
+        assertEquals(SearchModel.Open.Meeting(id, 0, "notes", box), SearchModel.open(m, hit("notes", 500)))
+        assertEquals(SearchModel.Open.Meeting(id, null, "notes", box), SearchModel.open(m, hit("notes", null)))
         assertEquals(SearchModel.Open.Meeting(id, 761_000, "transcript"), SearchModel.open(m, hit("transcript", 761_000)))
         assertEquals(SearchModel.Open.Meeting(id, null, "summary"), SearchModel.open(m, hit("minutes", null)))
         assertEquals(SearchModel.Open.Meeting(id, null, "todos"), SearchModel.open(m, hit("todo", null)))

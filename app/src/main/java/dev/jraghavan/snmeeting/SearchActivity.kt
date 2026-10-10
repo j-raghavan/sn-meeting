@@ -194,6 +194,8 @@ class SearchActivity : Activity() {
                 val i = android.content.Intent(this, MeetingActivity::class.java).putExtra(MeetingActivity.EXTRA_ID, o.id)
                 o.atMs?.let { i.putExtra(MeetingActivity.EXTRA_AT_MS, it) }
                 o.focus?.let { i.putExtra(MeetingActivity.EXTRA_FOCUS, it) }
+                // F19-FR3: a notes hit opens the Notes tab on the line, outlined.
+                o.outline?.let { i.putExtra(MeetingActivity.EXTRA_TAB, MeetingActivity.NOTES).putExtra(MeetingActivity.EXTRA_OUTLINE, it.toDoubleArray()) }
                 startActivity(i)
                 overridePendingTransition(0, 0)
             }

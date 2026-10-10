@@ -61,6 +61,8 @@ class MeetingActivity : Activity() {
     /** F17-FR1: the tab shown; chosen once, from the meeting's status, on the first load. */
     private var tab: String? = null
     private var notes: NotesPage? = null
+    /** F19-FR3: a search hit's line on the canvas, to centre and outline once. */
+    private var outline: dev.jraghavan.snmeeting.notes.WorldRect? = null
     /** F17-FR10: the Minutes tab's ink area, kept across redraws. */
     private var minutesInk: dev.jraghavan.snmeeting.notes.MinutesInk? = null
 
@@ -159,6 +161,8 @@ class MeetingActivity : Activity() {
         cueAt = intent.getLongExtra(EXTRA_AT_MS, -1).takeIf { it >= 0 }
         focus = intent.getStringExtra(EXTRA_FOCUS)
         tab = intent.getStringExtra(EXTRA_TAB)
+        outline = intent.getDoubleArrayExtra(EXTRA_OUTLINE)?.takeIf { it.size == 4 }
+            ?.let { dev.jraghavan.snmeeting.notes.WorldRect(it[0], it[1], it[2], it[3]) }
         CoreJobs.init(filesDir.absolutePath)
         setContentView(skeleton())
     }
@@ -248,7 +252,8 @@ class MeetingActivity : Activity() {
                 it.liveAvailable = view?.meeting?.nearLive == true
                 live?.let(it::showLive)
                 it.setMarks(view?.meeting?.marks.orEmpty().map { m -> m.atMs })
-                it.open()
+                it.open(outline)
+                outline = null
             }
         }
     }
@@ -778,6 +783,8 @@ class MeetingActivity : Activity() {
         const val EXTRA_AT_MS = "at_ms"
         /** F19-FR3: summary, todos or transcript: the part to scroll to. */
         const val EXTRA_FOCUS = "focus"
+        /** F19-FR3: a notes hit's world box `[x0, y0, x1, y1]`, outlined on the Notes tab. */
+        const val EXTRA_OUTLINE = "outline"
         /** F17-FR1 / F19-FR3: the tab to open on, [NOTES] or [MINUTES]; by status when absent. */
         const val EXTRA_TAB = "tab"
         const val NOTES = "notes"

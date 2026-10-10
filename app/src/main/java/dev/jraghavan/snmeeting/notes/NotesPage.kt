@@ -241,8 +241,9 @@ class NotesPage(
             .setNegativeButton("CLOSE", null).show()
     }
 
-    /** Opens the canvas at its last viewport, or fitted to its ink. */
-    fun open() {
+    /** Opens the canvas at its last viewport, or fitted to its ink; or (F19-FR3) centred on
+     *  [focus], a search hit's line, outlined with a 2 px dashed box. */
+    fun open(focus: WorldRect? = null) {
         scope.core({ NativeBridge.nativeNotesOpen(id) }) { json ->
             when (val r = CoreJson.obj(json) { it }) {
                 is CoreResult.Ok -> {
@@ -251,7 +252,11 @@ class NotesPage(
                     canvas.post {
                         val w = canvas.width.toDouble(); val h = canvas.height.toDouble()
                         val v = o.optJSONObject("view")
-                        val next = if (v != null) {
+                        canvas.outline = focus
+                        val next = if (focus != null) {
+                            Viewport.centred((focus.left + focus.right) / 2, (focus.top + focus.bottom) / 2,
+                                v?.optDouble("zoom", 1.0) ?: 1.0, w, h)
+                        } else if (v != null) {
                             Viewport.centred(v.optDouble("cx"), v.optDouble("cy"), v.optDouble("zoom", 1.0), w, h)
                         } else {
                             Viewport.fitInk(InkView.rect(o.optJSONArray("bounds")), w, h, NotesCanvasView.FIT_PAD)
