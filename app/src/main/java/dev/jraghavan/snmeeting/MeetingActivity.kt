@@ -618,6 +618,12 @@ class MeetingActivity : Activity() {
             // F18-FR10: "Linked to … · change" or "Link to event…". M12 hook: in layout B this
             // moves to the Minutes tab's header.
             linkLine(v.meeting)?.let { addView(it, ui.fullWidth()) }
+            // F20-FR4: the meeting's tags as pills, and "＋ tag", once it is no longer recording.
+            if (v.meeting.status != Status.RECORDING) {
+                addView(TagPills.row(this@MeetingActivity, ui, v.meeting.tags, ::removeTag, ::addTag).apply {
+                    setPadding(0, ui.dim(12), 0, 0)
+                }, ui.fullWidth())
+            }
             h.note?.let { addView(ui.note(it, 13f, ui.textMuted).apply { gravity = Gravity.CENTER; setPadding(0, ui.dim(2), 0, 0) }, ui.fullWidth()) }
 
             addView(ui.spacer(ui.dim(32)))
@@ -796,6 +802,22 @@ class MeetingActivity : Activity() {
     /** F16-FR5: the cost line, redrawn only when its text changes (the strip is the Notes tab's). */
     private fun showLive() {
         if (view?.meeting?.nearLive == true) live?.soFar?.let { notes?.bar?.showCost(it) }
+    }
+
+    /** F20-FR4: "＋ tag": typed or handwritten; the core normalises it. */
+    private fun addTag() = TagEntry.show(this, ui) { name ->
+        scope.core({ NativeBridge.nativeAddTag(id, name) }) { json ->
+            (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't add the tag", it.message) }
+            load()
+        }
+    }
+
+    /** F20-FR4: after the pill's one question. */
+    private fun removeTag(name: String) {
+        scope.core({ NativeBridge.nativeRemoveTag(id, name) }) { json ->
+            (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't remove the tag", it.message) }
+            load()
+        }
     }
 
     /** F7-FR5: an empty title returns the meeting to untitled; the next summary may name it. */
