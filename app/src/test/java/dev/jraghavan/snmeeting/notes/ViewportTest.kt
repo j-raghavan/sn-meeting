@@ -77,4 +77,36 @@ class ViewportTest { // F13-FR1 / F17-FR1: pan, pinch-zoom 5 %–2000 %, the zoo
         assertTrue(ink.contains(1.0, 1.0))
         assertFalse(ink.contains(-1.0, 1.0))
     }
+
+    @Test fun aTapOnTheMinimapCentresTheViewThere() { // F17-FR13
+        val ink = WorldRect(0.0, 0.0, 5_000.0, 5_000.0)
+        val view = Viewport(0.0, 0.0, 1.0)
+        val f = MinimapFrame.of(ink, view, 1_200.0, 1_400.0, barOnLeft = false)!!
+        // The minimap point showing world (4 000, 3 000).
+        val sx = f.left + f.fit.screenX(4_000.0)
+        val sy = f.top + f.fit.screenY(3_000.0)
+        assertTrue(f.contains(sx, sy))
+        val v = f.centreOn(sx, sy, view, 1_200.0, 1_400.0)
+        val (cx, cy) = v.centre(1_200.0, 1_400.0)
+        assertEquals(4_000.0, cx, 1e-6)
+        assertEquals(3_000.0, cy, 1e-6)
+        assertEquals(view.zoom, v.zoom, eps)
+        // A point off the box is clamped to its edge.
+        val (wx, _) = f.worldAt(f.left - 500, sy)
+        assertEquals(f.fit.worldX(0.0), wx, 1e-6)
+        assertFalse(f.contains(f.left - 1, sy))
+    }
+
+    @Test fun draggingTheViewRectanglePansByTheWorldDistance() { // F17-FR13
+        val ink = WorldRect(0.0, 0.0, 5_000.0, 5_000.0)
+        val view = Viewport(1_000.0, 1_000.0, 1.0)
+        val f = MinimapFrame.of(ink, view, 1_200.0, 1_400.0, barOnLeft = false)!!
+        val moved = f.dragBy(view, 10.0, -5.0)
+        assertEquals(1_000.0 + 10.0 / f.fit.zoom, moved.x, 1e-6)
+        assertEquals(1_000.0 - 5.0 / f.fit.zoom, moved.y, 1e-6)
+        val inside = f.left + f.fit.screenX(1_500.0)
+        val insideY = f.top + f.fit.screenY(1_500.0)
+        assertTrue(f.onView(inside, insideY, view, 1_200.0, 1_400.0))
+        assertFalse(f.onView(f.left + f.fit.screenX(4_900.0), f.top + f.fit.screenY(4_900.0), view, 1_200.0, 1_400.0))
+    }
 }

@@ -86,6 +86,29 @@ data class Viewport(val x: Double, val y: Double, val zoom: Double) {
  * part in view, in a box at the canvas's bottom corner away from the tool bar.
  */
 data class MinimapFrame(val left: Double, val top: Double, val width: Double, val height: Double, val fit: Viewport) {
+    /** F17-FR13: whether a view point ([x], [y]) is on the minimap. */
+    fun contains(x: Double, y: Double) = x in left..(left + width) && y in top..(top + height)
+
+    /** The world point under a view point on the minimap (clamped to the box). */
+    fun worldAt(x: Double, y: Double): Pair<Double, Double> =
+        fit.worldX(x.coerceIn(left, left + width) - left) to fit.worldY(y.coerceIn(top, top + height) - top)
+
+    /** F17-FR13: a tap at ([x], [y]) moves the view there: that world point at its centre. */
+    fun centreOn(x: Double, y: Double, view: Viewport, w: Double, h: Double): Viewport {
+        val (cx, cy) = worldAt(x, y)
+        return Viewport.centred(cx, cy, view.zoom, w, h)
+    }
+
+    /** F17-FR13: dragging the view rectangle by ([dx], [dy]) minimap px pans the same world
+     *  distance (this frame is held for the whole drag, as sn-canvas's MinimapLayout is). */
+    fun dragBy(view: Viewport, dx: Double, dy: Double): Viewport = view.copy(x = view.x + dx / fit.zoom, y = view.y + dy / fit.zoom)
+
+    /** Whether ([x], [y]) is on the view rectangle (a grab), rather than elsewhere (a jump). */
+    fun onView(x: Double, y: Double, view: Viewport, w: Double, h: Double): Boolean {
+        val (wx, wy) = worldAt(x, y)
+        return contains(x, y) && view.visible(w, h).contains(wx, wy)
+    }
+
     companion object {
         const val WIDTH_PX = 300.0
         const val MARGIN_PX = 24.0

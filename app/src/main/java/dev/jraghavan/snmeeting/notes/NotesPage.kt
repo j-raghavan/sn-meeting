@@ -123,6 +123,7 @@ class NotesPage(
         }
         item("FIT") { canvas.fit() }
         Viewport.PRESETS.forEach { p -> item("$p%") { canvas.zoomPercent(p) } }
+        item("MAP") { canvas.minimapOpen = !canvas.minimapOpen } // F17-FR13: on demand
     }
 
     /** The canvas with the zoom pill over its top corner. */

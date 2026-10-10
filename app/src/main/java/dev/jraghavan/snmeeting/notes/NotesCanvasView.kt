@@ -84,6 +84,15 @@ class NotesCanvasView(
     private var penHovering = false
     private var lastPenAt = -1_000_000L
     private var minimapUntil = 0L
+    /** F17-FR13: opened from the pill; stays until closed or the pen touches the canvas. */
+    var minimapOpen = false
+        set(v) { field = v; invalidate() }
+    /** A finger on the minimap: the frame held for the gesture, where it began, and whether it
+     *  grabbed the view rectangle (a drag) or not (a jump to the finger). */
+    private var mapFrame: MinimapFrame? = null
+    private var mapStart: Viewport? = null
+    private var mapGrab = false
+    private var mapDown = 0.0 to 0.0
 
     private val firmware = SupernoteInk(context)
     private var firmwareOn = false
@@ -195,6 +204,40 @@ class NotesCanvasView(
         postDelayed(hideMinimap, MinimapFrame.LINGER_MS)
     }
 
+    private fun minimapShown() = minimapOpen || SystemClock.uptimeMillis() < minimapUntil
+
+    private fun mapFrameNow() = MinimapFrame.of(ink.bounds, viewport, width.toDouble(), height.toDouble(), barOnLeft)
+
+    /**
+     * F17-FR13 (sn-canvas): a finger on the shown minimap navigates. A tap moves the view to
+     * the point; a drag of the view rectangle pans by the world distance, a drag elsewhere
+     * follows the finger. Nothing redraws until the finger lifts; then one redraw, baked in
+     * F17-FR4's order (draw, refresh, clear). Returns false when the minimap isn't touched.
+     */
+    private fun minimapTouch(e: MotionEvent): Boolean {
+        val x = e.x.toDouble(); val y = e.y.toDouble()
+        val w = width.toDouble(); val h = height.toDouble()
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val f = mapFrameNow()?.takeIf { minimapShown() && it.contains(x, y) } ?: return false
+                mapFrame = f; mapStart = viewport; mapDown = x to y
+                mapGrab = f.onView(x, y, viewport, w, h)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> return mapFrame != null
+            MotionEvent.ACTION_UP -> {
+                val f = mapFrame ?: return false
+                val start = mapStart ?: viewport
+                val target = if (mapGrab) f.dragBy(start, x - mapDown.first, y - mapDown.second) else f.centreOn(x, y, start, w, h)
+                mapFrame = null; mapStart = null
+                setViewport(target) // the host fetches what is now in view and bakes once
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> { val had = mapFrame != null; mapFrame = null; mapStart = null; return had }
+        }
+        return mapFrame != null
+    }
+
     private fun palmNear(): Boolean = PalmRule.isPalm(penHovering, arbiter.isPenActive,
         SystemClock.uptimeMillis() - lastPenAt, 0f, height)
 
@@ -216,6 +259,8 @@ class NotesCanvasView(
     @SuppressLint("ClickableViewAccessibility") // the canvas is not a button: taps are Listen's
     override fun onTouchEvent(e: MotionEvent): Boolean {
         val pen = e.getToolType(e.actionIndex).let { it == MotionEvent.TOOL_TYPE_STYLUS || it == MotionEvent.TOOL_TYPE_ERASER }
+        if (pen && e.actionMasked == MotionEvent.ACTION_DOWN && minimapOpen) minimapOpen = false // the pen closes it
+        if (!fixed && !pen && e.pointerCount == 1 && minimapTouch(e)) return true
         if (fixed && e.actionMasked == MotionEvent.ACTION_DOWN && !pen) return false // the page scrolls
         if (fixed) parent?.requestDisallowInterceptTouchEvent(true)
         if (!arbiter.isPenActive && !fixed) scale.onTouchEvent(e)
@@ -402,7 +447,7 @@ class NotesCanvasView(
             while (i + 1 < path.size) { livePath.lineTo(path[i], path[i + 1]); i += 2 }
             canvas.drawPath(livePath, if (gesture == Gesture.LASSO) dashPaint else livePaint)
         }
-        if (SystemClock.uptimeMillis() < minimapUntil) minimap(canvas)
+        if (minimapShown()) minimap(canvas)
         // F17-FR4: the panel shows this frame; only now refresh and clear the overlay.
         if (afterDraw.isNotEmpty()) {
             val rest = afterDraw
