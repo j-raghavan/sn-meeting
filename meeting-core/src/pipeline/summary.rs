@@ -72,6 +72,8 @@ pub async fn summarise(
         Some(m) => format!("{user}\n\n{m}"),
         None => user,
     };
+    // F20-FR1: the existing tags go first, as data, so the call reuses their names.
+    let user = summarise::user_message_with_tags(&user, &plan.tag_vocabulary);
     let with_event = |system: String| match &event {
         Some(_) => format!("{system}\n{}", summarise::EVENT_RULE),
         None => system,

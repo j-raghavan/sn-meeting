@@ -77,6 +77,9 @@ class SettingsActivity : Activity() {
     /** F19-FR5: the Rebuild search index line ("Indexing 120/340", then the result). */
     private var indexLine: String? = null
     private var indexView: TextView? = null
+    /** F20-FR10: the "Tag older meetings…" line, kept across redraws. */
+    private var tagView: TextView? = null
+    private var tagLine: String? = null
     private var rebuilding = false
     private val indexPoll = object : Runnable {
         override fun run() {
@@ -594,6 +597,7 @@ class SettingsActivity : Activity() {
             })
             updates(this)
             searchIndex(this)
+            tagOlder(this)
             if (showSegmentLength || segmentMs != null) segmentLength(this)
         }
 
@@ -617,6 +621,43 @@ class SettingsActivity : Activity() {
             indexView = note
             addView(note, ui.wrap().apply { topMargin = ui.dim(8) })
         })
+    }
+
+    /** F20-FR10 / OQ31: "Tag older meetings…": the count and cost first, then one call each. */
+    private fun tagOlder(card: LinearLayout) {
+        card.addView(ui.hairline())
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, ui.dim(12), 0, ui.dim(12))
+            addView(ui.pill("Tag older meetings…", size = 15f) { askTagOlder() }, ui.wrap())
+            val note = ui.note(tagLine ?: dev.jraghavan.snmeeting.model.TagOlder.NOTE, 13f)
+            tagView = note
+            addView(note, ui.wrap().apply { topMargin = ui.dim(8) })
+        })
+    }
+
+    private fun askTagOlder() {
+        if (LongJobs.lane.isRunning(TAG_OLDER)) return
+        scope.core({ NativeBridge.nativeTagOlder(true) }) { json ->
+            when (val r = CoreJson.obj(json, dev.jraghavan.snmeeting.model.TagOlder::from)) {
+                is CoreResult.Err -> InkDialog.error(this, "Can't tag older meetings", r.message)
+                is CoreResult.Ok -> {
+                    val q = r.value.question()
+                        ?: return@core InkDialog.info(this, "Nothing to tag", "Every summarised meeting already has tags.")
+                    InkDialog.confirm(this, "Tag older meetings?", q, "Tag them") {
+                        tagLine = "Tagging…"; tagView?.text = tagLine
+                        LongJobs.lane.run(TAG_OLDER, { NativeBridge.nativeTagOlder(false) }) { done ->
+                            tagLine = when (val d = CoreJson.obj(done) { it }) {
+                                is CoreResult.Ok -> dev.jraghavan.snmeeting.model.TagOlder.result(d.value)
+                                is CoreResult.Err -> "Couldn't tag older meetings: ${d.message}"
+                            }
+                            if (!isDestroyed) tagView?.text = tagLine
+                            SearchJobs.refresh()
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun rebuildIndex() {
@@ -730,6 +771,8 @@ class SettingsActivity : Activity() {
 
     companion object {
         private const val SHORT_SEGMENT_MS = 60_000L
+        /** F20-FR10: "Tag older meetings…" on the job lane (one run at a time). */
+        private const val TAG_OLDER = "tags:older"
         /** Open at a card: Home's "CALENDAR" asks for [SECTION_CALENDAR]. */
         const val EXTRA_SECTION = "section"
         const val SECTION_CALENDAR = "calendar"

@@ -18,12 +18,14 @@ mod notes;
 mod run;
 mod search;
 mod spend;
+mod tags;
 mod templates;
 pub use agenda::people as agenda_people;
 pub use calendar::LinkState;
 pub use live::DECLINED as LIVE_DECLINED;
 pub use run::Job;
 pub use search::{MAX_QUERY_RECORDS, QUERY_SYSTEM, png_size};
+pub use tags::RENAME_FILE;
 
 #[derive(Debug)]
 pub struct App {
@@ -53,6 +55,8 @@ pub struct App {
     lanes: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// F17-FR4 / FR5: the ink layers of the pages open now, flushed on a deferred timer.
     ink: notes::OpenInk,
+    /// F20-FR9: the last Tag Graph laid out, reused while the tags and counts are the same.
+    tag_graph: tags::GraphCache,
 }
 
 #[derive(Debug)]
@@ -92,6 +96,7 @@ impl App {
             calendar: Default::default(),
             lanes: Mutex::default(),
             ink: Default::default(),
+            tag_graph: Default::default(),
         }
     }
 

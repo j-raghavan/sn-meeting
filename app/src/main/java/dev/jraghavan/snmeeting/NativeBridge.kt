@@ -162,6 +162,31 @@ object NativeBridge {
      *  becomes the user's and Summarise again keeps it. `{meeting}`. */
     external fun nativeEditMinutes(id: String, patchJson: String): String
 
+    /** F20-FR4: add the user's tag (normalised by the core) to meeting [id]. `{tags: [{name,
+     *  source}]}`, or `{error}`. */
+    external fun nativeAddTag(id: String, name: String): String
+
+    /** F20-FR4: remove a tag; a later summary won't add it back. `{tags}`. */
+    external fun nativeRemoveTag(id: String, name: String): String
+
+    /** F20-FR4: rename a tag in every meeting in the save folders, merging into [to] where it
+     *  exists; resumable. Rewrites sidecars: call it on the core thread. `{renamed, to}`. */
+    external fun nativeRenameTag(from: String, to: String): String
+
+    /** F20-FR7 / FR9: the Tag Graph for [range] (`all` or `3m`), laid out by the core once per
+     *  set of tags and counts: `{range, graph: {nodes: [{name, count, x, y, r}], edges: [{a, b,
+     *  shared, weak}], meetings, bounds: [x0, y0, x1, y1]}, laidOut}`. Call it on the core thread. */
+    external fun nativeTagGraph(range: String): String
+
+    /** F20-FR8: the recordings tagged [name] in [range], newest first: `{tag, count, meetings:
+     *  [{id, title, startedAt, startedAtMs, durationMs, tags}]}` (`tags`: its other tags). */
+    external fun nativeTagMeetings(name: String, range: String): String
+
+    /** F20-FR10 / OQ31: "Tag older meetings…". [dryRun]: `{meetings, estUsd|null, provider,
+     *  model}` to show first; else one tags-only call per untagged meeting, `{tagged, failed,
+     *  error}`. Blocking for minutes: call it on [LongJobs]' lane. */
+    external fun nativeTagOlder(dryRun: Boolean): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 

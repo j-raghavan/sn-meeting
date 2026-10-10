@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Bumped whenever the tables or what goes in them change: an older index is rebuilt (F19-FR5).
-pub const VERSION: i64 = 1;
+/// 2: F20-FR5 adds tag units.
+pub const VERSION: i64 = 2;
 
 const SCHEMA: &str = "
 CREATE TABLE groups(

@@ -1052,3 +1052,92 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeEditMinut
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeAddTag<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    name: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let name: String = name.try_to_string(env)?;
+        env.new_string(crate::api::add_tag(&id, &name))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRemoveTag<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    name: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let name: String = name.try_to_string(env)?;
+        env.new_string(crate::api::remove_tag(&id, &name))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Rewrites sidecars: call it on the core thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeRenameTag<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    from: JString<'local>,
+    to: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let from: String = from.try_to_string(env)?;
+        let to: String = to.try_to_string(env)?;
+        env.new_string(crate::api::rename_tag(&from, &to))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Reads every sidecar and may lay the graph out: call it on the core thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTagGraph<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    range: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let range: String = range.try_to_string(env)?;
+        env.new_string(crate::api::tag_graph(&range))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Reads every sidecar: call it on the core thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTagMeetings<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    name: JString<'local>,
+    range: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let name: String = name.try_to_string(env)?;
+        let range: String = range.try_to_string(env)?;
+        env.new_string(crate::api::tag_meetings(&name, &range))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+/// Blocking, one provider call per meeting: call it on a background lane.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTagOlder<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    dry_run: jboolean,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::tag_older(dry_run))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

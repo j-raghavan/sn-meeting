@@ -69,6 +69,7 @@ fn plan(uri: &str) -> JobPlan {
         notes: meeting::notes_text::NotesSource::canvas(),
         event_block: true,
         chunks: None,
+        tag_vocabulary: vec![],
     }
 }
 

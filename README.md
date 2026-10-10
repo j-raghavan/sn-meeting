@@ -35,8 +35,6 @@ I built it the same way as [inkread](https://github.com/j-raghavan/inkread): a s
 
 Meetings is at **v0.1**. Everything below works, and CI checks it on every pull request. On my Supernote A5 X2 Manta I've tested recording, transcription and summaries, recovery after a crash, and unplugging the mic mid-recording. I've also recorded a 20-minute meeting with the screen asleep for most of it: it carried on recording, rolled over into a second segment with no gap, and both segments came out as clean audio.
 
-I haven't yet tested a Bluetooth headset on the device.
-
 ### Roadmap
 
 Here's what I'm building next:

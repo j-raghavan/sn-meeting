@@ -136,6 +136,7 @@ impl App {
             },
             event_block: s.calendar.event_in_minutes,
             chunks: None,
+            tag_vocabulary: crate::tags::vocabulary(&self.library().sidecars()),
         })
     }
 

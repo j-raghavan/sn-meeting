@@ -19,6 +19,8 @@ object SearchModel {
         MINUTES("Minutes", "minutes", "in minutes"),
         TODOS("To-dos", "todos", "in to-dos"),
         EVENTS("Events", "events", "in events"),
+        /** F20-FR5. */
+        TAGS("Tags", "tags", "in tags"),
     }
 
     /** "No results for “budget” in notes" (F19-FR2: the active filter named). */
@@ -64,6 +66,8 @@ object SearchModel {
         data class Meeting(val id: String, val atMs: Long?, val focus: String?, val outline: List<Double>? = null) : Open()
         /** An event with no meeting: its sheet (F18-FR8). */
         data class Event(val key: String, val title: String, val startMs: Long) : Open()
+        /** F20-FR5: a tag hit opens the Tag Graph with that tag selected (F20-FR8). */
+        data class Tag(val name: String) : Open()
     }
 
     /** ▶ on a notes hit plays from this long before the line was written (F19-FR3). */
@@ -72,10 +76,12 @@ object SearchModel {
     /**
      * F19-FR3. Transcript: the meeting at that moment. Minutes or to-do: the meeting at its
      * minutes or to-dos. Notes: the Notes tab centred on the line, its strokes outlined, and
-     * playback cued 2 s before it was written (▶). Event: the event sheet.
+     * playback cued 2 s before it was written (▶). Event: the event sheet. Tag (F20-FR5): the
+     * Tag Graph with the tag selected.
      */
     fun open(g: SearchGroup, h: SearchHit): Open = when {
         g.kind == "event" -> Open.Event(g.id, title(g), g.startMs)
+        h.kind == "tag" -> Open.Tag(h.unitId.removePrefix("tag:"))
         h.kind == "notes" -> Open.Meeting(g.id, h.atMs?.let { (it - NOTES_LEAD_MS).coerceAtLeast(0) }, "notes", h.bbox)
         h.kind == "transcript" -> Open.Meeting(g.id, h.atMs, "transcript")
         h.kind == "todo" -> Open.Meeting(g.id, null, "todos")

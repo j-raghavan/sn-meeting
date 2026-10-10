@@ -26,6 +26,7 @@ fn x(title: Option<&str>, todos: Vec<NewTodo>) -> Extraction {
         decisions: vec!["D".into()],
         todos,
         sections: vec![("Blockers".into(), "- none".into())],
+        tags: vec![],
     }
 }
 

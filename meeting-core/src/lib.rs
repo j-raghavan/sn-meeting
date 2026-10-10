@@ -25,6 +25,7 @@ pub mod sidecar;
 pub mod spend;
 pub mod status;
 pub mod summarise;
+pub mod tags;
 pub mod templates;
 pub mod tz;
 pub mod update;

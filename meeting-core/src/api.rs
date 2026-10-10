@@ -522,6 +522,36 @@ pub fn begin_meeting_for_event(
     })
 }
 
+/// `nativeAddTag(id, name)` (F20-FR4): `{tags}`.
+pub fn add_tag(id: &str, name: &str) -> String {
+    with_app(|app| app.add_tag_json(id, name))
+}
+
+/// `nativeRemoveTag(id, name)` (F20-FR4): `{tags}`.
+pub fn remove_tag(id: &str, name: &str) -> String {
+    with_app(|app| app.remove_tag_json(id, name))
+}
+
+/// `nativeRenameTag(from, to)` (F20-FR4): every meeting, resumable. `{renamed, to}`.
+pub fn rename_tag(from: &str, to: &str) -> String {
+    with_app(|app| app.rename_tag_json(from, to))
+}
+
+/// `nativeTagGraph(range)` (F20-FR7 / FR9): the laid-out Tag Graph, `all` or `3m`.
+pub fn tag_graph(range: &str) -> String {
+    with_app(|app| app.tag_graph_json(range))
+}
+
+/// `nativeTagMeetings(name, range)` (F20-FR8): the tag's recordings, newest first.
+pub fn tag_meetings(name: &str, range: &str) -> String {
+    with_app(|app| app.tag_meetings_json(name, range))
+}
+
+/// `nativeTagOlder(dryRun)` (F20-FR10): count and price first, then one tags-only call per untagged meeting.
+pub fn tag_older(dry_run: bool) -> String {
+    with_app(|app| app.tag_older_json(dry_run))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
