@@ -117,9 +117,16 @@ impl std::fmt::Debug for NotesSource {
 }
 
 impl NotesSource {
-    /// M12 hook: the canvas (F17) cuts its inked area into regions and renders each to a PNG,
-    /// when "Use my notes for the minutes" is on. There is no canvas yet, so nothing is sent.
+    /// F17-FR9: the canvas's inked area cut into regions, each rendered to a PNG, with every
+    /// stroke's box and time (`crate::notes::canvas_input`).
     pub fn canvas() -> NotesSource {
+        NotesSource(std::sync::Arc::new(|dir, sc| {
+            crate::notes::canvas_input(dir, sc)
+        }))
+    }
+
+    /// No notes: "Use my notes for the minutes" is off (F17-FR9).
+    pub fn none() -> NotesSource {
         NotesSource(std::sync::Arc::new(|_, _| None))
     }
 
@@ -439,6 +446,7 @@ mod tests {
         );
         let sc = crate::sidecar::blank("meeting-20261009-100000");
         assert_eq!(NotesSource::canvas().get(d.path(), &sc), None);
+        assert_eq!(NotesSource::none().get(d.path(), &sc), None);
         let empty = NotesSource(std::sync::Arc::new(|_, _| Some(NotesInput::default())));
         assert_eq!(empty.get(d.path(), &sc), None, "no regions is no notes");
         assert_eq!(format!("{empty:?}"), "NotesSource");

@@ -42,4 +42,12 @@ class NotesPrefsTest { // F17-FR2: the docked bar's side and collapsed state, pe
         assertEquals(1340, thin.canvasWidth)
         assertEquals(0, DockLayout.spans(50, NotesPrefs.Dock.LEFT, false, 132, 64).canvasWidth)
     }
+
+    @Test fun theNotesNoticeShowsOncePerProviderWhileTheSettingIsOn() { // OQ20, F17-FR9
+        val p = NotesPrefs()
+        assertTrue(NotesNotice.of(p, "anthropic", "Anthropic")!!.contains("go to Anthropic"))
+        assertEquals(null, NotesNotice.of(p.copy(noticeShown = mapOf("anthropic" to true)), "anthropic", "Anthropic"))
+        assertEquals(null, NotesNotice.of(p.copy(useForMinutes = false), "anthropic", "Anthropic"))
+        assertEquals(null, NotesNotice.of(p, null, ""))
+    }
 }

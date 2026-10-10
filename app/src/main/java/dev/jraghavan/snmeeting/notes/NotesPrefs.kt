@@ -32,6 +32,21 @@ data class NotesPrefs(
     }
 }
 
+/**
+ * OQ20 / F17-FR9 (Security): the one-time notice, the first time notes would go to the
+ * summarise [provider]: null when the setting is off or it was answered.
+ */
+object NotesNotice {
+    const val TITLE = "Your notes and the minutes"
+
+    fun of(p: NotesPrefs, provider: String?, name: String): String? {
+        if (provider == null || !p.useForMinutes || p.noticeShown[provider] == true) return null
+        return "When you stop, images of these notes go to $name with the transcript, so the minutes " +
+            "and Search can use your handwriting. Each provider may keep what it receives under its own " +
+            "policy. Turn this off in Settings → Notes."
+    }
+}
+
 /** RFC 7396 patches for `notes` (shape tested on the JVM). */
 object NotesPatch {
     fun dock(d: NotesPrefs.Dock) = """{"notes":{"dock":${CoreJson.quote(d.wire)}}}"""

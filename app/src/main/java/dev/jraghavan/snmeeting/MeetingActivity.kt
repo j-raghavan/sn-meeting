@@ -211,6 +211,8 @@ class MeetingActivity : Activity() {
                 override fun canPlay() = playback?.canPlay == true && recordingHere() == null
                 override fun togglePlay() { playback?.toggle() }
                 override fun mark() { this@MeetingActivity.mark() }
+                override fun summariseProvider(): String? =
+                    settings?.let { s -> s.effectiveSummarise.provider.takeIf { s.keys[it]?.usable == true } }
                 override fun listenAt(seekMs: Long, lineN: Int?) {
                     // F17-FR7: play from 2 s before the ink; on Minutes the paragraph then is outlined.
                     playback?.cue(seekMs)

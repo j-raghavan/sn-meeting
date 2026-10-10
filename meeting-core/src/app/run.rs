@@ -122,7 +122,12 @@ impl App {
             templates: self.templates.effective(),
             budgets: self.budgets,
             rates: self.rates(),
-            notes: self.notes.clone(),
+            // F17-FR9: the notes go only with "Use my notes for the minutes" on (the default).
+            notes: if s.notes.use_for_minutes {
+                self.notes.clone()
+            } else {
+                crate::notes_text::NotesSource::none()
+            },
             event_block: s.calendar.event_in_minutes,
             chunks: None,
         })
@@ -138,6 +143,9 @@ impl App {
         let Some(guard) = self.jobs.start(id) else {
             return error_json("meeting is busy");
         };
+        // F17-FR9: ink still waiting for the page's deferred save goes to disk first, so the
+        // Stop call sends every stroke.
+        let _ = self.flush_ink(Some(id));
         let mut plan = match self.plan(job) {
             Ok(p) => p,
             Err(e) => return error_json(&e),

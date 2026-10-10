@@ -48,6 +48,8 @@ class NotesPage(
         /** F17-FR7: Listen found ink written at a moment: play from [seekMs]; [lineN] is the
          *  transcript line spoken then (or null). */
         fun listenAt(seekMs: Long, lineN: Int?)
+        /** The summarise provider ("anthropic"), for the notes notice; null without a key. */
+        fun summariseProvider(): String?
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -277,9 +279,18 @@ class NotesPage(
 
     /** A change to the ink: run [call], fetch what is in view (drawn once the pen rests) and
      *  arm the deferred save. */
+    /** OQ20: the first stroke to a provider says the notes go with the minutes, once. */
+    private fun noticeOnce() {
+        val p = host.summariseProvider()
+        val text = NotesNotice.of(prefs, p, dev.jraghavan.snmeeting.model.Format.providerName(p.orEmpty())) ?: return
+        prefs = prefs.copy(noticeShown = prefs.noticeShown + (p!! to true))
+        InkDialog.notice(a, NotesNotice.TITLE, text, "OK") { host.savePrefs(NotesPatch.noticeShown(p)) }
+    }
+
     private fun changed(redraw: Boolean = false, call: () -> String) {
         scope.core(call) { json ->
             if (!reportError(json, "Couldn't keep that")) {
+                noticeOnce()
                 fetch(redraw)
                 scheduleSave()
             }

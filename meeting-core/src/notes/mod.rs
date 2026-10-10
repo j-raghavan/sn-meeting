@@ -2,6 +2,9 @@
 //! `canvas.inkbin` (the Notes tab's infinite canvas, one world-space layer), `minutes.inkbin`
 //! (the Minutes tab's ink area, F17-FR10) and `view.json` (the canvas's last viewport). The
 //! ink files change only from user input (INV12); every write is atomic (tmp, fsync, rename).
+pub mod png;
+pub mod regions;
+
 use crate::ink::{self, InkLayer};
 use crate::sidecar::Sidecar;
 use serde::{Deserialize, Serialize};
@@ -121,6 +124,23 @@ pub fn write_view(dir: &Path, id: &str, v: View) -> std::io::Result<()> {
 pub fn field(id: &str) -> Value {
     json!({"dir": crate::notes_text::notes_dir_name(id), "format": FORMAT, "space": "world",
            "clock": "recording-ms", "minutesInk": MINUTES})
+}
+
+/// F19-FR7: when the notes were last recognised (`notesRecognisedAt`), as epoch ms.
+pub fn recognised_at_ms(sc: &Sidecar) -> Option<u64> {
+    let t = sc.extra.get("notesRecognisedAt")?.as_str()?;
+    let d = chrono::DateTime::parse_from_rfc3339(t).ok()?;
+    u64::try_from(d.timestamp_millis()).ok()
+}
+
+/// F17-FR9: what the Stop call sends of a meeting's canvas: its regions as PNGs and its
+/// strokes' boxes; `None` without notes, or with an empty or unreadable canvas.
+pub fn canvas_input(dir: &Path, sc: &Sidecar) -> Option<crate::notes_text::NotesInput> {
+    if !has_notes(sc) {
+        return None;
+    }
+    let layer = load(dir, &sc.id, Layer::Canvas).ok()?;
+    (!layer.is_empty()).then(|| regions::input(&layer, recognised_at_ms(sc)))
 }
 
 /// Whether the meeting has notes (its sidecar names the folder).

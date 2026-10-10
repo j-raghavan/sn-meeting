@@ -295,6 +295,10 @@ class SettingsActivity : Activity() {
             choice("Tool bar on the left", null, n.dock == dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.LEFT) {
                 patch(dev.jraghavan.snmeeting.notes.NotesPatch.dock(dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.LEFT))
             }
+            addView(ui.hairline())
+            // F17-FR9 / OQ20: on by default; the regions of the canvas go with the Stop call.
+            choice("Use my notes for the minutes", "At Stop, images of your notes go with the transcript, so the minutes and Search can use your handwriting",
+                n.useForMinutes) { patch(dev.jraghavan.snmeeting.notes.NotesPatch.useForMinutes(!n.useForMinutes)) }
             errors["notes.dock"]?.let { addView(error(it)) }
         }
     }
