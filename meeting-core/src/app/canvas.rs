@@ -443,6 +443,50 @@ impl App {
         }
     }
 
+    /// `nativeCanvasPdfPlan(id)` (F21-FR14): where the notes PDF goes (`meeting-….notes.pdf`
+    /// beside the sidecar, via a tmp file in the same folder) and one page per canvas, in
+    /// canvas order, each fitted to its content with its paint-ordered content to draw.
+    pub fn canvas_pdf_plan_json(&self, id: &str) -> String {
+        let dir = match self.meeting_dir(id) {
+            Ok(d) => d,
+            Err(e) => return error_json(&e),
+        };
+        let list = notes::read_canvases(&dir, id);
+        let open = self.ink.lock();
+        let mut pages = Vec::new();
+        for (n, _) in &list.list {
+            let scene = match open
+                .layers
+                .get(&(id.to_owned(), super::notes::Slot::Canvas(*n)))
+            {
+                Some(o) => o.scene.clone(),
+                None => match notes::load_scene(&dir, id, *n) {
+                    Ok((s, _)) => s,
+                    Err(e) => return error_json(&e),
+                },
+            };
+            let p = crate::canvas::pdf::fitted(scene.bounds());
+            let all = BBox {
+                x0: f32::MIN,
+                y0: f32::MIN,
+                x1: f32::MAX,
+                y1: f32::MAX,
+            };
+            pages.push(
+                json!({"n": n, "widthPt": p.width_pt, "heightPt": p.height_pt,
+                "viewport": [p.x, p.y, p.scale],
+                "content": crate::canvas::draw::for_draw(&scene, all)["entries"].clone()}),
+            );
+        }
+        drop(open);
+        let path = dir.join(format!("{id}.notes.pdf"));
+        let tmp = crate::atomic::tmp_path(&path);
+        let images = notes::folder(&dir, id).join(notes::IMAGES);
+        json!({"path": path.to_string_lossy(), "tmpPath": tmp.to_string_lossy(),
+               "imagesDir": images.to_string_lossy(), "pages": pages})
+        .to_string()
+    }
+
     /// `nativeCanvasEdit(id, opJson)` (F21): one user gesture on the canvas, one undo step.
     /// `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`.
     pub fn canvas_edit_json(&self, id: &str, op: &str) -> String {

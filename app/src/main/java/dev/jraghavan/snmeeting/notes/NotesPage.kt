@@ -323,7 +323,7 @@ class NotesPage(
     private fun moreMenu(): View {
         val ink = canvas.inkView
         val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus, tableCell = tableTargeted(),
-            canvases = true,
+            canvases = true, export = true,
             hasContent = ink.bounds != null, canRestore = ink.canRestore))
         return panels.rows(entries.map { it.label }) { i -> more(entries[i]) }
     }
@@ -345,6 +345,7 @@ class NotesPage(
             MoreMenu.Entry.BACK -> edit("""{"op":"back"}""", keepSelection = true)
             MoreMenu.Entry.RESTORE -> edit("""{"op":"restoreCleared"}""")
             MoreMenu.Entry.NEW_CANVAS -> newCanvas()
+            MoreMenu.Entry.EXPORT -> exportPdf()
             MoreMenu.Entry.CANVASES -> canvasList()
             else -> Unit
         }
@@ -564,6 +565,37 @@ class NotesPage(
                 .putExtra(dev.jraghavan.snmeeting.MeetingActivity.EXTRA_ID, target)
                 .putExtra(dev.jraghavan.snmeeting.MeetingActivity.EXTRA_TAB, dev.jraghavan.snmeeting.MeetingActivity.MINUTES))
             a.overridePendingTransition(0, 0)
+        }
+    }
+
+    /** F21-FR14: the bar's status line, shown for a while after an export. */
+    private var status: String? = null
+    private val clearStatus = Runnable { status = null; refreshBar() }
+
+    private fun showStatus(text: String) {
+        status = text
+        refreshBar()
+        handler.removeCallbacks(clearStatus)
+        handler.postDelayed(clearStatus, STATUS_MS)
+    }
+
+    /** F21-FR14: ⋮ → Export to PDF: the core plans the pages, the shell draws them off the UI
+     *  thread and writes `meeting-….notes.pdf` beside the sidecar (tmp, fsync, rename). */
+    private fun exportPdf() {
+        showStatus("Exporting…")
+        scope.core({ NativeBridge.nativeInkSave(id); NativeBridge.nativeCanvasPdfPlan(id) }) { json ->
+            val plan = CoreJson.obj(json, dev.jraghavan.snmeeting.notes.canvas.PdfExport.Plan::from)
+            val p = (plan as? CoreResult.Ok)?.value
+            if (p == null) {
+                showStatus("Export failed")
+                reportError(json, "Couldn't export the notes")
+                return@core
+            }
+            val deliver = scope.deliver<String?> { err -> showStatus(if (err == null) "Exported · Notes PDF" else "Export failed: $err") }
+            Thread({
+                val err = dev.jraghavan.snmeeting.notes.canvas.PdfExport.write(p)
+                a.runOnUiThread { deliver(err) }
+            }, "notes-pdf").start()
         }
     }
 
@@ -791,7 +823,7 @@ class NotesPage(
         val ink = canvas.inkView
         bar.render(ToolBarModel.State(tool, prefs.collapsed, recording, ink.canUndo, ink.canRedo,
             host.timer(), host.cost(), host.playing(), host.canPlay(), prefs.focus,
-            lastShape = lastShape, style = ink.defaultStyle, open = panels.open,
+            lastShape = lastShape, style = ink.defaultStyle, open = panels.open, status = status,
             selection = selectionState()))
     }
 
@@ -913,6 +945,7 @@ class NotesPage(
         const val LAYER = "canvas"
         /** sn-canvas `TextElements.TEXT_WIDTH`, `NOTE_SIZE` (the core's too). */
         const val TEXT_WIDTH = 320.0
+        const val STATUS_MS = 4_000L
         const val NOTE_SIDE = 200.0
         const val CLEAR_TITLE = "Clear this canvas?"
         const val CLEAR_BODY = "Everything on this canvas is removed. Undo brings it back."

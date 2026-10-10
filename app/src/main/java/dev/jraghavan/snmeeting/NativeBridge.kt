@@ -194,6 +194,11 @@ object NativeBridge {
      *  followed: false}` for a link this build doesn't follow, or `{meetingId: null}`. */
     external fun nativeCanvasLinkTarget(id: String, ref: String): String
 
+    /** F21-FR14: the notes PDF's plan: `{path, tmpPath, imagesDir, pages: [{n, widthPt, heightPt,
+     *  viewport: [x, y, scale], content: [entries as nativeCanvasForDraw's]}]}`, one page per
+     *  canvas. The shell draws it off the UI thread, writes tmpPath, fsyncs and renames. */
+    external fun nativeCanvasPdfPlan(id: String): String
+
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
      *  atMs: null}`; none `{strokeId: null}`. */

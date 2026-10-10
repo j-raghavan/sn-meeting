@@ -50,6 +50,8 @@ object ToolBarModel {
         val style: ShapeStyle = ShapeStyle.DEFAULT,
         val open: Panel? = null,
         val selection: Selection? = null,
+        /** F21-FR14: a one-line status ("Exported · Notes PDF"), or null. */
+        val status: String? = null,
     )
 
     sealed interface Item {
@@ -69,6 +71,8 @@ object ToolBarModel {
         data class Action(val act: Act, val enabled: Boolean = true) : Item
         /** F17-FR14: "?" shows the hints again. */
         data object Help : Item
+        /** F21-FR14: the bar's status line. */
+        data class Status(val text: String) : Item
         /** Collapse (expanded) or expand (collapsed). */
         data class Handle(val collapsed: Boolean) : Item
         data class Timer(val text: String) : Item
@@ -119,6 +123,7 @@ object ToolBarModel {
             top += Item.More(s.open == Panel.MORE)
             top += Item.Help
         }
+        if (!s.collapsed) s.status?.let { top += Item.Status(it) }
         top += Item.Gap
         val bottom = if (s.recording) {
             listOfNotNull(Item.Timer(s.timer), s.cost?.takeIf { !s.collapsed }?.let { Item.Cost(it) }, Item.Mark(s.marked ?: MARK), Item.Stop)

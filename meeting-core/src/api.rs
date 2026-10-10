@@ -419,6 +419,11 @@ pub fn canvas_link_target(id: &str, r: &str) -> String {
     with_app(|app| app.canvas_link_target_json(id, r))
 }
 
+/// `nativeCanvasPdfPlan(id)` (F21-FR14): the notes PDF's path and pages.
+pub fn canvas_pdf_plan(id: &str) -> String {
+    with_app(|app| app.canvas_pdf_plan_json(id))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))

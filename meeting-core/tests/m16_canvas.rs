@@ -1024,3 +1024,41 @@ fn links_to_other_meetings() {
         json!({"kind": "note", "followed": false})
     );
 }
+
+/// F21-FR14: one page per canvas, in canvas order, fitted to its content; an empty canvas is
+/// A4; the PDF goes beside the sidecar.
+#[test]
+fn the_pdf_plan_has_a_page_per_canvas() {
+    let f = fixture();
+    edit(
+        &f,
+        json!({"op": "create", "type": "rectangle", "from": [100, 200], "to": [500, 400]}),
+    );
+    f.app.canvas_new_json(&f.id);
+    let p = parse(&f.app.canvas_pdf_plan_json(&f.id));
+    assert!(
+        p["path"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("{}.notes.pdf", f.id))
+    );
+    let tmp = p["tmpPath"].as_str().unwrap();
+    assert!(tmp.ends_with(".tmp") && tmp.contains(".notes.pdf."));
+    let pages = p["pages"].as_array().unwrap();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages[0]["n"], 1);
+    assert_eq!(pages[0]["content"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        (pages[1]["widthPt"].clone(), pages[1]["heightPt"].clone()),
+        (json!(595), json!(842))
+    );
+    assert!(pages[0]["widthPt"].as_u64().unwrap() > 300);
+    assert!(parse(&f.app.canvas_pdf_plan_json("../x"))["error"].is_string());
+    std::fs::write(
+        notes::canvas_dir(&f.dir, &f.id, 2).join(notes::CANVAS),
+        b"junk",
+    )
+    .unwrap();
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    assert!(parse(&f.app.canvas_pdf_plan_json(&f.id))["error"].is_string());
+}

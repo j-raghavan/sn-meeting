@@ -11,6 +11,7 @@ pub mod geom;
 pub mod hit;
 pub mod image;
 pub mod item;
+pub mod pdf;
 pub mod scene;
 pub mod style;
 pub mod table;

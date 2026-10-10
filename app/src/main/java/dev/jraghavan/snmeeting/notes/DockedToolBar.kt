@@ -265,6 +265,7 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
             isClickable = true
             setOnClickListener { host.onHelp() }
         }.control()
+        is Item.Status -> ui.eyebrow(stacked(i.text).uppercase(), ui.inkSoft).apply { textSize = 8f; letterSpacing = 0f }.control()
         Item.Gap -> View(a)
     }
 
