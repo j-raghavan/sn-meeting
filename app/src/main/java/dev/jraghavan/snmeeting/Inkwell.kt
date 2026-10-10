@@ -297,13 +297,34 @@ class Inkwell(private val activity: Activity) {
             if (lines > 1) { minLines = lines; isSingleLine = false } else isSingleLine = true
         }
 
-    /** Screen header: "← back" eyebrow on the left, small wordmark centred (meeting, settings, templates). */
+    /**
+     * The back control: a bold chevron and a mono word ("‹ HOME"), padded to a touch area of at
+     * least 48 × 48 dp (model.BackControl); it finishes the screen.
+     */
+    fun backControl(to: String, onBack: () -> Unit = { activity.finish() }): View = LinearLayout(activity).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        val min = dev.jraghavan.snmeeting.model.BackControl.touchPx(density)
+        minimumWidth = min; minimumHeight = min
+        setPadding(0, dp(6), dp(14), dp(6))
+        addView(TextView(activity).apply {
+            text = dev.jraghavan.snmeeting.model.BackControl.CHEVRON
+            textSize = dev.jraghavan.snmeeting.model.BackControl.CHEVRON_DP.toFloat()
+            typeface = serifBold; setTextColor(ink); includeFontPadding = false
+        })
+        addView(eyebrow(dev.jraghavan.snmeeting.model.BackControl.label(to)).apply { setPadding(dp(8), 0, 0, 0) })
+        contentDescription = "Back to $to"
+        isClickable = true
+        setOnClickListener { onBack() }
+    }
+
+    /** Screen header: the back control on the left, small wordmark centred (meeting, settings, templates). */
     fun header(back: String): View = LinearLayout(activity).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
-        addView(eyebrow("←  $back").apply {
-            isClickable = true; setOnClickListener { activity.finish() }
-            setPadding(0, dim(8), dim(8), dim(8))
+        addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(backControl(back))
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         addView(wordmark("Meetings", 18f))
         addView(View(activity), LinearLayout.LayoutParams(0, 1, 1f))

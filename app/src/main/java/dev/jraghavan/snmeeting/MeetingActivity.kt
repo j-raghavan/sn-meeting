@@ -179,10 +179,10 @@ class MeetingActivity : Activity() {
             addView(LinearLayout(this@MeetingActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                addView(ui.eyebrow("←").apply {
-                    isClickable = true; setOnClickListener { finish() }
-                    setPadding(0, ui.dim(8), ui.dim(18), ui.dim(8))
-                })
+                // Home: the meeting page finishes; a recording carries on (F17-FR12).
+                addView(ui.backControl("Home"))
+                addView(View(this@MeetingActivity).apply { setBackgroundColor(ui.ink) },
+                    LinearLayout.LayoutParams(maxOf(1, ui.dp(1)), ui.dp(28)).apply { marginEnd = ui.dim(16) })
                 addView(tabNotes)
                 addView(ui.eyebrow("|", ui.textMuted).apply { setPadding(ui.dim(12), 0, ui.dim(12), 0) })
                 addView(tabMinutes)
