@@ -18,7 +18,7 @@ fun framesToMs(frames: Long, rateHz: Int): Long = frames * SAMPLES_PER_FRAME * 1
 /** The frame boundary nearest [ms] at [rateHz]. */
 fun msToFrames(ms: Long, rateHz: Int): Long = (ms * rateHz + SAMPLES_PER_FRAME * 500L) / (SAMPLES_PER_FRAME * 1000L)
 
-/** One MP4 file being written (MediaMuxer on the device). */
+/** One MP4 file being written (the core's MP4 writer on the device, F15-FR1). */
 interface AacFile {
     /** [ptsUs] from the file's own start. */
     fun write(data: ByteArray, ptsUs: Long)

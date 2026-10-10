@@ -10,7 +10,6 @@ import android.media.AudioRouting
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.media.MediaMuxer
 import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Process
@@ -18,7 +17,6 @@ import android.os.SystemClock
 import android.util.Log
 import dev.jraghavan.snmeeting.NativeBridge
 import java.io.File
-import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.concurrent.ConcurrentLinkedQueue
 
@@ -39,33 +37,21 @@ private fun encoderFormat(spec: AudioSpec): MediaFormat =
         setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16 * 1024)
     }
 
-/** One MediaMuxer (MPEG-4) per file: a muxer can't be restarted once stopped (MediaMuxer.java:476-481). */
-class MuxerFiles(private val format: () -> MediaFormat?) : AacFiles {
-    override fun open(path: String): AacFile {
-        val fmt = checkNotNull(format()) { "no encoder format yet" }
-        val m = MediaMuxer(path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-        val track = try {
-            m.addTrack(fmt).also { m.start() }
-        } catch (e: Exception) {
-            m.release(); File(path).delete(); throw e
-        }
-        return object : AacFile {
-            private var n = 0
-            private val info = MediaCodec.BufferInfo()
-            override fun write(data: ByteArray, ptsUs: Long) {
-                info.set(0, data.size, ptsUs, MediaCodec.BUFFER_FLAG_KEY_FRAME)
-                m.writeSampleData(track, ByteBuffer.wrap(data), info)
-                n++
-            }
-            // stop() writes the MP4 index; with no sample it throws, so it is only called with one.
-            override fun close(): Boolean = try {
-                if (n > 0) m.stop()
-                n > 0
-            } finally {
-                m.release()
-            }
-        }
-    }
+/** The core's MP4 writer over JNI (F15-FR1; never MediaMuxer, which aborts on the Manta). */
+object NativeMp4 : Mp4Port {
+    override fun open(path: String, rateHz: Int, channels: Int, asc: ByteArray, journal: String) =
+        NativeBridge.nativeMp4Open(path, rateHz, channels, asc, journal)
+    override fun write(handle: Long, frame: ByteArray) = NativeBridge.nativeMp4Write(handle, frame)
+    override fun close(handle: Long) = NativeBridge.nativeMp4Close(handle)
+    override fun abandon(handle: Long) = NativeBridge.nativeMp4Abandon(handle)
+}
+
+/** The encoder's output format as the writer needs it: csd-0 is the AudioSpecificConfig. */
+private fun aacConfig(f: MediaFormat?): AacConfig? {
+    f ?: return null
+    val csd = f.getByteBuffer("csd-0") ?: return null
+    val asc = ByteArray(csd.remaining()).also { csd.duplicate().get(it) }
+    return AacConfig(f.getInteger(MediaFormat.KEY_SAMPLE_RATE), f.getInteger(MediaFormat.KEY_CHANNEL_COUNT), asc)
 }
 
 /**
@@ -143,7 +129,8 @@ class PcmRecorderAdapter(private val ctx: Context, private val handler: Handler)
         }
         val p = PcmPipeline(spec.sampleRateHz, maxDurationMs.toLong(), maxFileBytes, path,
             PcmPipeline.chunkDir(ctx.filesDir, path), CorePlanner(meetingId(path), NativeBridge::nativeChunkPlan),
-            MuxerFiles { format }, pipelineEvents(events), base,
+            CoreAacFiles({ aacConfig(format) }, NativeMp4) { p -> Mp4Journal.forSegment(ctx.filesDir, p) },
+            pipelineEvents(events), base,
             log = { what, t -> Log.w(TAG, "$what: ${t.javaClass.simpleName}") })
         record = ar; codec = c; pipeline = p
         LiveClock.current = p.clock

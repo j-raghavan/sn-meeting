@@ -331,6 +331,38 @@ pub fn delete_mark(id: &str, mark_id: &str) -> String {
     with_app(|app| app.delete_mark_json(id, mark_id))
 }
 
+/// F15-FR1 (D14 revised 2026-10-09): the near-live recorder's `.m4a` files, written by the
+/// core because `MediaMuxer.stop()` aborts the process on the Manta's firmware. Pure: no
+/// `nativeInit` needed; the capture thread calls these directly.
+pub fn mp4_open(path: &str, rate_hz: i32, channels: i32, asc: &[u8], journal: &str) -> String {
+    guarded(|| crate::mp4::open_json(path, rate_hz, channels, asc, journal))
+}
+
+/// One AAC access unit; "" when written.
+pub fn mp4_write(handle: i64, frame: &[u8]) -> String {
+    guarded(|| crate::mp4::write_json(handle, frame))
+}
+
+/// Finalise: `{frames, durationMs}`.
+pub fn mp4_close(handle: i64) -> String {
+    guarded(|| crate::mp4::close_json(handle))
+}
+
+/// Let a file go without its index (its journal stays for recovery).
+pub fn mp4_abandon(handle: i64) -> String {
+    guarded(|| crate::mp4::abandon_json(handle))
+}
+
+/// A chunk re-cut from a segment (F15-FR9/FR10): `{frames}`.
+pub fn mp4_cut(segment: &str, from_ms: i64, to_ms: i64, out: &str) -> String {
+    guarded(|| crate::mp4::cut_json(segment, from_ms, to_ms, out))
+}
+
+/// A segment repaired from its journal or rebuilt from its chunks (F15-FR8).
+pub fn mp4_rebuild(path: &str, journal: &str, pieces_json: &str) -> String {
+    guarded(|| crate::mp4::rebuild_json(path, journal, pieces_json))
+}
+
 /// `nativeChunkPlan(id, rmsJson)` (F15-FR4): where the chunk being written ends,
 /// `{cutAtMs|null, overlapMs, speechMs}`. Pure: it needs no `nativeInit`, so the recorder's
 /// capture thread can ask at any time.

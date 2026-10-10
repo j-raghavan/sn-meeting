@@ -731,3 +731,97 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeDeleteMar
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// F15-FR1: pure; the capture thread calls the MP4 writer directly.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Open<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    path: JString<'local>,
+    rate_hz: jint,
+    channels: jint,
+    asc: JByteArray<'local>,
+    journal: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let path: String = path.try_to_string(env)?;
+        let asc = env.convert_byte_array(&asc)?;
+        let journal: String = journal.try_to_string(env)?;
+        env.new_string(crate::api::mp4_open(
+            &path, rate_hz, channels, &asc, &journal,
+        ))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Write<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+    frame: JByteArray<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let frame = env.convert_byte_array(&frame)?;
+        env.new_string(crate::api::mp4_write(handle, &frame))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Close<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::mp4_close(handle))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Abandon<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    handle: jlong,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::mp4_abandon(handle))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Cut<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    segment: JString<'local>,
+    from_ms: jlong,
+    to_ms: jlong,
+    out: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let segment: String = segment.try_to_string(env)?;
+        let out: String = out.try_to_string(env)?;
+        env.new_string(crate::api::mp4_cut(&segment, from_ms, to_ms, &out))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeMp4Rebuild<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    path: JString<'local>,
+    journal: JString<'local>,
+    pieces_json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let path: String = path.try_to_string(env)?;
+        let journal: String = journal.try_to_string(env)?;
+        let pieces: String = pieces_json.try_to_string(env)?;
+        env.new_string(crate::api::mp4_rebuild(&path, &journal, &pieces))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

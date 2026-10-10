@@ -34,8 +34,8 @@ pub struct Measure {
     pub index: usize,
     pub path: String,
     /// F15-FR8: the segment's finalised chunk files, in order. If the segment file can't be
-    /// read (its muxer was killed before it wrote the index), the shell rebuilds it from these
-    /// by remuxing their AAC frames, then measures it. Omitted when there are none.
+    /// read (its writer was killed before it wrote the index), the shell has the core repair it
+    /// from its frame journal, else rebuild it from these (`mp4.rs`), then measures it. Omitted when there are none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub chunks: Vec<super::Piece>,
 }

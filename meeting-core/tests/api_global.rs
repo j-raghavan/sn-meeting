@@ -143,7 +143,7 @@ fn init_then_the_app_exports() {
 }
 
 /// Every Kotlin external but nativeVersion, nativeInit, nativeUpdateDecide (F14-FR5: a pure
-/// comparison) and nativeChunkPlan (F15-FR4: a pure plan) needs the app, so each must be in `app_exports` (checked before and after init
+/// comparison) nativeChunkPlan (F15-FR4: a pure plan) and the nativeMp4* writer calls (F15-FR1) needs the app, so each must be in `app_exports` (checked before and after init
 /// above).
 #[test]
 fn app_exports_cover_the_bridge() {
@@ -163,6 +163,7 @@ fn app_exports_cover_the_bridge() {
         })
         .filter(|n: &String| {
             !["version", "init", "updateDecide", "chunkPlan"].contains(&n.as_str())
+                && !n.starts_with("mp4") // F15-FR1: the MP4 writer is pure too
         })
         .collect();
     bridge.sort();

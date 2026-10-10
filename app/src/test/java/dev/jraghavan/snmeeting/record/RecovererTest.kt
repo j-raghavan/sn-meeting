@@ -62,6 +62,18 @@ class RecovererTest {
         assertEquals(listOf("m/0=64000", "m/1=0", "n/0=0"), closed)
     }
 
+    @Test fun aSegmentWithNoFinishedChunkIsStillRepairedFromItsJournal() { // F15-FR8
+        var tried = ""
+        Recoverer(
+            recover = { """{"recovered":["m"],"measure":[{"id":"m","index":0,"path":"/p/m-01.m4a"}],"flagged":[]}""" },
+            duration = { if (tried.isNotEmpty()) 35_000 else null },
+            close = { id, index, ms -> closed += "$id/$index=$ms" },
+            rebuild = { pieces, target -> tried = "$target:${pieces.size}"; true },
+        ).run(serviceAlive = false)
+        assertEquals("/p/m-01.m4a:0", tried)
+        assertEquals(listOf("m/0=35000"), closed)
+    }
+
     @Test fun anErrorClosesNothing() {
         assertNull(recoverer("""{"error":"nativeInit has not run"}""").run(serviceAlive = true))
         assertEquals(true, alive)

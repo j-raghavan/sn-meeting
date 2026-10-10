@@ -91,7 +91,7 @@ impl Default for Settings {
 
 /// F15 / ADR D14: the recorder behind `RecorderPort`. **Standard** (the default) is today's
 /// `MediaRecorder` path, transcribed after Stop. **Near-live** is D14's `AudioRecord` → AAC →
-/// two muxers pipeline, which writes ~30 s chunks and transcribes them while recording. It
+/// two MP4 writers pipeline (the core's, `mp4.rs`), which writes ~30 s chunks and transcribes them while recording. It
 /// stays opt-in until the owner's device spike accepts D14 (R13).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Recorder {

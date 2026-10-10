@@ -131,7 +131,7 @@ class MeetingActivity : Activity() {
         // read transcribing with no job; recovery (cheap, queued first) moves it on.
         val alive = RecordingService.running
         CoreJobs.exec {
-            deviceRecoverer().run(alive)?.let { StopJob.resume(it.resume) } // F15-AC8: catch up
+            deviceRecoverer(filesDir).run(alive)?.let { StopJob.resume(it.resume) } // F15-AC8: catch up
         }
         // Settings and templates may have changed in their screens or on the desktop. CoreJobs
         // answers in order, so both are in hand when the meeting arrives: one redraw.

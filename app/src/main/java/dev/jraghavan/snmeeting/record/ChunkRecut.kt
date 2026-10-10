@@ -1,134 +1,32 @@
 package dev.jraghavan.snmeeting.record
 
-import android.media.MediaCodec
-import android.media.MediaExtractor
-import android.media.MediaFormat
-import android.media.MediaMuxer
-import android.util.Log
 import dev.jraghavan.snmeeting.NativeBridge
-import dev.jraghavan.snmeeting.model.Recovery
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
-import java.nio.ByteBuffer
 
-// DEVICE-UNVERIFIED (ADR D14, R13): remuxing AAC frames between MP4 files with MediaExtractor
-// and MediaMuxer, never re-encoding. Checked by the device runbook (kill a near-live recording
-// mid-segment, relaunch, play the rebuilt segment). The choices it makes (which pieces, what
-// to skip) come from the core and are host-tested there.
+// F15-FR8 / FR9 (ADR D14, revised 2026-10-09): segments and chunk files are re-cut and rebuilt
+// by the core's MP4 writer (meeting-core/src/mp4.rs, host-tested and checked with ffprobe),
+// never MediaMuxer, whose stop() aborts the process on the Manta's firmware.
 
-/** F3-FR5 on the device: the core's recovery, files measured, near-live segments rebuilt (F15-FR8). */
-fun deviceRecoverer() = Recoverer(NativeBridge::nativeRecover, RetrieverDuration,
-    { id, i, ms -> NativeBridge.nativeCloseSegment(id, i, ms) }, ChunkRecut)
+/** F3-FR5 on the device: the core's recovery, files measured, near-live segments repaired (F15-FR8). */
+fun deviceRecoverer(filesDir: File) = Recoverer(NativeBridge::nativeRecover, RetrieverDuration,
+    { id, i, ms -> NativeBridge.nativeCloseSegment(id, i, ms) }, ChunkRecut.rebuilder(filesDir))
 
-/**
- * F15-FR8 / F15-FR9: chunk files and segment files remuxed into one another. [rebuild] writes a
- * segment its muxer never finalised from that segment's finished chunks, each without the
- * overlap it repeats, into a temporary file renamed over the unreadable one.
- */
-object ChunkRecut : RebuildPort {
-    private const val TAG = "Meetings"
-
-    override fun rebuild(pieces: List<Recovery.Piece>, target: String): Boolean {
-        val tmp = File("$target.rebuild")
-        var muxer: MediaMuxer? = null
-        var track = -1
-        var outUs = 0L
-        var written = 0
-        try {
-            for (p in pieces) {
-                val ex = MediaExtractor()
-                try {
-                    ex.setDataSource(p.path)
-                    val t = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
-                        ?: continue
-                    ex.selectTrack(t)
-                    val fmt = ex.getTrackFormat(t)
-                    val m = muxer ?: MediaMuxer(tmp.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4).also {
-                        track = it.addTrack(fmt); it.start(); muxer = it
-                    }
-                    val frameUs = SAMPLES_PER_FRAME * 1_000_000L / fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
-                    val skipUs = p.skipMs * 1000
-                    val buf = ByteBuffer.allocate(64 * 1024)
-                    val info = MediaCodec.BufferInfo()
-                    var last = -frameUs
-                    while (true) {
-                        val size = ex.readSampleData(buf, 0)
-                        if (size < 0) break
-                        val pts = ex.sampleTime - skipUs
-                        if (pts >= 0) {
-                            info.set(0, size, outUs + pts, MediaCodec.BUFFER_FLAG_KEY_FRAME)
-                            m.writeSampleData(track, buf, info)
-                            written++
-                            last = pts
-                        }
-                        ex.advance()
-                    }
-                    outUs += last + frameUs
-                } finally {
-                    ex.release()
-                }
-            }
-            val m = muxer ?: return false
-            muxer = null
-            if (written == 0) { m.release(); return false }
-            m.stop(); m.release()
-            return tmp.renameTo(File(target))
-        } catch (t: Throwable) {
-            Log.w(TAG, "rebuild: ${t.javaClass.simpleName}")
-            return false
-        } finally {
-            try { muxer?.release() } catch (_: Throwable) {}
-            if (tmp.exists()) tmp.delete()
-        }
-    }
+object ChunkRecut {
+    /** Whether a core reply is an error envelope. */
+    private fun ok(json: String) = try { !JSONObject(json).has("error") } catch (e: Exception) { false }
 
     /**
-     * F15-FR9 / FR10: chunk file [out] re-cut from segment [segPath]'s frames in
-     * [fromMs, toMs) (segment time), each moved to start at 0. True if it was written.
+     * F15-FR8: a segment its writer never finished, repaired from its frame journal when there
+     * is one, else rebuilt from its finished chunks, each without the overlap it repeats.
      */
-    fun cut(segPath: String, fromMs: Long, toMs: Long, out: String): Boolean {
-        val target = File(out)
-        target.parentFile?.mkdirs()
-        val tmp = File("$out.cut")
-        val ex = MediaExtractor()
-        var muxer: MediaMuxer? = null
-        try {
-            ex.setDataSource(segPath)
-            val t = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
-                ?: return false
-            ex.selectTrack(t)
-            val fromUs = fromMs * 1000
-            val toUs = toMs * 1000
-            ex.seekTo(fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC) // every AAC frame is a sync frame
-            val m = MediaMuxer(tmp.path, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            muxer = m
-            val track = m.addTrack(ex.getTrackFormat(t))
-            m.start()
-            val buf = ByteBuffer.allocate(64 * 1024)
-            val info = MediaCodec.BufferInfo()
-            var written = 0
-            while (true) {
-                val size = ex.readSampleData(buf, 0)
-                if (size < 0) break
-                val pts = ex.sampleTime
-                if (pts >= toUs) break
-                if (pts >= fromUs) {
-                    info.set(0, size, pts - fromUs, MediaCodec.BUFFER_FLAG_KEY_FRAME)
-                    m.writeSampleData(track, buf, info)
-                    written++
-                }
-                ex.advance()
-            }
-            muxer = null
-            if (written == 0) { m.release(); return false }
-            m.stop(); m.release()
-            return tmp.renameTo(target)
-        } catch (t: Throwable) {
-            Log.w(TAG, "cut: ${t.javaClass.simpleName}")
-            return false
-        } finally {
-            try { muxer?.release() } catch (_: Throwable) {}
-            ex.release()
-            if (tmp.exists()) tmp.delete()
-        }
+    fun rebuilder(filesDir: File) = RebuildPort { pieces, target ->
+        val list = JSONArray().apply { pieces.forEach { put(JSONObject().put("path", it.path).put("skipMs", it.skipMs)) } }
+        ok(NativeBridge.nativeMp4Rebuild(target, Mp4Journal.forSegment(filesDir, target) ?: "", list.toString()))
     }
+
+    /** F15-FR9 / FR10: chunk file [out] re-cut from segment [segPath]'s frames in [fromMs, toMs). */
+    fun cut(segPath: String, fromMs: Long, toMs: Long, out: String): Boolean = ok(NativeBridge.nativeMp4Cut(segPath, fromMs, toMs, out))
+
 }

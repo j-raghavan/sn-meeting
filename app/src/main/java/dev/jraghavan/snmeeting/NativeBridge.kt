@@ -117,6 +117,29 @@ object NativeBridge {
      *  quick; it needs no [nativeInit], so the recorder's capture thread calls it directly. */
     external fun nativeChunkPlan(id: String, rmsJson: String): String
 
+    // Near-live audio files (F15-FR1, D14 revised 2026-10-09). MediaMuxer.stop() aborts the
+    // process on the Manta's firmware, so the core writes the .m4a files. Pure: no nativeInit.
+
+    /** A new `.m4a` for AAC-LC frames: [asc] is the encoder's csd-0; [journal] ("" for none)
+     *  keeps each frame's size so a crashed file can be repaired. `{handle}` or `{error}`. */
+    external fun nativeMp4Open(path: String, rateHz: Int, channels: Int, asc: ByteArray, journal: String): String
+
+    /** One access unit, in order: "" when written, else `{error}`. */
+    external fun nativeMp4Write(handle: Long, frame: ByteArray): String
+
+    /** Writes the index and closes: `{frames, durationMs}`; a file with no frame is removed. */
+    external fun nativeMp4Close(handle: Long): String
+
+    /** Lets a failed file go without its index; its journal stays for recovery. `{ok}`. */
+    external fun nativeMp4Abandon(handle: Long): String
+
+    /** F15-FR9/FR10: chunk [out] re-cut from [segment]'s frames in [fromMs, toMs): `{frames}`. */
+    external fun nativeMp4Cut(segment: String, fromMs: Long, toMs: Long, out: String): String
+
+    /** F15-FR8: segment [path] repaired from [journal], else rebuilt from its chunks
+     *  (`[{path, skipMs}]`): `{frames, from}` or `{error}`. */
+    external fun nativeMp4Rebuild(path: String, journal: String, piecesJson: String): String
+
     /** F15-FR5: chunk [index]'s file is finalised at [path] (`<filesDir>/chunks/<id>/c-NNNN.m4a`);
      *  [speechMs] is from [nativeChunkPlan], -1 when unknown. While recording it is recorded
      *  `pending`; afterwards only a known chunk's re-cut file. `{index, state, added}`. */
