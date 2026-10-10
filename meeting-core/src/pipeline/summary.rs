@@ -42,7 +42,13 @@ pub async fn summarise(
     .map_err(JobError::NotStarted)?;
     // F19-FR6/FR7: the note regions to recognise in the same call, when there are any: all
     // of them the first time, then only those written on since.
-    let prepared = plan.notes.get(&dir, &sc).and_then(|n| {
+    let input = plan.notes.get(&dir, &sc);
+    // F21-FR15: the typed text goes as one text block in the same call; images inserted on the
+    // canvas never go (INV20, OQ35).
+    let typed = input
+        .as_ref()
+        .and_then(|n| crate::canvas::text::block(&n.typed));
+    let prepared = input.filter(|n| !n.regions.is_empty()).and_then(|n| {
         let stored = crate::notes_text::read(&crate::notes_text::path(&dir, id));
         let before = sc.extra.contains_key("notesRecognisedAt");
         notes::prepare(n, stored.unwrap_or_default(), before)
@@ -70,6 +76,10 @@ pub async fn summarise(
     // F15-FR11 / F17-FR9: the user's marks go with the transcript, as data.
     let user = match crate::marks::summary_block(&sc) {
         Some(m) => format!("{user}\n\n{m}"),
+        None => user,
+    };
+    let user = match &typed {
+        Some(b) => format!("{user}\n\n{b}"),
         None => user,
     };
     // F20-FR1: the existing tags go first, as data, so the call reuses their names.

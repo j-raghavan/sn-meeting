@@ -158,6 +158,9 @@ pub struct Hit {
     pub stroke_ids: Vec<u32>,
     /// "(notes changed since recognised)" (F19-FR7).
     pub changed: bool,
+    /// F21-FR15: the canvas a Notes hit is on, when not the first (it opens that canvas).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canvas: Option<u32>,
 }
 
 /// A meeting's or an event's hits.
@@ -365,10 +368,12 @@ fn details(ix: &Index, fts: &str, rows: &[i64]) -> rusqlite::Result<HashMap<i64,
         let at_ms = at.and_then(|t| u64::try_from(t).ok());
         let bbox: Option<String> = r.get(5)?;
         let strokes: String = r.get(6)?;
+        let unit_id: String = r.get(2)?;
         let hit = Hit {
             kind,
             label: kind.label(),
-            unit_id: r.get(2)?,
+            canvas: crate::search::units::canvas_of(kind, &unit_id),
+            unit_id,
             at_ms,
             time: at_ms.map(crate::pipeline::marker),
             snippet: spans(&r.get::<_, String>(8)?),

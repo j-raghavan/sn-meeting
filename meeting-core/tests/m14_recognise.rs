@@ -42,6 +42,7 @@ pub fn input(n: usize) -> NotesInput {
             .map(|i| RegionImage {
                 rect: [i as f64 * 100.0, 0.0, i as f64 * 100.0 + 100.0, 100.0],
                 png: png(i as u8),
+                canvas: 1,
             })
             .collect(),
         strokes: vec![
@@ -50,26 +51,31 @@ pub fn input(n: usize) -> NotesInput {
                 bbox: [112.0, 20.0, 130.0, 24.0],
                 at_ms: Some(761_000),
                 new: false,
+                canvas: 1,
             },
             StrokeBox {
                 id: 5,
                 bbox: [135.0, 21.0, 158.0, 25.0],
                 at_ms: Some(763_000),
                 new: false,
+                canvas: 1,
             },
             StrokeBox {
                 id: 6,
                 bbox: [150.0, 22.0, 155.0, 24.0],
                 at_ms: None,
                 new: false,
+                canvas: 1,
             },
             StrokeBox {
                 id: 9,
                 bbox: [10.0, 80.0, 20.0, 90.0],
                 at_ms: Some(1),
                 new: false,
+                canvas: 1,
             },
         ],
+        typed: Vec::new(),
     }
 }
 
@@ -344,6 +350,7 @@ fn summarise_again_sends_only_the_regions_written_on_since() {
         bbox: [140.0, 60.0, 150.0, 70.0],
         at_ms: None,
         new: true,
+        canvas: 1,
     });
     fx.rt.block_on(fx.s.reset());
     fx.mount(
@@ -422,6 +429,7 @@ fn recognised_text_never_changes_ink() {
         bbox: [140.0, 60.0, 150.0, 70.0],
         at_ms: None,
         new: true,
+        canvas: 1,
     });
     assert_eq!(fx.run()["meeting"]["status"], "done");
     fx.app.rebuild_index_json();

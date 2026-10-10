@@ -40,15 +40,20 @@ pub(crate) fn prepare(
             keep: Vec::new(),
         });
     }
-    let rects: Vec<notes_text::Rect> = input.regions.iter().map(|r| r.rect).collect();
+    let rects: Vec<(u32, notes_text::Rect)> =
+        input.regions.iter().map(|r| (r.canvas, r.rect)).collect();
     let changed = notes_text::with_new_strokes(&rects, &input.strokes);
     if changed.is_empty() {
         return None;
     }
-    let send_rects: Vec<notes_text::Rect> = changed.iter().map(|&i| rects[i]).collect();
+    let send_rects: Vec<(u32, notes_text::Rect)> = changed.iter().map(|&i| rects[i]).collect();
     let keep: Vec<Region> = stored
         .into_iter()
-        .filter(|r| !send_rects.iter().any(|s| notes_text::overlaps(r.rect, *s)))
+        .filter(|r| {
+            !send_rects
+                .iter()
+                .any(|(c, s)| *c == r.canvas && notes_text::overlaps(r.rect, *s))
+        })
         .collect();
     let next = keep.iter().map(|r| r.region + 1).max().unwrap_or(0);
     let numbers = (0..changed.len())
@@ -59,6 +64,7 @@ pub(crate) fn prepare(
         send: NotesInput {
             regions,
             strokes: input.strokes,
+            typed: input.typed,
         },
         numbers,
         keep,
@@ -122,7 +128,8 @@ fn mapped(input: &NotesInput, from: usize, to: usize, reads: &[Read]) -> Vec<Reg
                 .filter(|(r, _)| *r == n)
                 .flat_map(|(_, l)| l.iter().cloned())
                 .collect();
-            notes_text::map_region(n, input.regions[i].rect, &lines, &input.strokes)
+            let r = &input.regions[i];
+            notes_text::map_region(n, r.canvas, r.rect, &lines, &input.strokes)
         })
         .collect()
 }

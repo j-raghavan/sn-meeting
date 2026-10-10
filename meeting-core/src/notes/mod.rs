@@ -365,14 +365,32 @@ pub fn recognised_at_ms(sc: &Sidecar) -> Option<u64> {
     u64::try_from(d.timestamp_millis()).ok()
 }
 
-/// F17-FR9: what the Stop call sends of a meeting's canvas: its regions as PNGs and its
-/// strokes' boxes; `None` without notes, or with an empty or unreadable canvas.
+/// F17-FR9 / F21-FR15: what the Stop call sends of a meeting's canvases: the regions of every
+/// canvas's strokes as PNGs (shapes, text and images are never drawn into them), the strokes'
+/// boxes, and the typed text in reading order (canvas, then top to bottom). `None` without
+/// notes; a canvas that can't be read is left out.
 pub fn canvas_input(dir: &Path, sc: &Sidecar) -> Option<crate::notes_text::NotesInput> {
-    if !has_notes(sc) {
+    if !has_notes(sc) && !folder(dir, &sc.id).is_dir() {
         return None;
     }
-    let layer = load(dir, &sc.id, Layer::Canvas).ok()?;
-    (!layer.is_empty()).then(|| regions::input(&layer, recognised_at_ms(sc)))
+    let at = recognised_at_ms(sc);
+    let mut out = crate::notes_text::NotesInput::default();
+    for (n, _) in read_canvases(dir, &sc.id).list {
+        let Ok((scene, _)) = load_scene(dir, &sc.id, n) else {
+            continue;
+        };
+        if !scene.ink().is_empty() {
+            let one = regions::input_on(scene.ink(), at, n);
+            out.regions.extend(one.regions);
+            out.strokes.extend(one.strokes);
+        }
+        out.typed.extend(
+            crate::canvas::text::typed(&scene, n)
+                .into_iter()
+                .map(|t| t.text),
+        );
+    }
+    (!out.regions.is_empty() || !out.typed.is_empty()).then_some(out)
 }
 
 /// Whether the meeting has notes (its sidecar names the folder).

@@ -151,7 +151,8 @@ class NotesPage(
             edit("""{"op":"create","type":"${tool.name.lowercase()}","from":[$x0,$y0],"to":[$x1,$y1]${recMs()}}""")
 
         override fun handleDragged(ref: String, h: Handles.Handle, x: Float, y: Float) = edit(handleOp(ref, h, x, y), keepSelection = true)
-        override fun listen(x: Float, y: Float, radiusWorld: Float) = scope.core({ NativeBridge.nativeInkHit(id, LAYER, x, y, radiusWorld) }) { json ->
+        // F21-FR15: Listen on a timed stroke or item (an untimed one does nothing).
+        override fun listen(x: Float, y: Float, radiusWorld: Float) = scope.core({ NativeBridge.nativeCanvasHit(id, x, y, radiusWorld) }) { json ->
             val hit = CoreJson.obj(json, ListenHit::from).getOrNull() ?: return@core
             val seek = hit.seekMs ?: return@core // an untimed stroke, or no stroke: nothing happens
             hit.lineN?.let { n -> showStrip(strip.state.copy(highlight = n)) }

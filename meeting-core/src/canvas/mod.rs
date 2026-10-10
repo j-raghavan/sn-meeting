@@ -15,6 +15,7 @@ pub mod pdf;
 pub mod scene;
 pub mod style;
 pub mod table;
+pub mod text;
 
 pub use item::{Item, Ref};
 pub use scene::{Doc, LoadReport, Scene};

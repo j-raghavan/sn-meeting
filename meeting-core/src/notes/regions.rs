@@ -174,21 +174,38 @@ pub fn rect_of(b: BBox) -> Rect {
 /// Every region rendered (F17-FR9), and every stroke's box and time for mapping lines back
 /// (F19-FR6); a stroke written after `recognised_at_ms` (epoch) is `new` (F19-FR7).
 pub fn input(layer: &InkLayer, recognised_at_ms: Option<u64>) -> crate::notes_text::NotesInput {
+    input_on(layer, recognised_at_ms, 1)
+}
+
+/// [`input`] for canvas `canvas` (F21-FR15: regions are cut from strokes only, on every canvas,
+/// with the region's canvas recorded).
+pub fn input_on(
+    layer: &InkLayer,
+    recognised_at_ms: Option<u64>,
+    canvas: u32,
+) -> crate::notes_text::NotesInput {
     let regions = cut(layer)
         .into_iter()
         .map(|c| RegionImage {
             rect: rect_of(c.rect),
             png: render(layer, c),
+            canvas,
         })
         .collect();
     crate::notes_text::NotesInput {
         regions,
-        strokes: boxes(layer, recognised_at_ms),
+        strokes: boxes_on(layer, recognised_at_ms, canvas),
+        typed: Vec::new(),
     }
 }
 
 /// The strokes as F19's boxes: world bounds, recording time, and whether written since.
 pub fn boxes(layer: &InkLayer, recognised_at_ms: Option<u64>) -> Vec<StrokeBox> {
+    boxes_on(layer, recognised_at_ms, 1)
+}
+
+/// [`boxes`] of canvas `canvas`.
+pub fn boxes_on(layer: &InkLayer, recognised_at_ms: Option<u64>, canvas: u32) -> Vec<StrokeBox> {
     layer
         .strokes()
         .iter()
@@ -197,6 +214,7 @@ pub fn boxes(layer: &InkLayer, recognised_at_ms: Option<u64>) -> Vec<StrokeBox> 
             bbox: rect_of(s.bounds()),
             at_ms: s.rec_ms,
             new: recognised_at_ms.is_none_or(|t| s.created_at_ms > t),
+            canvas,
         })
         .collect()
 }
