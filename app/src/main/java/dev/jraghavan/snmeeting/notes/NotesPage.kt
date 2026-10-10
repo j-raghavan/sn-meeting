@@ -249,7 +249,10 @@ class NotesPage(
         }
     }
 
-    init { layout() }
+    init {
+        canvas.inkHoles = { listOf(zoomPill) } // F17-FR4: the pen never inks over the pill
+        layout()
+    }
 
     /** Bar and column in dock order, the bar at its expanded or collapsed width: one redraw. */
     private fun layout() {

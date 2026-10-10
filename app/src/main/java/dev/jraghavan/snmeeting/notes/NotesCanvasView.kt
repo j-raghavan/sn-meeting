@@ -11,6 +11,7 @@ import android.os.SystemClock
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import android.view.ViewTreeObserver
 import kotlin.math.hypot
 
 /**
@@ -88,7 +89,7 @@ class NotesCanvasView(
     private var minimapUntil = 0L
     /** F17-FR13: opened from the pill; stays until closed or the pen touches the canvas. */
     var minimapOpen = false
-        set(v) { field = v; invalidate() }
+        set(v) { field = v; invalidate(); updateInkAreas() }
     /** A finger on the minimap: the frame held for the gesture, where it began, and whether it
      *  grabbed the view rectangle (a drag) or not (a jump to the finger). */
     private var mapFrame: MinimapFrame? = null
@@ -98,6 +99,45 @@ class NotesCanvasView(
 
     private val firmware = SupernoteInk(context)
     private var firmwareOn = false
+
+    /** F17-FR4: the controls drawn over the canvas (the zoom pill) where the pen must not ink. */
+    var inkHoles: () -> List<View> = { emptyList() }
+
+    /** Any layout on the page (bar collapse, dock side, the strip opening, Focus) may move the
+     *  canvas: the disabled areas follow, sent only when they change. */
+    private val layoutWatch = ViewTreeObserver.OnGlobalLayoutListener { updateInkAreas() }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (!fixed) viewTreeObserver.addOnGlobalLayoutListener(layoutWatch)
+    }
+
+    private fun screenRect(v: View): PxRect {
+        val p = IntArray(2).also { v.getLocationOnScreen(it) }
+        return PxRect(p[0], p[1], p[0] + v.width, p[1] + v.height)
+    }
+
+    /**
+     * F17-FR4: tell the firmware pen where not to ink: everything outside this canvas on the
+     * screen, the zoom pill and the open minimap. Screen pixels (getLocationOnScreen); the
+     * window offset is logged beside them so the device log shows whether the two differ.
+     */
+    fun updateInkAreas() {
+        if (fixed || !isAttachedToWindow || width == 0 || height == 0) return
+        val c = screenRect(this)
+        val root = rootView
+        val r = screenRect(root)
+        val dm = resources.displayMetrics
+        val screen = PxRect(0, 0, maxOf(r.right, dm.widthPixels), maxOf(r.bottom, dm.heightPixels))
+        val holes = inkHoles().filter { it.isShown && it.width > 0 }.map(::screenRect).toMutableList()
+        if (minimapOpen) mapFrameNow()?.let { f ->
+            holes += PxRect(c.left + f.left.toInt(), c.top + f.top.toInt(),
+                c.left + (f.left + f.width).toInt() + 1, c.top + (f.top + f.height).toInt() + 1)
+        }
+        val w = IntArray(2).also { getLocationInWindow(it) }
+        firmware.setDisabledAreas(InkAreas.disabled(screen, c, holes),
+            "(screen px; canvas window=${w[0]},${w[1]} screen=${c.left},${c.top} size=${width}x$height)")
+    }
 
     private val inkPaint = Paint().apply {
         style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; isAntiAlias = true
@@ -191,6 +231,7 @@ class NotesCanvasView(
     /** inkread's applyToolInkState: claim the pen on every resume and focus gain (the firmware
      *  drops the claim when another window takes focus), writable for the Pen. Clears nothing. */
     fun claimPen(reason: String) {
+        updateInkAreas()
         firmwareOn = firmware.setup(reason)
         firmware.systemGestures(false)
         firmware.setWritable(InkBake.overlayFor(host.tool))
@@ -486,6 +527,7 @@ class NotesCanvasView(
 
     override fun onDetachedFromWindow() {
         removeCallbacks(hideMinimap)
+        viewTreeObserver.removeOnGlobalLayoutListener(layoutWatch)
         super.onDetachedFromWindow()
     }
 

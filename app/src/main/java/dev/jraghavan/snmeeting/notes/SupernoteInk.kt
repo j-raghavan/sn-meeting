@@ -18,6 +18,10 @@ import android.util.Log
 class SupernoteInk(private val context: Context) {
     private var cached: IBinder? = null
     private var active = false
+    /** Whether the pen inks at all now (the Pen tool); the disabled areas apply only then. */
+    private var writable = false
+    /** F17-FR4: where the pen must never ink (screen px): every control, not the canvas. */
+    private var areas: List<PxRect> = emptyList()
 
     private fun binder(): IBinder? {
         cached?.let { if (it.isBinderAlive) return it }
@@ -60,9 +64,10 @@ class SupernoteInk(private val context: Context) {
     }
 
     /**
-     * Claim the pen for this window, inking everywhere; safe to repeat on every resume and
-     * focus gain ([reason] is logged). inkread `SupernoteInk.setup`, call for call: app info,
-     * enableFullUiAuto(true), no disabled areas, the needle pen.
+     * Claim the pen for this window; safe to repeat on every resume and focus gain ([reason] is
+     * logged). inkread `SupernoteInk.setup`, call for call (app info, enableFullUiAuto(true),
+     * disabled areas, the needle pen), except that the disabled areas are the last ones
+     * [setDisabledAreas] was given rather than none.
      */
     fun setup(reason: String = ""): Boolean {
         val b = binder()
@@ -72,9 +77,10 @@ class SupernoteInk(private val context: Context) {
         }
         send(TX_WRITE_APP_INFO) { it.writeInt(0); it.writeInt(0) }
         val fullAuto = eink("enableFullUiAuto", true)
-        send(TX_DISABLE_AREA) { it.writeInt(0) }
+        sendAreas()
         send(TX_PEN) { it.writeInt(PEN_NEEDLE); it.writeInt(SIZE_EMR); it.writeInt(COLOR_BLACK) }
         active = true
+        writable = true
         Log.i(TAG, "SupernoteInk: setup ok ($reason): binder=${b.javaClass.simpleName} alive=${b.isBinderAlive}, fullAuto=$fullAuto")
         return true
     }
@@ -84,12 +90,37 @@ class SupernoteInk(private val context: Context) {
         if (active) send(TX_DRAW_BUFFER) { it.writeInt(255); it.writeInt(0) }
     }
 
-    /** Firmware ink on or off over the whole window (off for Eraser, Lasso and Listen). */
+    /** Firmware ink on (except over [areas]) or off over the whole window (off for Eraser,
+     *  Lasso and Listen). */
     fun setWritable(enable: Boolean) {
         if (!active) return
         Log.i(TAG, "SupernoteInk: writable=$enable")
+        writable = enable
         val edge = if (enable) WRITABLE_ON_EDGE else WRITABLE_OFF_EDGE
         send(TX_DISABLE_AREA) { it.writeInt(1); it.writeInt(0); it.writeInt(0); it.writeInt(edge); it.writeInt(edge); it.writeInt(0) }
+        if (enable) sendAreas()
+    }
+
+    /**
+     * F17-FR4 (DEVICE-UNVERIFIED): the screen-pixel rectangles where the pen must not ink, the
+     * tool bar, the top bar, the strip and the controls over the canvas ([InkAreas]). Sent now
+     * while the pen inks, and again on every [setup] and [setWritable] (true). [where] is
+     * logged with them, e.g. the window offset, so the space can be checked on the device.
+     */
+    fun setDisabledAreas(rects: List<PxRect>, where: String = "") {
+        if (rects == areas) return
+        areas = rects
+        Log.i(TAG, "SupernoteInk: disabled areas ${InkAreas.describe(rects)} $where")
+        if (active && writable) sendAreas()
+    }
+
+    /** TX_DISABLE_AREA with each rect as 5 ints `[left, top, width, height, 0]`. */
+    private fun sendAreas() {
+        val rs = areas
+        send(TX_DISABLE_AREA) { p ->
+            p.writeInt(rs.size)
+            rs.forEach { r -> r.ltwh().forEach(p::writeInt); p.writeInt(0) }
+        }
     }
 
     /** Release the pen when the page goes, ink off (inkread #157: else it inks other apps). */
@@ -99,6 +130,7 @@ class SupernoteInk(private val context: Context) {
         setWritable(false)
         eink("enableFullUiAuto", false)
         active = false
+        writable = false
     }
 
     /** A full-panel refresh, only when the user asks (the bar's refresh option, F17-FR11). */
