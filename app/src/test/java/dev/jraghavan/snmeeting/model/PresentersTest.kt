@@ -109,6 +109,15 @@ class PresentersTest {
             run(Status.TRANSCRIBING, 90_000).note)
     }
 
+    @Test fun aMeetingWhoseAudioWasLostOffersNoTranscribe() { // F15-FR8 (device finding 2026-10-09)
+        val lost = sc(Status.RECORDED).copy(error = Actions.AUDIO_LOST)
+        val a = Actions.of(lost, false, found, found)
+        assertEquals(null, a.primary)
+        assertEquals("Audio couldn't be recovered.", a.note)
+        assertTrue(a.canDelete)
+        assertEquals(Actions.Job.TRANSCRIBE, Actions.of(sc(Status.RECORDED), false, found, found).primary)
+    }
+
     @Test fun theActionFollowsTheStatus() { // F7-FR2
         fun job(st: Status, f: FailedAt? = null) = Actions.of(sc(st, f), false, found, found).primary
         assertEquals(Actions.Job.TRANSCRIBE, job(Status.RECORDED))

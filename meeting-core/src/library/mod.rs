@@ -20,7 +20,7 @@ pub use chunks::{
 pub use edit::TodoRef;
 pub(crate) use list::stamp_of;
 pub use list::{MeetingSummary, MeetingView, Source};
-pub use recover::{Flagged, Measure, Recovery};
+pub use recover::{AUDIO_LOST, Flagged, Measure, Recovery};
 
 const MAX_MIC_NAME: usize = 200;
 const MAX_CODEC: usize = 32;
@@ -297,6 +297,7 @@ impl Library<'_> {
         crate::chunk::fill_segments(&mut sc); // F15-FR6
         if sc.status != Status::Recording {
             measured(&mut sc, index);
+            recover::mark_lost(&mut sc); // F15-FR8: the last readable segment is gone
         }
         sidecar::write(&dir, &sc)?;
         Ok(())

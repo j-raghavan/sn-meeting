@@ -49,6 +49,23 @@ pub struct Flagged {
 }
 
 pub(crate) const INTERRUPTED: &str = "Transcription was interrupted";
+/// F15-FR8: every segment file of a recorded meeting is missing, empty or unreadable, and no
+/// chunk holds text: there is nothing to transcribe, so the meeting says so (and the shell
+/// offers no Transcribe) instead of reading as a silent 0:00 recording.
+pub const AUDIO_LOST: &str = "Audio couldn't be recovered";
+
+/// Set [`AUDIO_LOST`] on a recorded meeting that has no audio left; `true` when it changed.
+pub(crate) fn mark_lost(sc: &mut Sidecar) -> bool {
+    let lost = sc.status == Status::Recorded
+        && !sc.segments.is_empty()
+        && sc.segments.iter().all(|s| s.flag.is_some())
+        && sc.chunks.iter().all(|c| c.text.is_none());
+    if !lost || sc.error.as_deref() == Some(AUDIO_LOST) {
+        return false;
+    }
+    sc.error = Some(AUDIO_LOST.into());
+    true
+}
 
 impl Library<'_> {
     /// F3-FR5. `recording` with no live recording becomes `recorded`; `transcribing` with no
@@ -111,7 +128,8 @@ impl Library<'_> {
                 super::extend_duration(&mut sc);
             }
             let longer = sc.duration_ms != before;
-            let changed = moved || canonical || empty || longer || !flagged.is_empty();
+            let lost = mark_lost(&mut sc);
+            let changed = moved || canonical || empty || longer || lost || !flagged.is_empty();
             if changed && sidecar::write(&f.dir, &sc).is_err() {
                 continue; // not recovered after all; the next launch tries again
             }

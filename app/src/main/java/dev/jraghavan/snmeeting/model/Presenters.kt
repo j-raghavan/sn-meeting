@@ -147,6 +147,9 @@ data class Actions(
             return "Transcribing $n/$total"
         }
 
+        /** F15-FR8: the core's error on a recorded meeting with no audio left (recovery). */
+        const val AUDIO_LOST = "Audio couldn't be recovered"
+
         /** Shown under a job that has run [SLOW_MS]: a reasoning model can take a while. */
         const val SLOW = "Reasoning models can take a minute or two."
         const val SLOW_MS = 20_000L
@@ -181,6 +184,8 @@ data class Actions(
                 // No job here (a screen restored after the process died): resume it (INV8).
                 m.status == Status.TRANSCRIBING -> offer(Job.TRANSCRIBE, transcribeKey, "Transcription was interrupted.")
                 jobRunning -> Actions(null, false, withElapsed("Summarising…", elapsedMs), true, note(elapsedMs, summarising = true), false)
+                // F15-FR8: nothing to transcribe; say so, and leave Delete.
+                m.status == Status.RECORDED && m.error == AUDIO_LOST -> Actions(null, false, null, false, "$AUDIO_LOST.", true)
                 m.status == Status.RECORDED || (m.status == Status.FAILED && m.failedAt != FailedAt.SUMMARISING) ->
                     offer(Job.TRANSCRIBE, transcribeKey, "Not transcribed yet.")
                 m.status == Status.TRANSCRIBED || m.status == Status.DONE -> {
