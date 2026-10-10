@@ -60,6 +60,8 @@ class NotesPage(
 
     var tool: NoteTool = NoteTool.PEN
         private set
+    /** F17-FR11 / R14: the strip's and the timer's redraws wait while the pen writes. */
+    val quiet = PenQuiet()
     /** The lasso selection's stroke ids (`[id, …]`), while there is one. */
     private var selected = "[]"
 
@@ -67,6 +69,7 @@ class NotesPage(
         override val tool get() = this@NotesPage.tool
         override val recording get() = host.recordingSince() != null
         override val penWidthPx get() = PEN_WIDTH_PX
+        override fun pen(down: Boolean) = if (down) quiet.down() else quiet.up()
 
         override fun strokeTimes(): StrokeTimes {
             val since = host.recordingSince() ?: return StrokeTimes.UNTIMED
@@ -152,7 +155,7 @@ class NotesPage(
         set(v) { field = v; showStrip(strip.state) }
 
     /** New lines or a new status from the core (about twice a minute): the strip redraws only if they change it. */
-    fun showLive(t: dev.jraghavan.snmeeting.model.LiveTranscript) = showStrip(strip.state.copy(transcript = t))
+    fun showLive(t: dev.jraghavan.snmeeting.model.LiveTranscript) = quiet.redraw("strip") { showStrip(strip.state.copy(transcript = t)) }
 
     /** Draw [next]; opened, the strip takes the lower half of the column, its ink above still shown. */
     fun showStrip(next: StripModel) {

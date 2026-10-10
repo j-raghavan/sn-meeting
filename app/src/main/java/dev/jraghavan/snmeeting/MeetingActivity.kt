@@ -265,8 +265,12 @@ class MeetingActivity : Activity() {
         } else {
             view?.let { v -> MeetingHeader.of(v.meeting, v.cost).let { h -> listOf(h.stamp, h.length).filter { it.isNotEmpty() }.joinToString("  ·  ") } }.orEmpty()
         }
-        if (topTimer.text.toString() != text) topTimer.text = text
-        notes?.bar?.showTimer(clockText()) // the bar's timer: its own view only (F17-FR11)
+        val bar = clockText()
+        val draw: () -> Unit = {
+            if (topTimer.text.toString() != text) topTimer.text = text
+            notes?.bar?.showTimer(bar) // the bar's timer: its own view only (F17-FR11)
+        }
+        notes?.quiet?.redraw("timer", draw) ?: draw()
     }
 
     /** The recording's time, or the playback position when not recording. */

@@ -35,6 +35,8 @@ class NotesCanvasView(
 ) : View(context) {
 
     interface Host {
+        /** The pen landed or lifted (F17-FR11: other redraws wait for the lift). */
+        fun pen(down: Boolean) {}
         val tool: NoteTool
         val recording: Boolean
         /** The times for a stroke starting now (F17-FR4). */
@@ -233,6 +235,7 @@ class NotesCanvasView(
         downX = c.x; downY = c.y; lastX = c.x; lastY = c.y; moved = false
         path.clear()
         if (c.isPen) {
+            host.pen(true)
             lastPenAt = SystemClock.uptimeMillis()
             removeCallbacks(settle)
             penTool = NoteTool.forPen(host.tool, c.isEraser)
@@ -273,6 +276,7 @@ class NotesCanvasView(
     }
 
     private fun end(x: Float, y: Float, at: Long) {
+        val was = gesture
         val wx = { vx: Float -> viewport.worldX(vx.toDouble()).toFloat() }
         val wy = { vy: Float -> viewport.worldY(vy.toDouble()).toFloat() }
         when (gesture) {
@@ -309,11 +313,14 @@ class NotesCanvasView(
             Gesture.NONE -> Unit
         }
         buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
-        invalidate()
+        host.pen(false)
+        // A pen stroke the firmware inked is not repainted now: that waits for the pen to rest.
+        if (!firmwareOn || was != Gesture.DRAW) invalidate()
     }
 
     private fun abandon() {
         buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
+        host.pen(false)
         invalidate()
     }
 
