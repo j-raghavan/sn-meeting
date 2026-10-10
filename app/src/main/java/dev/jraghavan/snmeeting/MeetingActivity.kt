@@ -78,8 +78,6 @@ class MeetingActivity : Activity() {
     // views change, and only when a reply differs (new lines, a new status, the cost).
     private var live: LiveTranscript? = null
     private var liveJson: String? = null
-    /** F16-FR5: "≈ $0.08 so far" above Mark, redrawn only when a chunk's cost changes it. */
-    private var liveCost: TextView? = null
     private var unLive: (() -> Unit)? = null
     private var unHub: (() -> Unit)? = null
     private val livePoll = object : Runnable {
@@ -212,12 +210,13 @@ class MeetingActivity : Activity() {
                 override fun playing() = playback?.playing == true
                 override fun canPlay() = playback?.canPlay == true && recordingHere() == null
                 override fun togglePlay() { playback?.toggle() }
-                override fun mark() { this@MeetingActivity.mark(null) }
+                override fun mark() { this@MeetingActivity.mark() }
                 override fun stop() { if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity) }
             }).also {
                 notesHost.addView(it.view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
                 it.liveAvailable = view?.meeting?.nearLive == true
                 live?.let(it::showLive)
+                it.setMarks(view?.meeting?.marks.orEmpty().map { m -> m.atMs })
                 it.open()
             }
         }
@@ -311,6 +310,7 @@ class MeetingActivity : Activity() {
                     if (recordingLive(r.value)) handler.post(livePoll)
                     else if (r.value.meeting.nearLive) fetchLive() // a past meeting's lines, for the strip
                     notes?.liveAvailable = r.value.meeting.nearLive
+                    notes?.setMarks(r.value.meeting.marks.map { it.atMs })
                 }
                 is CoreResult.Err -> showGone(r.message)
             }
@@ -556,10 +556,6 @@ class MeetingActivity : Activity() {
                 addView(ui.spacer(ui.dim(14)))
                 addView(cards.todos(m.todos, ::setDone))
             }
-            if (m.status == Status.RECORDING) {
-                addView(ui.spacer(ui.dim(24)))
-                addView(markRow(), ui.fullWidth())
-            }
             if (m.marks.isNotEmpty() && m.status != Status.RECORDING) {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("Marks"))
@@ -638,45 +634,20 @@ class MeetingActivity : Activity() {
         }
     }
 
-    /**
-     * F15-FR11 / F17-FR3 on today's meeting screen (layout B's docked bar is M12): Mark stamps
-     * the recording clock and reads "Marked 0:12:41" for 2 s, redrawing only itself; Stop ends
-     * the recording as Home's ■ Stop does.
-     */
-    private fun markRow(): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER_HORIZONTAL
-        liveCost = if (view?.meeting?.nearLive == true) ui.eyebrow("", ui.inkSoft).also { addView(it, ui.wrap()) } else null
-        addView(LinearLayout(this@MeetingActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            lateinit var pill: TextView
-            pill = ui.pill("◆  Mark", size = 17f) { markNow(pill) }
-            addView(pill, ui.wrap())
-            addView(ui.pill("■  Stop", filled = true, size = 17f) {
-                if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity)
-            }, ui.wrap().apply { marginStart = ui.dim(16) })
-        }, ui.wrap().apply { topMargin = ui.dim(10) })
-        showLive()
-    }
-
-    private fun markNow(pill: TextView) = mark(pill)
-
-    /** F17-FR3: Mark from the minutes' row ([pill]) or the notes bar: "Marked 0:12:41" for 2 s,
-     *  redrawing only the button. */
-    private fun mark(pill: TextView?) {
+    /** F17-FR3: Mark in the notes bar stamps the recording clock and reads "Marked 0:12:41"
+     *  for 2 s, redrawing only the button; the ◆ goes beside the latest stroke. */
+    private fun mark() {
         val rec = RecordingService.hub.state as? RecState.Recording ?: return
         if (rec.id != id) return
         val at = LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), rec.startElapsedMs)
-        pill?.let { ui.stylePill(it, "Marked ${Format.duration(at)}", filled = false) }
         notes?.bar?.showMarked("Marked\n${Format.duration(at)}")
         handler.postDelayed({
-            pill?.let { ui.stylePill(it, "◆  Mark", filled = false) }
             notes?.bar?.showMarked(dev.jraghavan.snmeeting.notes.ToolBarModel.MARK)
         }, MARKED_MS)
         scope.core({ NativeBridge.nativeAddMark(id, at) }) { json ->
             (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't add the mark", it.message) }
             fetchLive()
+            notes?.setMarks(view?.meeting?.marks.orEmpty().map { it.atMs } + at) // ◆ beside the latest stroke
         }
     }
 
@@ -718,7 +689,6 @@ class MeetingActivity : Activity() {
 
     /** F16-FR5: the cost line, redrawn only when its text changes (the strip is the Notes tab's). */
     private fun showLive() {
-        live?.soFar?.uppercase()?.let { cost -> if (liveCost?.text?.toString() != cost) liveCost?.text = cost }
         if (view?.meeting?.nearLive == true) live?.soFar?.let { notes?.bar?.showCost(it) }
     }
 

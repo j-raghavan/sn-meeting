@@ -66,6 +66,18 @@ data class InkView(val strokes: List<DrawStroke>, val bounds: WorldRect?, val ca
 }
 
 /**
+ * F17-FR3 [Recommendation]: a mark draws a small ◆ beside the stroke written last before it:
+ * just right of that stroke's top-right corner. Marks before any stroke have none.
+ */
+object MarkGlyphs {
+    const val GAP = 8.0
+
+    fun place(strokes: List<DrawStroke>, marksAtMs: List<Long>): List<Pair<Double, Double>> = marksAtMs.mapNotNull { at ->
+        strokes.filter { it.atMs != null && it.atMs <= at }.maxByOrNull { it.atMs!! }?.bounds?.let { b -> (b.right + GAP) to b.top }
+    }.distinct()
+}
+
+/**
  * F17-FR7 / F13-FR3: during playback, strokes written up to the position are drawn normally
  * and later ones muted; untimed strokes (written outside the recording) stay as they are. The
  * canvas redraws for it only when the muted set changes, and at most once a second (NFR2).

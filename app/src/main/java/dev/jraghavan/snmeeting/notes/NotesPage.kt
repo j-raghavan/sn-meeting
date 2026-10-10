@@ -123,6 +123,20 @@ class NotesPage(
         addView(strip.view, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
     }
 
+    /** F17-FR3: the meeting's marks (recording-clock ms), each a ◆ beside the stroke before it. */
+    private var marks: List<Long> = emptyList()
+
+    fun setMarks(atMs: List<Long>) {
+        if (atMs == marks) return
+        marks = atMs
+        placeMarks()
+    }
+
+    private fun placeMarks() {
+        val g = MarkGlyphs.place(canvas.inkView.strokes, marks)
+        if (g != canvas.markGlyphs) canvas.markGlyphs = g
+    }
+
     /** A meeting with near-live lines has a strip; a Standard one's transcript is on Minutes. */
     var liveAvailable = false
         set(v) { field = v; showStrip(strip.state) }
@@ -281,6 +295,7 @@ class NotesPage(
             CoreJson.obj(json, InkView::from).getOrNull()?.let {
                 val history = it.canUndo != canvas.inkView.canUndo || it.canRedo != canvas.inkView.canRedo
                 canvas.show(it, redraw)
+                placeMarks()
                 if (history) refreshBar() // Undo and Redo light up or grey out
             }
         }

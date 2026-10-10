@@ -41,4 +41,10 @@ class InkModelTest { // F17-FR1 / FR4: what the canvas draws, from nativeInkStro
         assertFalse(Emphasis.changed(v.strokes, 460_000, 470_000))
         assertTrue(Emphasis.changed(v.strokes, 449_000, null))
     }
+
+    @Test fun aMarkDrawsADiamondBesideTheStrokeBeforeIt() { // F17-FR3
+        val v = InkView.from(JSONObject(reply))
+        assertEquals(listOf(49.5 to -1.5), MarkGlyphs.place(v.strokes, listOf(450_000L, 460_000L)))
+        assertTrue(MarkGlyphs.place(v.strokes, listOf(10L)).isEmpty())
+    }
 }
