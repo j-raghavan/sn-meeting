@@ -38,6 +38,8 @@ data class AgendaRow(
     val durationMs: Long? = null, val cost: String = "—",
     /** An event marked free (transparent): it holds no meeting, so nothing links to it. */
     val transparent: Boolean = false,
+    /** F20-FR6: up to three of the meeting's tags, the most used first. */
+    val tags: List<String> = emptyList(),
 ) {
     companion object {
         fun from(o: JSONObject): AgendaRow? {
@@ -54,6 +56,7 @@ data class AgendaRow(
                 fromLastTime = o.arr("fromLastTime").mapObj(TodoRef::from),
                 durationMs = o.long("durationMs"), cost = Spend.label(o.obj("spend")),
                 transparent = o.bool("transparent") ?: false,
+                tags = o.arr("tags").strings(),
             )
         }
     }

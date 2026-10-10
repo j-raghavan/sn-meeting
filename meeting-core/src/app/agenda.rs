@@ -9,11 +9,25 @@ use crate::library::MeetingSummary;
 use crate::sidecar::Sidecar;
 use chrono::NaiveDate;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 /// The most days one call returns (a week strip is 7).
 const MAX_DAYS: i64 = 42;
 /// Attendees named on a row before "+n".
 const PEOPLE_SHOWN: usize = 4;
+/// F20-FR6: tags a Home row shows.
+pub const TAGS_SHOWN: usize = 3;
+
+/// F20-FR6: up to [`TAGS_SHOWN`] of the meeting's tags, the most used (across every meeting)
+/// first; ties keep the meeting's own order.
+pub fn row_tags(sc: Option<&Sidecar>, counts: &HashMap<String, usize>) -> Vec<String> {
+    let Some(sc) = sc else {
+        return Vec::new();
+    };
+    let mut t: Vec<&String> = sc.tags.iter().map(|t| &t.name).collect();
+    t.sort_by_key(|n| std::cmp::Reverse(counts.get(*n).copied().unwrap_or(0)));
+    t.into_iter().take(TAGS_SHOWN).cloned().collect()
+}
 
 /// A meeting's marks (F18-FR7): filled when it exists or is done.
 pub fn marks(sc: Option<&Sidecar>, folder: Option<&str>) -> Value {
@@ -77,10 +91,11 @@ impl App {
         let has_links = !self.calendar_links().links.is_empty();
         let events = self.cached_events();
         let meetings = self.library().all();
+        let counts = crate::tags::counts(meetings.iter().map(|(_, sc)| sc));
         let mut days = Vec::new();
         for i in 0..=n {
             let d = a + chrono::Days::new(i as u64);
-            days.push(self.agenda_day(d, &events, &meetings, now_ms));
+            days.push(self.agenda_day(d, &events, &meetings, &counts, now_ms));
         }
         let today = crate::tz::local_at(self.tz.as_ref(), now_ms)
             .map(|t| t.date_naive().format("%Y-%m-%d").to_string());
@@ -97,6 +112,7 @@ impl App {
         d: NaiveDate,
         events: &[(String, Event)],
         meetings: &[(MeetingSummary, Sidecar)],
+        counts: &HashMap<String, usize>,
         now_ms: i64,
     ) -> Value {
         let (ds, de) = (
@@ -143,6 +159,7 @@ impl App {
                 "spend": newest.map(|(m, _)| m.spend.clone()),
                 "meetings": linked.iter().map(|(m, _)| m.id.clone()).collect::<Vec<_>>(),
                 "marks": marks(newest.map(|(_, sc)| sc), newest.map(|(m, _)| m.folder.as_str())),
+                "tags": row_tags(newest.map(|(_, sc)| sc), counts),
             });
             if is_current {
                 row["fromLastTime"] = json!(self.from_last_time(e));
@@ -178,6 +195,7 @@ impl App {
                     "unscheduled": ev.is_none(),
                     "eventKey": ev.as_ref().map(|l| l.event_key.clone()),
                     "marks": marks(Some(sc), Some(&m.folder)),
+                    "tags": row_tags(Some(sc), counts),
                 }),
             ));
         }

@@ -199,6 +199,10 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
             val has = CalendarFormat.has(r.marks, r.meetingId?.let { LongJobs.lane.isRunning(it) } == true)
             if (has.isNotEmpty()) addView(ui.eyebrow(has, ui.inkSoft).apply { contentDescription = has },
                 ui.fullWidth().apply { topMargin = ui.dim(4) })
+            // F20-FR6: up to three tags on their own line, under what the meeting has.
+            val tags = dev.jraghavan.snmeeting.model.Tags.line(r.tags)
+            if (tags.isNotEmpty()) addView(ui.eyebrow(tags, ui.inkSoft).apply { isAllCaps = false; maxLines = 1; ellipsize = TextUtils.TruncateAt.END },
+                ui.fullWidth().apply { topMargin = ui.dim(3) })
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
     }
 

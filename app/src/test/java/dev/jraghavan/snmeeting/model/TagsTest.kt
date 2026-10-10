@@ -16,6 +16,16 @@ class TagsTest {
         assertEquals(emptyList<String>(), Tags.names(JSONObject("{}")))
     }
 
+    /** F20-FR6: a Home row's line, at most three, in the core's order. */
+    @Test
+    fun home_rows_show_up_to_three_tags() {
+        assertEquals("#gpu  #vram  #local-ai", Tags.line(listOf("gpu", "vram", "local-ai", "q4")))
+        assertEquals("", Tags.line(emptyList()))
+        val r = AgendaRow.from(JSONObject("""{"kind":"meeting","meetingId":"m","startMs":1,"tags":["gpu","vram"]}"""))!!
+        assertEquals(listOf("gpu", "vram"), r.tags)
+        assertEquals(emptyList<String>(), AgendaRow.from(JSONObject("""{"kind":"meeting","startMs":1}"""))!!.tags)
+    }
+
     @Test
     fun a_sidecar_lists_its_tags() {
         val sc = Sidecar.from(JSONObject("""{"id":"meeting-20261009-171436","status":"done",
