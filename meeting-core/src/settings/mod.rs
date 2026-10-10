@@ -332,6 +332,17 @@ pub struct NoticeShown {
     pub extra: Extra,
 }
 
+impl NoticeShown {
+    /// Whether the notice was answered for `p`.
+    pub fn shown(&self, p: Provider) -> bool {
+        match p {
+            Provider::OpenAi => self.openai,
+            Provider::Gemini => self.gemini,
+            Provider::Anthropic => self.anthropic,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DebugSettings {

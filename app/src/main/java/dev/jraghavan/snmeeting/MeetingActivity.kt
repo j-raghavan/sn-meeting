@@ -246,7 +246,7 @@ class MeetingActivity : Activity() {
                     view?.let { v -> TranscriptPages.locate(v.transcript, seekMs + 2_000, marks = v.meeting.marks)?.let { mark = it; transcriptPage = it.first } }
                     notes?.refreshBar()
                 }
-                override fun stop() { if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity) }
+                override fun stop() = notesNoticeThen { if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity) }
             }).also {
                 notesHost.addView(it.view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
                 it.liveAvailable = view?.meeting?.nearLive == true
@@ -530,7 +530,37 @@ class MeetingActivity : Activity() {
     }
 
     /** Security: the first job to a provider names it once, and nothing is sent without OK. */
-    private fun confirmThenStart(job: Actions.Job) {
+    /**
+     * F17-FR9 / FR14 (OQ20): the one-time notes notice comes when notes would first be sent (Stop
+     * or a transcribe / summarise of a meeting with notes, "Use my notes" on), never on a stroke,
+     * and only once the canvas is idle. "Send my notes" answers it; "Not now" keeps the notes on
+     * the device this time. [then] runs after either; Cancel runs nothing.
+     */
+    private fun notesNoticeThen(then: () -> Unit) {
+        val s = settings
+        val p = s?.effectiveSummarise?.provider?.takeIf { s.keys[it]?.usable == true }
+        val hasNotes = view?.meeting?.hasNotes == true || notes?.canvas?.inkView?.strokes?.isNotEmpty() == true
+        val text = s?.takeIf { hasNotes }?.let { dev.jraghavan.snmeeting.notes.NotesNotice.of(it.notes, p, Format.providerName(p.orEmpty())) }
+        if (text == null || p == null) return then()
+        val show = {
+            InkDialog.choose(this, dev.jraghavan.snmeeting.notes.NotesNotice.TITLE, text,
+                dev.jraghavan.snmeeting.notes.NotesNotice.SEND, dev.jraghavan.snmeeting.notes.NotesNotice.NOT_NOW, "Cancel",
+                onYes = {
+                    scope.core({ NativeBridge.nativeSetSettings(dev.jraghavan.snmeeting.notes.NotesPatch.noticeShown(p)) }) { json ->
+                        CoreJson.obj(json, SettingsView::from).getOrNull()?.let { settings = it }
+                        then()
+                    }
+                },
+                onNo = then,
+                onLater = {},
+            )
+        }
+        notes?.dialogs?.show(show) ?: show()
+    }
+
+    private fun confirmThenStart(job: Actions.Job) = notesNoticeThen { confirmProvider(job) }
+
+    private fun confirmProvider(job: Actions.Job) {
         val notice = settings?.let { ProviderNotice.of(job, it) } ?: return start(job)
         InkDialog.notice(this, ProviderNotice.TITLE, notice.message, job.label) {
             scope.core({ NativeBridge.nativeSetSettings(SettingsPatch.noticeShown(notice.providers)) }) { json ->

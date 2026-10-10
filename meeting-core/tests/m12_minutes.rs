@@ -50,7 +50,9 @@ fn fixture() -> Fx {
         https_only: false,
     };
     let app = App::with_tz(core, e.root.path().into(), Arc::new(tz(PDT)));
-    parse(&app.set_settings_json(r#"{"summarise":{"provider":"anthropic"}}"#));
+    parse(&app.set_settings_json(
+        r#"{"summarise":{"provider":"anthropic"},"notes":{"noticeShown":{"anthropic":true}}}"#,
+    ));
     let b = begin(&app, T0);
     let id = b["id"].as_str().unwrap().to_owned();
     let dir = PathBuf::from(b["firstSegmentPath"].as_str().unwrap())
@@ -156,6 +158,19 @@ fn one_stop_request_carries_the_transcript_the_marks_and_two_note_images() {
         3
     );
     assert!(canvas.exists());
+}
+
+/// F17-FR14: until the one-time notice is answered for the provider, no note image goes.
+#[test]
+fn no_note_goes_before_its_notice_is_answered() {
+    let fx = fixture();
+    parse(
+        &fx.app
+            .set_settings_json(r#"{"notes":{"noticeShown":{"anthropic":false}}}"#),
+    );
+    let out = parse(&fx.app.run_job_json(&fx.id, Job::Summarise));
+    assert_eq!(out["meeting"]["status"], "done", "{out}");
+    assert!(images(&requests(&fx)[0]).is_empty());
 }
 
 #[test]

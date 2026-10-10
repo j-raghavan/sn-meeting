@@ -38,12 +38,14 @@ data class NotesPrefs(
  */
 object NotesNotice {
     const val TITLE = "Your notes and the minutes"
+    const val SEND = "Send my notes"
+    const val NOT_NOW = "Not now"
 
     fun of(p: NotesPrefs, provider: String?, name: String): String? {
         if (provider == null || !p.useForMinutes || p.noticeShown[provider] == true) return null
-        return "When you stop, images of these notes go to $name with the transcript, so the minutes " +
-            "and Search can use your handwriting. Each provider may keep what it receives under its own " +
-            "policy. Turn this off in Settings → Notes."
+        return "Images of your notes go to $name with the transcript, so the minutes and Search can use " +
+            "your handwriting. Each provider may keep what it receives under its own policy. Until you " +
+            "agree, the minutes are made from the transcript alone. Turn this off in Settings → Notes."
     }
 }
 

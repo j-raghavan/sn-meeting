@@ -66,6 +66,9 @@ class NotesPage(
         private set
     /** F17-FR11 / R14: the strip's and the timer's redraws wait while the pen writes. */
     val quiet = PenQuiet()
+    /** F17-FR14: dialogs wait while the pen is in use (a dialog takes the pen's claim). */
+    val dialogs = DialogGate({ SystemClock.uptimeMillis() })
+    private val dialogTick = Runnable { dialogs.tick() }
     /** The lasso selection's stroke ids (`[id, …]`), while there is one. */
     private var selected = "[]"
 
@@ -73,7 +76,12 @@ class NotesPage(
         override val tool get() = this@NotesPage.tool
         override val recording get() = host.recordingSince() != null
         override val penWidthPx get() = PEN_WIDTH_PX
-        override fun pen(down: Boolean) = if (down) quiet.down() else quiet.up()
+        override fun pen(down: Boolean) {
+            if (down) quiet.down() else quiet.up()
+            dialogs.pen(down)
+            handler.removeCallbacks(dialogTick)
+            if (!down) handler.postDelayed(dialogTick, DialogGate.IDLE_MS)
+        }
 
         override fun strokeTimes(): StrokeTimes {
             val since = host.recordingSince() ?: return StrokeTimes.UNTIMED
@@ -266,7 +274,7 @@ class NotesPage(
                         if (front) canvas.claimPen("open")
                     }
                 }
-                is CoreResult.Err -> InkDialog.error(a, "The notes can't be opened", r.message)
+                is CoreResult.Err -> dialogs.show { InkDialog.error(a, "The notes can't be opened", r.message) }
             }
         }
     }
@@ -301,18 +309,9 @@ class NotesPage(
 
     /** A change to the ink: run [call], fetch what is in view (drawn once the pen rests) and
      *  arm the deferred save. */
-    /** OQ20: the first stroke to a provider says the notes go with the minutes, once. */
-    private fun noticeOnce() {
-        val p = host.summariseProvider()
-        val text = NotesNotice.of(prefs, p, dev.jraghavan.snmeeting.model.Format.providerName(p.orEmpty())) ?: return
-        prefs = prefs.copy(noticeShown = prefs.noticeShown + (p!! to true))
-        InkDialog.notice(a, NotesNotice.TITLE, text, "OK") { host.savePrefs(NotesPatch.noticeShown(p)) }
-    }
-
     private fun changed(event: InkBake.Event, call: () -> String) {
         scope.core(call) { json ->
             if (!reportError(json, "Couldn't keep that")) {
-                noticeOnce()
                 fetch(event)
                 scheduleSave()
             }
@@ -345,7 +344,7 @@ class NotesPage(
     /** True when [json] is an error, which is then shown. */
     private fun reportError(json: String, title: String): Boolean {
         val e = CoreJson.obj(json) { o: JSONObject -> o } as? CoreResult.Err ?: return false
-        InkDialog.error(a, title, e.message)
+        dialogs.show { InkDialog.error(a, title, e.message) }
         return true
     }
 

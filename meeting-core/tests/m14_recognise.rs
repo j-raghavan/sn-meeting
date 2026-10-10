@@ -104,7 +104,9 @@ pub fn fixture_src(src: NotesSource) -> Fx {
     };
     let mut app = App::with_tz(core, e.root.path().into(), Arc::new(tz(PDT)));
     app.notes = src;
-    parse(&app.set_settings_json(r#"{"summarise":{"provider":"anthropic"}}"#));
+    parse(&app.set_settings_json(
+        r#"{"summarise":{"provider":"anthropic"},"notes":{"noticeShown":{"anthropic":true}}}"#,
+    ));
     let b = begin(&app, T0);
     let id = b["id"].as_str().unwrap().to_owned();
     let dir = PathBuf::from(b["firstSegmentPath"].as_str().unwrap())

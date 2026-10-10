@@ -110,6 +110,13 @@ impl App {
         let summarise_fallback = summarise
             .as_ref()
             .map(|(k, _)| fallback_model(k.provider).to_owned());
+        // F17-FR9 / FR14: the notes go only with "Use my notes for the minutes" on (the default)
+        // and once its one-time notice was answered for the summarise provider; until then the
+        // minutes are made from the transcript alone.
+        let notes_ok = s.notes.use_for_minutes
+            && summarise
+                .as_ref()
+                .is_some_and(|(k, _)| s.notes.notice_shown.shown(k.provider));
         Ok(JobPlan {
             http,
             endpoints: self.core.endpoints.clone(),
@@ -122,8 +129,7 @@ impl App {
             templates: self.templates.effective(),
             budgets: self.budgets,
             rates: self.rates(),
-            // F17-FR9: the notes go only with "Use my notes for the minutes" on (the default).
-            notes: if s.notes.use_for_minutes {
+            notes: if notes_ok {
                 self.notes.clone()
             } else {
                 crate::notes_text::NotesSource::none()

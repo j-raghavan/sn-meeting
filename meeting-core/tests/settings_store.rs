@@ -345,3 +345,17 @@ fn a_wrongly_typed_field_reads_as_its_default_and_keeps_the_folders() {
     assert!(s.previous_folders.is_empty());
     assert_eq!(s.default_template, "lecture");
 }
+
+#[test]
+fn a_notice_is_shown_per_provider() {
+    use meeting::keyfile::Provider;
+    let n = meeting::settings::NoticeShown {
+        openai: true,
+        gemini: false,
+        anthropic: true,
+        extra: Default::default(),
+    };
+    assert!(
+        n.shown(Provider::OpenAi) && !n.shown(Provider::Gemini) && n.shown(Provider::Anthropic)
+    );
+}

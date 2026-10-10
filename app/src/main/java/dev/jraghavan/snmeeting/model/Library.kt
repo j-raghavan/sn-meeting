@@ -90,6 +90,8 @@ data class Sidecar(
     val chunkTotal: Int = 0, val chunksDone: Int = 0,
     /** F15-FR11, by time. */
     val marks: List<Mark> = emptyList(),
+    /** F17-FR5: the meeting has notes (its sidecar names the notes folder). */
+    val hasNotes: Boolean = false,
 ) {
     companion object {
         private fun run(o: JSONObject?): ProviderRun? =
@@ -121,6 +123,7 @@ data class Sidecar(
             chunkTotal = o.arr("chunks")?.length() ?: 0,
             chunksDone = o.arr("chunks").mapObj { c -> c.str("state")?.takeIf { it != "pending" } }.size,
             marks = o.arr("marks").mapObj(Mark::from).sortedBy { it.atMs },
+            hasNotes = o.obj("notes") != null,
         ) }
 
         /** nativeTranscribe / nativeSummarise: `{meeting: <sidecar>}` once a job ran. */
