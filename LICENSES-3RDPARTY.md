@@ -47,8 +47,8 @@ Each adapted file names its origin in its header.
 | `app/.../notes/SupernoteInk.kt` | inkread `eink/SupernoteInk.kt`, `eink/SupernoteEinkAdapter.kt` | AGPL-3.0-only |
 | `app/.../notes/Hints.kt` (hand-drawn arrow, caption placement) | sn-canvas `scripts/draw_hints.py`, `src/ui/HelpHints.tsx` | MIT (notice below) |
 | `app/.../notes/DockedToolBar.kt` | inkread `ToolPalette.kt` (vertical docked palette, Define removed, docked collapse) | AGPL-3.0-only |
-| `meeting-core/src/canvas/{item,geom,scene,style}.rs` (the F21 scene: items, arrow bindings, hit-tests, one history, styles) | sn-canvas `CanvasModel.kt`, `CanvasCore.kt`, `ShapeEdits.kt`, `ViewTransforms.kt`, `EditHistory.kt`, `CanvasStyle.kt`, ported to Rust with their rules, constants and test vectors | MIT (notice below) |
-| `app/.../notes/canvas/{CanvasStyle,ShapeOutline,ItemPainter,ImageCache}.kt` (palette, hand-drawn outlines, item and text painters, image decoding) | sn-canvas `CanvasStyle.kt`, `StylePalette.kt`, `ShapeOutline.kt`, `ElementPainter.kt`, `TextPainter.kt`, `ShapeDrawing.kt`, `AndroidTextMeasurer.kt`, `ImageCache.kt` | MIT (notice below) |
+| `meeting-core/src/canvas/{item,geom,hit,edits,scene,style}.rs` (the F21 scene: items, arrow bindings, hit-tests, handle edits, arranging, one history, styles) | sn-canvas `CanvasModel.kt`, `CanvasCore.kt`, `ShapeEdits.kt`, `CanvasActions.kt`, `ImageElements.kt`, `TableEdits.kt`, `ViewTransforms.kt`, `EditHistory.kt`, `CanvasStyle.kt`, ported to Rust with their rules, constants and test vectors | MIT (notice below) |
+| `app/.../notes/canvas/{CanvasStyle,ShapeOutline,ItemPainter,ImageCache,Handles}.kt` (palette, hand-drawn outlines, item and text painters, image decoding) | sn-canvas `CanvasStyle.kt`, `StylePalette.kt`, `ShapeOutline.kt`, `ElementPainter.kt`, `TextPainter.kt`, `ShapeDrawing.kt`, `AndroidTextMeasurer.kt`, `ImageCache.kt` | MIT (notice below) |
 
 ## Rust crates linked into `libmeeting.so`
 

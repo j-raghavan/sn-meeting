@@ -444,3 +444,75 @@ fn select_move_duplicate_and_delete() {
     assert!(edit(&f, json!({"op": "select"}))["error"].is_string());
     assert!(edit(&f, json!({"op": "move", "dx": "x"}))["error"].is_string());
 }
+
+/// F21-FR5 through the app: handles, arranging and grouping, each one step.
+#[test]
+fn handles_arrange_and_group() {
+    let f = fixture();
+    let all = every_item();
+    let file = json!({"version": 1, "items": [all[0], all[1], all[3], all[4]]});
+    std::fs::create_dir_all(notes::folder(&f.dir, &f.id)).unwrap();
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    let ok = |v: Value| assert!(v["dirty"].is_array(), "{v}");
+    ok(edit(
+        &f,
+        json!({"op": "resize", "ref": "i:rect1", "corner": "br", "x": 200.0, "y": 100.0}),
+    ));
+    ok(edit(
+        &f,
+        json!({"op": "resize", "ref": "i:text1", "corner": "br", "x": 200.0, "y": 410.0, "fit": 90.0}),
+    ));
+    ok(edit(
+        &f,
+        json!({"op": "rotate", "ref": "i:ell1", "x": 500.0, "y": 40.0}),
+    ));
+    ok(edit(
+        &f,
+        json!({"op": "endpoint", "ref": "i:arr1", "which": "end", "x": 900.0, "y": 900.0}),
+    ));
+    ok(edit(
+        &f,
+        json!({"op": "group", "refs": ["i:rect1", "i:ell1"]}),
+    ));
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e5, -1e5, 1e5, 1e5]));
+    let items: Vec<&Value> = d["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| &e["item"])
+        .collect();
+    assert_eq!(
+        (items[0]["width"].clone(), items[3]["height"].clone()),
+        (json!(200.0), json!(90.0))
+    );
+    assert_eq!(
+        items[1]["rotation"].as_f64().unwrap(),
+        std::f64::consts::FRAC_PI_2
+    );
+    assert_eq!(items[2]["bound"], json!([true, false]));
+    assert_eq!(items[0]["groupId"], items[1]["groupId"]);
+    assert_eq!(d["selection"], json!(["i:rect1", "i:ell1"]));
+    ok(edit(&f, json!({"op": "back", "refs": ["i:text1"]})));
+    ok(edit(&f, json!({"op": "front"})));
+    ok(edit(&f, json!({"op": "ungroup"})));
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e5, -1e5, 1e5, 1e5]));
+    let refs: Vec<&str> = d["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["ref"].as_str().unwrap())
+        .collect();
+    assert_eq!(refs, ["i:text1", "i:arr1", "i:rect1", "i:ell1"]);
+    assert!(
+        edit(
+            &f,
+            json!({"op": "resize", "ref": "i:rect1", "corner": "zz", "x": 1, "y": 1})
+        )["error"]
+            .is_string()
+    );
+    assert!(edit(&f, json!({"op": "rotate", "ref": "nope", "x": 1, "y": 1}))["error"].is_string());
+    assert_eq!(
+        edit(&f, json!({"op": "group", "refs": ["i:rect1"]}))["dirty"],
+        Value::Null
+    );
+}

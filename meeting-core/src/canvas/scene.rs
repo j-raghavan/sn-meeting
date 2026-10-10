@@ -573,6 +573,44 @@ impl Scene {
         })
     }
 
+    /// One step changing the item `id` by `f` (nothing changed: no step).
+    pub(crate) fn edit_item(&mut self, id: &str, f: impl FnOnce(&mut Item)) -> Option<BBox> {
+        self.step(|s| {
+            if let Some(it) = s.doc.items.iter_mut().find(|i| i.id == id) {
+                f(it);
+            }
+            (Vec::new(), Vec::new())
+        })
+    }
+
+    /// One step changing only the item side (`items`, `extras`, `order`).
+    pub(crate) fn step_doc(&mut self, f: impl FnOnce(&mut Doc)) -> Option<BBox> {
+        self.step(|s| {
+            f(&mut s.doc);
+            (Vec::new(), Vec::new())
+        })
+    }
+
+    /// One step moving every point of the strokes in `refs` through `f` (world in, world
+    /// out); pressure and times are kept.
+    pub(crate) fn step_strokes(
+        &mut self,
+        refs: &[Ref],
+        f: impl Fn(Pt) -> (f64, f64),
+    ) -> Option<BBox> {
+        self.step(|s| {
+            s.map_strokes(refs, |st| {
+                for p in &mut st.points {
+                    let (x, y) = f(Pt::new(f64::from(p.x), f64::from(p.y)));
+                    #[allow(clippy::cast_possible_truncation)]
+                    {
+                        (p.x, p.y) = (x as f32, y as f32);
+                    }
+                }
+            })
+        })
+    }
+
     /// Replace each stroke in `refs` by `f` of it, keeping its id and index: the lists a
     /// step records.
     fn map_strokes(&mut self, refs: &[Ref], f: impl Fn(&mut Stroke)) -> (Placed, Placed) {

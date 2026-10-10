@@ -4,6 +4,8 @@ use super::App;
 use super::notes::rect_of;
 use crate::api::error_json;
 use crate::canvas::draw::{bbox_json, refs_json};
+use crate::canvas::edits::{Corner, Measured};
+use crate::canvas::geom::Pt;
 use crate::canvas::{Ref, Scene};
 use crate::ink::BBox;
 use crate::notes::{self, Layer};
@@ -20,6 +22,19 @@ fn num(op: &Value, k: &str) -> Result<f64, String> {
         .and_then(Value::as_f64)
         .filter(|v| v.is_finite())
         .ok_or_else(|| format!("{k} must be a number"))
+}
+
+/// The op's one `ref`.
+fn one(op: &Value) -> Result<Ref, String> {
+    op.get("ref")
+        .and_then(Value::as_str)
+        .and_then(Ref::parse)
+        .ok_or_else(|| "ref must be s:<id> or i:<id>".into())
+}
+
+/// The op's world point `{x, y}`.
+fn at(op: &Value) -> Result<Pt, String> {
+    Ok(Pt::new(num(op, "x")?, num(op, "y")?))
 }
 
 /// The op's `refs`, or the selection when it names none.
@@ -52,7 +67,7 @@ fn floats(op: &Value, k: &str) -> Option<Vec<f32>> {
 fn select(scene: &mut Scene, op: &Value) -> Result<(), String> {
     let refs = if let Some(at) = floats(op, "at").filter(|a| a.len() == 2) {
         let r = op.get("r").and_then(Value::as_f64).unwrap_or(8.0);
-        let p = crate::canvas::geom::Pt::new(f64::from(at[0]), f64::from(at[1]));
+        let p = Pt::new(f64::from(at[0]), f64::from(at[1]));
         scene.top_at(p, r).into_iter().collect()
     } else if let Some(b) = floats(op, "rect").filter(|a| a.len() == 4) {
         let rect = BBox {
@@ -129,6 +144,29 @@ impl App {
                     o.scene.delete(&all).1
                 }
                 "duplicate" => o.scene.duplicate(&refs, &now_local()),
+                // F21-FR5: one item's handles; arranging and grouping the selection.
+                "resize" => {
+                    let corner = op
+                        .get("corner")
+                        .and_then(Value::as_str)
+                        .and_then(Corner::parse)
+                        .ok_or("corner must be tl, tr, bl or br")?;
+                    let m = Measured {
+                        fit: op.get("fit").and_then(Value::as_f64),
+                        cell_heights: floats(&op, "cellHeights")
+                            .map(|v| v.into_iter().map(f64::from).collect()),
+                    };
+                    o.scene.resize(&one(&op)?, corner, at(&op)?, &m)
+                }
+                "rotate" => o.scene.rotate(&one(&op)?, at(&op)?),
+                "endpoint" => {
+                    let start = op.get("which").and_then(Value::as_str) == Some("start");
+                    o.scene.move_end(&one(&op)?, start, at(&op)?)
+                }
+                "group" => o.scene.group(&refs).map(|(_, a)| a),
+                "ungroup" => o.scene.ungroup(&refs),
+                "front" => o.scene.arrange(&refs, true),
+                "back" => o.scene.arrange(&refs, false),
                 // F21-FR3: the backup goes first; without it, nothing is cleared (OQ34).
                 "clear" => {
                     if o.scene.is_empty() {

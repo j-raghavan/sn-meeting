@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewTreeObserver
+import dev.jraghavan.snmeeting.notes.canvas.Handles
 import dev.jraghavan.snmeeting.notes.canvas.ImageSource
 import dev.jraghavan.snmeeting.notes.canvas.ItemPainter
 import dev.jraghavan.snmeeting.notes.canvas.StylePalette
@@ -57,6 +58,8 @@ class NotesCanvasView(
         fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
         /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
         fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR5: a handle of the one selected thing ([ref]) dragged to a world point. */
+        fun handleDragged(ref: String, h: Handles.Handle, x: Float, y: Float) {}
         /** A Listen tap at a world point (F17-FR7). */
         fun listen(x: Float, y: Float, radiusWorld: Float)
         /** The viewport moved: the visible strokes are fetched again. */
@@ -85,6 +88,13 @@ class NotesCanvasView(
     val selection: WorldRect? get() = ink.selectionBounds
     /** F21-FR4: a drag's preview is redrawn at most every [PREVIEW_MS] (F21-FR2). */
     private var lastPreview = 0L
+    /** F21-FR5: the handle a Select drag took, if it took one. */
+    private var dragging: Handles.Handle? = null
+
+    /** F21-FR5: the one selected thing, which shows handles. */
+    private fun soleSelected(): DrawEntry? = ink.selection.singleOrNull()?.let { r -> ink.entries.firstOrNull { it.ref == r } }
+
+    private fun handles(): List<Handles.Handle> = soleSelected()?.let { Handles.of(it, viewport.zoom) }.orEmpty()
     /** F17-FR3: ◆ beside the stroke written before each mark. */
     var markGlyphs: List<Pair<Double, Double>> = emptyList()
         set(v) { field = v; invalidate() }
@@ -412,9 +422,10 @@ class NotesCanvasView(
                 Gesture.DRAW -> buffer = StrokeBuffer(host.strokeTimes()).also { it.add(c.x, c.y, c.pressure, at) }
                 Gesture.ERASE, Gesture.LASSO, Gesture.SELECT -> {
                     if (c.isEraser && firmwareOn) firmware.setWritable(false)
+                    val wxd = viewport.worldX(c.x.toDouble()); val wyd = viewport.worldY(c.y.toDouble())
+                    dragging = if (gesture == Gesture.SELECT) Handles.at(handles(), wxd, wyd, viewport.zoom) else null
                     val sel = selection
-                    movingSelection = gesture != Gesture.ERASE && sel != null &&
-                        sel.contains(viewport.worldX(c.x.toDouble()), viewport.worldY(c.y.toDouble()))
+                    movingSelection = dragging == null && gesture != Gesture.ERASE && sel != null && sel.contains(wxd, wyd)
                     path += c.x; path += c.y
                 }
                 else -> Unit
@@ -473,6 +484,9 @@ class NotesCanvasView(
             }
             Gesture.LISTEN -> host.listen(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
             Gesture.SELECT -> when {
+                dragging != null -> if (moved) {
+                    soleSelected()?.let { host.handleDragged(it.ref, dragging!!, wx(x), wy(y)) }
+                }
                 !moved -> host.selectAt(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
                 movingSelection -> host.moveSelection(wx(x) - wx(downX), wy(y) - wy(downY))
                 else -> host.selectRect(wx(downX), wy(downY), wx(x), wy(y))
@@ -487,7 +501,7 @@ class NotesCanvasView(
             }
             Gesture.NONE -> Unit
         }
-        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
+        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null
         host.pen(false)
         // A pen stroke the firmware inked is not repainted (inkread); anything else drew a band
         // or loop of its own, which the next draw removes.
@@ -506,7 +520,7 @@ class NotesCanvasView(
     private fun overlayInks(g: Gesture = gesture): Boolean = firmwareOn && g == Gesture.DRAW && penTool == NoteTool.PEN
 
     private fun abandon() {
-        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
+        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null
         host.pen(false)
         invalidate()
     }
@@ -547,9 +561,15 @@ class NotesCanvasView(
             box(canvas, sel, dashPaint)
             canvas.restore()
         }
-        if (gesture == Gesture.SELECT && !movingSelection && moved) {
+        val drag = dragging
+        if (gesture == Gesture.SELECT && drag != null && moved) {
+            // F21-FR5: where the handle goes, from where it was.
+            canvas.drawLine(v.screenX(drag.x).toFloat(), v.screenY(drag.y).toFloat(), lastX, lastY, dashPaint)
+            canvas.drawCircle(lastX, lastY, HANDLE_PX, handleStroke)
+        } else if (gesture == Gesture.SELECT && !movingSelection && moved) {
             canvas.drawRect(minOf(downX, lastX), minOf(downY, lastY), maxOf(downX, lastX), maxOf(downY, lastY), dashPaint)
         }
+        if (gesture != Gesture.SELECT || (!movingSelection && drag == null)) drawHandles(canvas)
         if ((gesture == Gesture.ERASE || gesture == Gesture.LASSO) && !movingSelection && path.size >= 4) {
             livePaint.strokeWidth = if (gesture == Gesture.ERASE) ERASE_RADIUS_PX * 2 else 2f
             livePath.reset()
@@ -591,6 +611,32 @@ class NotesCanvasView(
             drawPath.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2
         }
         canvas.drawPath(drawPath, inkPaint)
+    }
+
+    private val handleFill = Paint().apply { style = Paint.Style.FILL; color = Color.WHITE; isAntiAlias = true }
+    private val handleStroke = Paint().apply { style = Paint.Style.STROKE; color = Color.BLACK; strokeWidth = 2f; isAntiAlias = true }
+
+    /** F21-FR5: the one selected thing's handles: squares at the corners (or a line's ends)
+     *  and a circle for rotating, joined to the top edge. */
+    private fun drawHandles(canvas: Canvas) {
+        val hs = handles()
+        if (hs.isEmpty()) return
+        val v = viewport
+        val r = hs.firstOrNull { it.kind == Handles.Kind.ROTATE }
+        if (r != null) {
+            val tl = hs[0]; val tr = hs[1]
+            canvas.drawLine(v.screenX((tl.x + tr.x) / 2).toFloat(), v.screenY((tl.y + tr.y) / 2).toFloat(),
+                v.screenX(r.x).toFloat(), v.screenY(r.y).toFloat(), handleStroke)
+        }
+        for (h in hs) {
+            val x = v.screenX(h.x).toFloat(); val y = v.screenY(h.y).toFloat()
+            if (h.kind == Handles.Kind.ROTATE) {
+                canvas.drawCircle(x, y, HANDLE_PX, handleFill); canvas.drawCircle(x, y, HANDLE_PX, handleStroke)
+            } else {
+                canvas.drawRect(x - HANDLE_PX, y - HANDLE_PX, x + HANDLE_PX, y + HANDLE_PX, handleFill)
+                canvas.drawRect(x - HANDLE_PX, y - HANDLE_PX, x + HANDLE_PX, y + HANDLE_PX, handleStroke)
+            }
+        }
     }
 
     private fun box(canvas: Canvas, r: WorldRect, paint: Paint) {
@@ -710,6 +756,8 @@ class NotesCanvasView(
         const val HIGHLIGHT_FACTOR = 3.3f
         /** F21-FR2 [Recommendation]: a drag's preview redraws at most this often. */
         const val PREVIEW_MS = 100L
+        /** Half a handle's side on screen. */
+        const val HANDLE_PX = 9f
         val MUTED = Color.rgb(170, 170, 170)
     }
 }

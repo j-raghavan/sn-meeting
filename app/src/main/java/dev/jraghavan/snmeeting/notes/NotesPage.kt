@@ -15,6 +15,9 @@ import dev.jraghavan.snmeeting.ScreenScope
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.str
+import dev.jraghavan.snmeeting.notes.canvas.DrawItem
+import dev.jraghavan.snmeeting.notes.canvas.Handles
+import dev.jraghavan.snmeeting.notes.canvas.TextLayout
 import dev.jraghavan.snmeeting.record.LiveClock
 import org.json.JSONObject
 
@@ -112,6 +115,8 @@ class NotesPage(
 
         override fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) =
             select("""{"op":"select","rect":[$x0,$y0,$x1,$y1]}""")
+
+        override fun handleDragged(ref: String, h: Handles.Handle, x: Float, y: Float) = edit(handleOp(ref, h, x, y), keepSelection = true)
         override fun listen(x: Float, y: Float, radiusWorld: Float) = scope.core({ NativeBridge.nativeInkHit(id, LAYER, x, y, radiusWorld) }) { json ->
             val hit = CoreJson.obj(json, ListenHit::from).getOrNull() ?: return@core
             val seek = hit.seekMs ?: return@core // an untimed stroke, or no stroke: nothing happens
@@ -266,6 +271,8 @@ class NotesPage(
             }
             MoreMenu.Entry.REFRESH -> canvas.fullRefresh()
             MoreMenu.Entry.CLEAR -> askClear()
+            MoreMenu.Entry.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
+            MoreMenu.Entry.BACK -> edit("""{"op":"back"}""", keepSelection = true)
             MoreMenu.Entry.RESTORE -> edit("""{"op":"restoreCleared"}""")
             else -> Unit
         }
@@ -302,6 +309,10 @@ class NotesPage(
             ToolBarModel.Act.DELETE -> edit("""{"op":"delete"}""")
             ToolBarModel.Act.DUPLICATE -> edit("""{"op":"duplicate"}""", keepSelection = true)
             ToolBarModel.Act.DONE -> clearSelection()
+            ToolBarModel.Act.GROUP -> edit("""{"op":"group"}""", keepSelection = true)
+            ToolBarModel.Act.UNGROUP -> edit("""{"op":"ungroup"}""", keepSelection = true)
+            ToolBarModel.Act.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
+            ToolBarModel.Act.BACK -> edit("""{"op":"back"}""", keepSelection = true)
             else -> Unit
         }
         refreshBar()
@@ -326,6 +337,39 @@ class NotesPage(
     /** F21-FR4: a selection op (not an undo step): one fetch, one redraw of canvas and bar. */
     private fun select(op: String) = scope.core({ NativeBridge.nativeCanvasEdit(id, op) }) { json ->
         if (!reportError(json, "Couldn't select that")) fetch(null)
+    }
+
+    /**
+     * F21-FR5: the edit a handle drag makes. A text box or note resized keeps its text size, so
+     * its new height is measured here at the new width; a table's cells are measured at its new
+     * column width (the core can't measure text).
+     */
+    private fun handleOp(ref: String, h: Handles.Handle, x: Float, y: Float): String {
+        val q = CoreJson.quote(ref)
+        return when (h.kind) {
+            Handles.Kind.ROTATE -> """{"op":"rotate","ref":$q,"x":$x,"y":$y}"""
+            Handles.Kind.END -> """{"op":"endpoint","ref":$q,"which":"${h.id}","x":$x,"y":$y}"""
+            Handles.Kind.CORNER -> {
+                val item = canvas.inkView.items.firstOrNull { it.ref == ref }
+                val extra = item?.let { measure(it, Handles.resizedWidth(it, h.id, x.toDouble(), y.toDouble())) }.orEmpty()
+                """{"op":"resize","ref":$q,"corner":"${h.id}","x":$x,"y":$y$extra}"""
+            }
+        }
+    }
+
+    /** What the core needs measured for [item] at [width]: `,"fit":h` or `,"cellHeights":[…]`. */
+    private fun measure(item: DrawItem, width: Double): String {
+        val font = item.style.size.fontSize
+        val table = item.table
+        return when {
+            item.type == "text" || item.type == "note" -> ""","fit":${TextLayout.height(item.text.orEmpty(), width, font)}"""
+            table != null -> {
+                val col = width / table.cols
+                val hs = table.cells.map { if (it.isEmpty()) 0.0 else TextLayout.height(it, col, font * TextLayout.TABLE_FONT_SCALE) }
+                ""","cellHeights":[${hs.joinToString(",")}]"""
+            }
+            else -> ""
+        }
     }
 
     private fun polygonOp(xy: FloatArray) = """{"op":"select","polygon":[${xy.joinToString(",")}]}"""

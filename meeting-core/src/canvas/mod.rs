@@ -6,6 +6,7 @@
 //! keeping its rules and constants; its JUnit cases are carried as test vectors. The shell
 //! measures text, decodes image headers and draws what [`draw`] hands it.
 pub mod draw;
+pub mod edits;
 pub mod geom;
 pub mod hit;
 pub mod item;
