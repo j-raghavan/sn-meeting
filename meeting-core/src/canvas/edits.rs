@@ -480,6 +480,44 @@ impl Scene {
     }
 }
 
+impl Scene {
+    /// F21-FR13: link `refs` (and their groups), items and strokes alike, to `link` (or to
+    /// nothing), as one step.
+    pub fn relink(&mut self, refs: &[Ref], link: Option<&super::item::Link>) -> Option<BBox> {
+        if !self.items_ok() {
+            return None;
+        }
+        let refs = self.with_groups(refs);
+        self.step_doc(|d| {
+            for r in &refs {
+                match r {
+                    Ref::Item(i) => {
+                        if let Some(it) = d.items.iter_mut().find(|x| x.id == *i && x.known()) {
+                            it.link = link.cloned();
+                        }
+                    }
+                    Ref::Stroke(n) => {
+                        let e = d.extras.entry(*n).or_default();
+                        e.link = link.cloned();
+                        if e.is_empty() {
+                            d.extras.remove(n);
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    /// The link of `r`, if it has one.
+    #[must_use]
+    pub fn link_of(&self, r: &Ref) -> Option<&super::item::Link> {
+        match r {
+            Ref::Item(i) => self.item(i)?.link.as_ref(),
+            Ref::Stroke(n) => self.doc().extras.get(n)?.link.as_ref(),
+        }
+    }
+}
+
 /// A style's true colour as `.inkbin` keeps it (F21-FR7): its RGB, its opacity as alpha.
 #[must_use]
 pub fn ink_color(style: &super::style::Style) -> crate::ink::InkColor {
@@ -1038,6 +1076,25 @@ mod tests {
             Some(42),
             "its first text times it"
         );
+    }
+
+    /// F21-FR13: a link goes on every selected item and stroke in one step; Remove link clears it.
+    #[test]
+    fn links_go_on_items_and_strokes() {
+        let mut s = empty();
+        with_item(&mut s, rect("a", 0.0, 0.0));
+        let st = pen(&mut s, &[(0.0, 300.0)], None);
+        let both = [Ref::Item("a".into()), Ref::Stroke(st.0)];
+        let l = crate::canvas::item::Link::meeting("meeting-20261008-090000").unwrap();
+        assert!(s.relink(&both, Some(&l)).is_some());
+        assert_eq!(s.link_of(&both[0]), Some(&l));
+        assert_eq!(s.link_of(&both[1]), Some(&l));
+        assert!(s.relink(&both, None).is_some());
+        assert_eq!(s.link_of(&both[1]), None);
+        assert!(s.doc().extras.is_empty());
+        assert_eq!(s.link_of(&Ref::Item("zz".into())), None);
+        let (mut broken, _) = Scene::load(InkLayer::new(), Err("io".into()));
+        assert_eq!(broken.relink(&both, Some(&l)), None);
     }
 
     #[test]

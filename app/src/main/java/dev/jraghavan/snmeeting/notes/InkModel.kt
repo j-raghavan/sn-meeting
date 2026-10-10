@@ -28,6 +28,8 @@ class DrawStroke(
     val groupId: String? = null,
     /** F21-FR7: each point's pressure, for a styled pen stroke (null: one width). */
     val pressure: FloatArray? = null,
+    /** F21-FR13: it links to another meeting (it shows a badge). */
+    val linked: Boolean = false,
 ) {
     val ref get() = "s:$id"
 
@@ -67,6 +69,7 @@ class DrawStroke(
                 groupId = o.str("groupId"),
                 pressure = o.arr("pressure")?.let { a -> FloatArray(a.length()) { (a.opt(it) as? Number)?.toFloat() ?: 1f } }
                     ?.takeIf { it.size * 2 == pts.length() },
+                linked = o.obj("link") != null,
             )
         }
     }

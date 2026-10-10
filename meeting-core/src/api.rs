@@ -414,6 +414,11 @@ pub fn canvas_show(id: &str, n: i32) -> String {
     with_app(|app| app.canvas_show_json(id, n))
 }
 
+/// `nativeCanvasLinkTarget(id, ref)` (F21-FR13): where a link badge goes.
+pub fn canvas_link_target(id: &str, r: &str) -> String {
+    with_app(|app| app.canvas_link_target_json(id, r))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))

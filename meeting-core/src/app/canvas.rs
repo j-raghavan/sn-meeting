@@ -422,6 +422,27 @@ impl App {
         }
     }
 
+    /// `nativeCanvasLinkTarget(id, ref)` (F21-FR13): where a badge tap goes: `{meetingId,
+    /// exists, missing}` (a deleted meeting is `missing`); a link of a kind this build doesn't
+    /// follow is `{kind, followed: false}`; no link `{meetingId: null}`.
+    pub fn canvas_link_target_json(&self, id: &str, r: &str) -> String {
+        let Some(rf) = Ref::parse(r) else {
+            return error_json("ref must be s:<id> or i:<id>");
+        };
+        let link = match self.with_ink(id, Layer::Canvas, |o| o.scene.link_of(&rf).cloned()) {
+            Ok(l) => l,
+            Err(e) => return error_json(&e),
+        };
+        match link {
+            None => json!({"meetingId": null}).to_string(),
+            Some(l) if !l.followed() => json!({"kind": l.kind, "followed": false}).to_string(),
+            Some(l) => {
+                let exists = self.library().find(&l.target).is_ok();
+                json!({"meetingId": l.target, "exists": exists, "missing": !exists}).to_string()
+            }
+        }
+    }
+
     /// `nativeCanvasEdit(id, opJson)` (F21): one user gesture on the canvas, one undo step.
     /// `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`.
     pub fn canvas_edit_json(&self, id: &str, op: &str) -> String {
@@ -569,6 +590,13 @@ impl App {
                         None
                     }
                 }
+                // F21-FR13: link the selection to another meeting, or remove its link.
+                "link" => {
+                    let t = op.get("target").and_then(Value::as_str).unwrap_or("");
+                    let l = crate::canvas::item::Link::meeting(t).ok_or("That isn't a meeting")?;
+                    o.scene.relink(&refs, Some(&l))
+                }
+                "unlink" => o.scene.relink(&refs, None),
                 "front" => o.scene.arrange(&refs, true),
                 "back" => o.scene.arrange(&refs, false),
                 // F21-FR3: the backup goes first; without it, nothing is cleared (OQ34).

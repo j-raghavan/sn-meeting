@@ -13,6 +13,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewTreeObserver
+import dev.jraghavan.snmeeting.notes.canvas.Badges
 import dev.jraghavan.snmeeting.notes.canvas.Handles
 import dev.jraghavan.snmeeting.notes.canvas.ImageSource
 import dev.jraghavan.snmeeting.notes.canvas.ItemPainter
@@ -58,6 +59,8 @@ class NotesCanvasView(
         fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
         /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
         fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR13: a pen or finger tap on a link badge. */
+        fun openLink(ref: String) {}
         /** F21-FR10: a pen drag with Table, from ([x0], [y0]) to ([x1], [y1]). */
         fun createTable(x0: Float, y0: Float, x1: Float, y1: Float) {}
         /** F21-FR10: a pen tap with Table at a world point (a cell to type into). */
@@ -377,6 +380,51 @@ class NotesCanvasView(
         return mapFrame != null || mapSwallow
     }
 
+    /** F21-FR13: a link badge taken by the touch going down, until it lifts. */
+    private var badgeRef: String? = null
+    private var badgeDown = 0f to 0f
+
+    /** F21-FR13: a pen (any tool) or finger tap on a link badge opens the meeting it links to. */
+    private fun badgeTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (palmNear() && e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) return false
+                val wx = viewport.worldX(e.x.toDouble()); val wy = viewport.worldY(e.y.toDouble())
+                val r = Badges.RADIUS_DP * density / viewport.zoom
+                badgeRef = Badges.at(ink.entries, wx, wy, viewport.zoom, r)?.ref ?: return false
+                badgeDown = e.x to e.y
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val ref = badgeRef ?: return false
+                badgeRef = null
+                if (hypot(e.x - badgeDown.first, e.y - badgeDown.second) <= TAP_SLOP_PX) host.openLink(ref)
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> { val had = badgeRef != null; badgeRef = null; return had }
+        }
+        return badgeRef != null
+    }
+
+    private val badgeFill = Paint().apply { style = Paint.Style.FILL; color = Color.WHITE; isAntiAlias = true }
+    private val badgeIcon: Bitmap? by lazy {
+        android.graphics.BitmapFactory.decodeResource(resources, dev.jraghavan.snmeeting.R.drawable.ic_cv_action_link)
+    }
+
+    /** F21-FR13: each linked thing's chain badge, drawn with the canvas (never on its own). */
+    private fun drawBadges(canvas: Canvas) {
+        val v = viewport
+        val r = (Badges.RADIUS_DP * density).toFloat()
+        for (e in ink.entries) {
+            if (!Badges.linked(e)) continue
+            val p = Badges.point(e, v.zoom)
+            val x = v.screenX(p.x).toFloat(); val y = v.screenY(p.y).toFloat()
+            canvas.drawCircle(x, y, r * 0.75f, badgeFill)
+            canvas.drawCircle(x, y, r * 0.75f, handleStroke)
+            badgeIcon?.let { b -> canvas.drawBitmap(b, null, android.graphics.RectF(x - r / 2, y - r / 2, x + r / 2, y + r / 2), null) }
+        }
+    }
+
     private fun palmNear(): Boolean = PalmRule.isPalm(penHovering, arbiter.isPenActive,
         SystemClock.uptimeMillis() - lastPenAt, 0f, height)
 
@@ -400,6 +448,7 @@ class NotesCanvasView(
         val pen = e.getToolType(e.actionIndex).let { it == MotionEvent.TOOL_TYPE_STYLUS || it == MotionEvent.TOOL_TYPE_ERASER }
         if (pen && e.actionMasked == MotionEvent.ACTION_DOWN && minimapOpen) minimapOpen = false // the pen closes it
         if (!fixed && !pen && e.pointerCount == 1 && minimapTouch(e)) return true
+        if (!fixed && e.pointerCount == 1 && badgeTouch(e)) return true
         if (fixed && e.actionMasked == MotionEvent.ACTION_DOWN && !pen) return false // the page scrolls
         if (e.actionMasked == MotionEvent.ACTION_DOWN) host.touched()
         if (fixed) parent?.requestDisallowInterceptTouchEvent(true)
@@ -593,6 +642,8 @@ class NotesCanvasView(
             inkPaint.color = Color.BLACK; inkPaint.strokeWidth = host.penWidthPx
             canvas.drawPath(livePath, inkPaint)
         }
+        drawBadges(canvas)
+        drawBadges(canvas)
         markGlyphs.forEach { (x, y) -> canvas.drawText("◆", v.screenX(x).toFloat(), v.screenY(y).toFloat(), glyphPaint) }
         outline?.let { box(canvas, it, dashPaint) }
         val sel = selection

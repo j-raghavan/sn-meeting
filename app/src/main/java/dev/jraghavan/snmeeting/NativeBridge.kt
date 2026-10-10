@@ -190,6 +190,10 @@ object NativeBridge {
      *  As [nativeNotesOpen], with `n` and `defaultStyle`. */
     external fun nativeCanvasShow(id: String, n: Int): String
 
+    /** F21-FR13: where a link badge on [ref] goes: `{meetingId, exists, missing}`, or `{kind,
+     *  followed: false}` for a link this build doesn't follow, or `{meetingId: null}`. */
+    external fun nativeCanvasLinkTarget(id: String, ref: String): String
+
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
      *  atMs: null}`; none `{strokeId: null}`. */

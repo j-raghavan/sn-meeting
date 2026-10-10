@@ -971,3 +971,56 @@ fn new_canvases_live_beside_the_first() {
         false
     );
 }
+
+/// F21-AC13: a link to a meeting is stored and drawn with its badge; `../x` is refused; once
+/// that meeting is deleted, a badge tap says it is missing.
+#[test]
+fn links_to_other_meetings() {
+    let f = fixture();
+    f.app.finish_json(&f.id, 1_000, "");
+    let other = begin(&f.app, T0 + 60_000)["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    f.app.finish_json(&other, 1_000, "");
+    let r = edit(
+        &f,
+        json!({"op": "create", "type": "rectangle", "from": [0, 0], "to": [100, 50]}),
+    );
+    let rect = r["created"].as_str().unwrap().to_owned();
+    edit(&f, json!({"op": "select", "refs": [rect]}));
+    assert!(
+        edit(&f, json!({"op": "link", "target": "../x"}))["error"]
+            .as_str()
+            .unwrap()
+            .contains("isn't a meeting")
+    );
+    assert!(edit(&f, json!({"op": "link", "target": other}))["dirty"].is_array());
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e4, -1e4, 1e4, 1e4]));
+    assert_eq!(
+        d["entries"][0]["item"]["link"],
+        json!({"kind": "meeting", "target": other, "followed": true})
+    );
+    let t = parse(&f.app.canvas_link_target_json(&f.id, &rect));
+    assert_eq!(
+        t,
+        json!({"meetingId": other, "exists": true, "missing": false})
+    );
+    assert!(parse(&f.app.delete_json(&other)).get("error").is_none());
+    let gone = parse(&f.app.canvas_link_target_json(&f.id, &rect));
+    assert_eq!(gone["missing"], true, "{gone}");
+    assert_eq!(
+        parse(&f.app.canvas_link_target_json(&f.id, "s:9")),
+        json!({"meetingId": null})
+    );
+    assert!(parse(&f.app.canvas_link_target_json(&f.id, "bad"))["error"].is_string());
+    assert!(parse(&f.app.canvas_link_target_json("../x", "s:1"))["error"].is_string());
+    assert!(edit(&f, json!({"op": "unlink"}))["dirty"].is_array());
+    let file = json!({"version": 1, "items": [{"id": "n1", "type": "rectangle", "link": {"kind": "note", "target": "/a.note"}}]});
+    f.app.notes_close_json(&f.id, 0.0, 0.0, 1.0);
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    assert_eq!(
+        parse(&f.app.canvas_link_target_json(&f.id, "i:n1")),
+        json!({"kind": "note", "followed": false})
+    );
+}

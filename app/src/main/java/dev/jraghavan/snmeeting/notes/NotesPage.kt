@@ -15,6 +15,7 @@ import dev.jraghavan.snmeeting.ScreenScope
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.str
+import dev.jraghavan.snmeeting.notes.canvas.Badges
 import dev.jraghavan.snmeeting.notes.canvas.DrawItem
 import dev.jraghavan.snmeeting.notes.canvas.Handles
 import dev.jraghavan.snmeeting.notes.canvas.TextLayout
@@ -124,6 +125,8 @@ class NotesPage(
             target = null
             select("""{"op":"select","at":[$x,$y],"r":$radiusWorld}""")
         }
+
+        override fun openLink(ref: String) = openLinkOf(ref)
 
         override fun createTable(x0: Float, y0: Float, x1: Float, y1: Float) =
             edit("""{"op":"create","type":"table","from":[$x0,$y0],"to":[$x1,$y1]${recMs()}}""")
@@ -502,6 +505,68 @@ class NotesPage(
         }
     }
 
+    /**
+     * F21-FR13: Link ⇢ meeting: the recent meetings, newest first, filtered by a search over
+     * their titles; a pick links every selected item and stroke (one step). Remove link clears
+     * it. Links are never sent to a provider.
+     */
+    private fun linkPicker() {
+        val linked = canvas.inkView.selection.any { r -> canvas.inkView.entries.firstOrNull { it.ref == r }?.let(Badges::linked) == true }
+        scope.core({ NativeBridge.nativeListRecent(200) }) { json ->
+            val all = CoreJson.list(json, dev.jraghavan.snmeeting.model.MeetingSummary::from).getOrNull().orEmpty().filter { it.id != id }
+            dialogs.explicit {
+                val search = ui.field("").apply { hint = "Search titles" }
+                val list = android.widget.ListView(a)
+                var shown = all
+                fun label(m: dev.jraghavan.snmeeting.model.MeetingSummary) =
+                    (m.title?.takeIf { it.isNotBlank() } ?: "Untitled") + "  ·  " + m.startedAt.take(16).replace('T', ' ')
+                fun refill() {
+                    val q = search.text.toString().trim().lowercase()
+                    shown = if (q.isEmpty()) all else all.filter { (it.title ?: "").lowercase().contains(q) }
+                    list.adapter = android.widget.ArrayAdapter(a, android.R.layout.simple_list_item_1, shown.map(::label))
+                }
+                refill()
+                search.addTextChangedListener(object : android.text.TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, af: Int) {}
+                    override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+                    override fun afterTextChanged(s: android.text.Editable?) = refill()
+                })
+                val box = LinearLayout(a).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(ui.dim(24), ui.dim(8), ui.dim(24), 0)
+                    addView(search)
+                    addView(list, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dp(420)))
+                }
+                val b = android.app.AlertDialog.Builder(a, dev.jraghavan.snmeeting.R.style.InkDialog).setTitle("Link to a meeting")
+                    .setView(box)
+                    .setNegativeButton("CANCEL", null)
+                    .setOnDismissListener { claim("focus"); canvas.bake(InkBake.Event.PANEL_CLOSED) }
+                if (linked) b.setNeutralButton("REMOVE LINK") { _, _ -> edit("""{"op":"unlink"}""", keepSelection = true) }
+                val d = b.show()
+                list.setOnItemClickListener { _, _, i, _ ->
+                    d.dismiss()
+                    edit("""{"op":"link","target":${CoreJson.quote(shown[i].id)}}""", keepSelection = true)
+                }
+            }
+        }
+    }
+
+    /** F21-FR13: a badge opens the linked meeting on its Minutes tab; Back returns here. */
+    private fun openLinkOf(ref: String) {
+        scope.core({ NativeBridge.nativeCanvasLinkTarget(id, ref) }) { json ->
+            val o = CoreJson.obj(json) { it }.getOrNull() ?: return@core
+            val target = o.str("meetingId") ?: return@core
+            if (o.optBoolean("missing")) {
+                dialogs.explicit { InkDialog.info(a, "That meeting was deleted", "The link stays until you remove it.") }
+                return@core
+            }
+            a.startActivity(android.content.Intent(a, dev.jraghavan.snmeeting.MeetingActivity::class.java)
+                .putExtra(dev.jraghavan.snmeeting.MeetingActivity.EXTRA_ID, target)
+                .putExtra(dev.jraghavan.snmeeting.MeetingActivity.EXTRA_TAB, dev.jraghavan.snmeeting.MeetingActivity.MINUTES))
+            a.overridePendingTransition(0, 0)
+        }
+    }
+
     /** F21-FR12: New canvas saves the one shown and shows a new, empty one (not an undo step). */
     private fun newCanvas() {
         clearSelection()
@@ -563,6 +628,7 @@ class NotesPage(
             ToolBarModel.Act.DONE -> clearSelection()
             ToolBarModel.Act.STYLE -> togglePanel(ToolBarModel.Panel.STYLE, anchor)
             ToolBarModel.Act.TABLE -> togglePanel(ToolBarModel.Panel.TABLE, anchor)
+            ToolBarModel.Act.LINK -> linkPicker()
             ToolBarModel.Act.GROUP -> edit("""{"op":"group"}""", keepSelection = true)
             ToolBarModel.Act.UNGROUP -> edit("""{"op":"ungroup"}""", keepSelection = true)
             ToolBarModel.Act.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
