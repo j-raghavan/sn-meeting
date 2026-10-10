@@ -2,6 +2,7 @@ package dev.jraghavan.snmeeting.notes
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -54,6 +55,8 @@ class NotesCanvasView(
         /** The viewport moved: the visible strokes are fetched again. */
         fun viewportChanged(v: Viewport)
         val penWidthPx: Float
+        /** F17-FR13: every stroke within [bounds], for the minimap's thumbnail. */
+        fun allStrokes(bounds: WorldRect, done: (List<DrawStroke>) -> Unit) = done(emptyList())
     }
 
     var viewport = Viewport(0.0, 0.0, 1.0)
@@ -131,8 +134,8 @@ class NotesCanvasView(
         val screen = PxRect(0, 0, maxOf(r.right, dm.widthPixels), maxOf(r.bottom, dm.heightPixels))
         val holes = inkHoles().filter { it.isShown && it.width > 0 }.map(::screenRect).toMutableList()
         if (minimapOpen) mapFrameNow()?.let { f ->
-            holes += PxRect(c.left + f.left.toInt(), c.top + f.top.toInt(),
-                c.left + (f.left + f.width).toInt() + 1, c.top + (f.top + f.height).toInt() + 1)
+            holes += PxRect(c.left + f.cardLeft.toInt(), c.top + f.cardTop.toInt(),
+                c.left + f.cardRight.toInt() + 1, c.top + f.cardBottom.toInt() + 1)
         }
         val w = IntArray(2).also { getLocationInWindow(it) }
         firmware.setDisabledAreas(InkAreas.disabled(screen, c, holes),
@@ -151,7 +154,6 @@ class NotesCanvasView(
         style = Paint.Style.STROKE; color = Color.BLACK; strokeWidth = 2f
         pathEffect = DashPathEffect(floatArrayOf(10f, 8f), 0f)
     }
-    private val framePaint = Paint().apply { style = Paint.Style.STROKE; color = Color.BLACK; strokeWidth = 2f }
     private val glyphPaint = Paint().apply { color = Color.BLACK; textSize = 28f; isAntiAlias = true }
 
     private val drawPath = Path()
@@ -173,6 +175,8 @@ class NotesCanvasView(
     /** The strokes in view and the history state, from the core. [event] says whether the
      *  canvas bakes now (InkBake): a pen stroke never does, its ink stays on the overlay. */
     fun show(next: InkView, event: InkBake.Event? = InkBake.Event.VIEWPORT_SETTLED) {
+        // F17-FR13: the thumbnail is rebuilt only when the ink itself changed.
+        if (next.bounds != ink.bounds || (event != null && event in InkBake.INK_CHANGES)) { thumbStrokes = null; thumbKey = null }
         ink = next
         event?.let(::bake)
     }
@@ -249,7 +253,16 @@ class NotesCanvasView(
 
     private fun minimapShown() = minimapOpen || SystemClock.uptimeMillis() < minimapUntil
 
-    private fun mapFrameNow() = MinimapFrame.of(ink.bounds, viewport, width.toDouble(), height.toDouble(), barOnLeft)
+    private val density get() = resources.displayMetrics.density.toDouble()
+
+    /** F17-FR13: the minimap card's top (canvas px), below the zoom pill when they share a corner. */
+    var minimapTop: () -> Int = { 0 }
+
+    private fun mapFrameNow() = MinimapFrame.of(ink.bounds, viewport, width.toDouble(), height.toDouble(), barOnLeft,
+        density, minimapTop().toDouble())
+
+    /** A touch landed on the card but not on a control: the rest of it is swallowed. */
+    private var mapSwallow = false
 
     /**
      * F17-FR13 (sn-canvas): a finger on the shown minimap navigates. A tap moves the view to
@@ -262,13 +275,20 @@ class NotesCanvasView(
         val w = width.toDouble(); val h = height.toDouble()
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                val f = mapFrameNow()?.takeIf { minimapShown() && it.contains(x, y) } ?: return false
+                val f = mapFrameNow()?.takeIf { minimapShown() && it.inCard(x, y) } ?: return false
+                if (f.inMinus(x, y) || f.inPlus(x, y)) {
+                    setViewport(f.zoomed(viewport, f.inPlus(x, y), w, h)) // about the view's centre
+                    mapSwallow = true
+                    return true
+                }
+                if (!f.contains(x, y)) { mapSwallow = true; return true }
                 mapFrame = f; mapStart = viewport; mapDown = x to y
                 mapGrab = f.onView(x, y, viewport, w, h)
                 return true
             }
-            MotionEvent.ACTION_MOVE -> return mapFrame != null
+            MotionEvent.ACTION_MOVE -> return mapFrame != null || mapSwallow
             MotionEvent.ACTION_UP -> {
+                if (mapSwallow) { mapSwallow = false; return true }
                 val f = mapFrame ?: return false
                 val start = mapStart ?: viewport
                 val target = if (mapGrab) f.dragBy(start, x - mapDown.first, y - mapDown.second) else f.centreOn(x, y, start, w, h)
@@ -276,9 +296,13 @@ class NotesCanvasView(
                 setViewport(target) // the host fetches what is now in view and bakes once
                 return true
             }
-            MotionEvent.ACTION_CANCEL -> { val had = mapFrame != null; mapFrame = null; mapStart = null; return had }
+            MotionEvent.ACTION_CANCEL -> {
+                val had = mapFrame != null || mapSwallow
+                mapFrame = null; mapStart = null; mapSwallow = false
+                return had
+            }
         }
-        return mapFrame != null
+        return mapFrame != null || mapSwallow
     }
 
     private fun palmNear(): Boolean = PalmRule.isPalm(penHovering, arbiter.isPenActive,
@@ -506,28 +530,99 @@ class NotesCanvasView(
             v.screenX(r.right).toFloat() + 4, v.screenY(r.bottom).toFloat() + 4, paint)
     }
 
-    /** sn-canvas's minimap: all ink and the part in view, one repaint (F17-FR1). */
-    private fun minimap(canvas: Canvas) {
-        val f = MinimapFrame.of(ink.bounds, viewport, width.toDouble(), height.toDouble(), barOnLeft) ?: return
-        val l = f.left.toFloat(); val t = f.top.toFloat()
-        dotPaint.color = Color.WHITE
-        canvas.drawRect(l, t, l + f.width.toFloat(), t + f.height.toFloat(), dotPaint)
-        canvas.drawRect(l, t, l + f.width.toFloat(), t + f.height.toFloat(), framePaint)
-        dotPaint.color = Color.BLACK
-        for (s in ink.strokes) {
-            val b = s.bounds
-            canvas.drawRect(l + f.fit.screenX(b.left).toFloat(), t + f.fit.screenY(b.top).toFloat(),
-                l + f.fit.screenX(b.right).toFloat().coerceAtLeast(f.fit.screenX(b.left).toFloat() + 1),
-                t + f.fit.screenY(b.bottom).toFloat().coerceAtLeast(f.fit.screenY(b.top).toFloat() + 1), dotPaint)
+    // F17-FR13: the minimap card, drawn as inkread's MinimapController draws its own.
+    private val cardFill = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL; isAntiAlias = true }
+    private val cardStroke = Paint().apply { color = Color.parseColor("#BDBDBD"); style = Paint.Style.STROKE; strokeWidth = 1.5f; isAntiAlias = true }
+    private val thumbStroke = Paint().apply { color = Color.parseColor("#E0E0E0"); style = Paint.Style.STROKE; strokeWidth = 1f; isAntiAlias = true }
+    private val windowFill = Paint().apply { color = Color.parseColor("#22000000"); style = Paint.Style.FILL; isAntiAlias = true }
+    private val windowStroke = Paint().apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 3f; isAntiAlias = true }
+    private val buttonGlyph = Paint().apply { color = Color.BLACK; style = Paint.Style.STROKE; strokeWidth = 3f; strokeCap = Paint.Cap.ROUND; isAntiAlias = true }
+    private val thumbInk = Paint().apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; isAntiAlias = true }
+    private val thumbDot = Paint().apply { style = Paint.Style.FILL; isAntiAlias = true }
+
+    /** Every stroke, fetched for the thumbnail; null until fetched or once the ink changes. */
+    private var thumbStrokes: List<DrawStroke>? = null
+    private var thumbFetching = false
+    private var thumb: Bitmap? = null
+    /** What [thumb] was drawn for: its size and fit (the bar's side moves it, not its fit). */
+    private var thumbKey: Any? = null
+
+    /** The cached thumbnail for [f], or null while the strokes are fetched (one redraw follows). */
+    private fun thumbFor(f: MinimapFrame): Bitmap? {
+        val strokes = thumbStrokes
+        if (strokes == null) {
+            val b = ink.bounds
+            if (b == null) {
+                thumbStrokes = emptyList()
+            } else {
+                if (!thumbFetching) {
+                    thumbFetching = true
+                    host.allStrokes(b) { all -> thumbFetching = false; thumbStrokes = all; thumbKey = null; if (minimapShown()) invalidate() }
+                }
+                return thumb
+            }
         }
-        val vis = viewport.visible(width.toDouble(), height.toDouble())
-        canvas.drawRect(l + f.fit.screenX(vis.left).toFloat(), t + f.fit.screenY(vis.top).toFloat(),
-            l + f.fit.screenX(vis.right).toFloat(), t + f.fit.screenY(vis.bottom).toFloat(), framePaint)
+        val key = Triple(f.width.toInt(), f.height.toInt(), f.fit)
+        if (key == thumbKey && thumb != null) return thumb
+        thumb?.recycle()
+        thumb = renderThumb(f, thumbStrokes.orEmpty())
+        thumbKey = key
+        return thumb
+    }
+
+    /** The strokes themselves, scaled into the thumbnail; highlighter as a light grey band. */
+    private fun renderThumb(f: MinimapFrame, strokes: List<DrawStroke>): Bitmap {
+        val bmp = Bitmap.createBitmap(f.width.toInt().coerceAtLeast(1), f.height.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.WHITE)
+        val v = f.fit
+        val z = v.zoom.toFloat()
+        val path = Path()
+        for (s in strokes) {
+            if (s.pts.size < 2) continue
+            val color = if (s.highlighter) Color.rgb(205, 205, 205) else s.argb or 0xFF000000.toInt()
+            thumbInk.color = color; thumbDot.color = color
+            thumbInk.strokeWidth = (s.width * z).coerceAtLeast(if (s.highlighter) 2f else 1f)
+            if (s.pts.size == 2) {
+                c.drawCircle(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat(), thumbInk.strokeWidth / 2, thumbDot)
+                continue
+            }
+            path.reset()
+            path.moveTo(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat())
+            var i = 2
+            while (i + 1 < s.pts.size) { path.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2 }
+            c.drawPath(path, thumbInk)
+        }
+        return bmp
+    }
+
+    /** The card: the thumbnail in a light frame, the part in view, and −/+ under a divider. */
+    private fun minimap(canvas: Canvas) {
+        val f = mapFrameNow() ?: return
+        val l = f.left.toFloat(); val t = f.top.toFloat(); val r = (f.left + f.width).toFloat(); val b = (f.top + f.height).toFloat()
+        val rad = (10 * density).toFloat()
+        canvas.drawRoundRect(f.cardLeft.toFloat(), f.cardTop.toFloat(), f.cardRight.toFloat(), f.cardBottom.toFloat(), rad, rad, cardFill)
+        canvas.drawRoundRect(f.cardLeft.toFloat(), f.cardTop.toFloat(), f.cardRight.toFloat(), f.cardBottom.toFloat(), rad, rad, cardStroke)
+        thumbFor(f)?.let { canvas.drawBitmap(it, l, t, null) }
+        canvas.drawRect(l, t, r, b, thumbStroke)
+        val win = f.window(viewport, width.toDouble(), height.toDouble())
+        canvas.drawRect(win[0].toFloat(), win[1].toFloat(), win[2].toFloat(), win[3].toFloat(), windowFill)
+        canvas.drawRect(win[0].toFloat(), win[1].toFloat(), win[2].toFloat(), win[3].toFloat(), windowStroke)
+        val pad = f.pad.toFloat(); val top = f.buttonTop.toFloat(); val bottom = f.buttonBottom.toFloat()
+        canvas.drawLine(f.cardLeft.toFloat() + pad, top, f.cardRight.toFloat() - pad, top, thumbStroke)
+        val inset = (4 * density).toFloat()
+        canvas.drawLine(f.split.toFloat(), top + inset, f.split.toFloat(), bottom - inset, thumbStroke)
+        val g = (8 * density).toFloat(); val cy = (top + bottom) / 2
+        val minusX = (f.left + f.width / 4).toFloat(); val plusX = (f.left + f.width * 3 / 4).toFloat()
+        canvas.drawLine(minusX - g, cy, minusX + g, cy, buttonGlyph)
+        canvas.drawLine(plusX - g, cy, plusX + g, cy, buttonGlyph)
+        canvas.drawLine(plusX, cy - g, plusX, cy + g, buttonGlyph)
     }
 
     override fun onDetachedFromWindow() {
         removeCallbacks(hideMinimap)
         viewTreeObserver.removeOnGlobalLayoutListener(layoutWatch)
+        thumb?.recycle(); thumb = null; thumbKey = null
         super.onDetachedFromWindow()
     }
 

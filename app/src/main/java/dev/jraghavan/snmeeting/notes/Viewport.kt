@@ -81,17 +81,55 @@ data class Viewport(val x: Double, val y: Double, val zoom: Double) {
 }
 
 /**
- * The minimap (sn-canvas `Minimap.kt`, `ViewTransforms.minimapLayout`): shown while the canvas
- * moves and for a while after, as one repaint (no fade on e-ink). It frames all ink and the
- * part in view, in a box at the canvas's bottom corner away from the tool bar.
+ * F17-FR13's minimap card, after inkread's `MinimapController` (AGPL-3.0, same owner): a
+ * rounded white card at the canvas's top corner away from the tool bar, holding a thumbnail of
+ * all the ink with the part in view marked, and −/+ buttons under it. This one geometry is what
+ * both the drawing and the touch handling read, so they cannot disagree (inkread's pattern).
+ * All values are canvas px; [fit] maps world to thumbnail px.
  */
-data class MinimapFrame(val left: Double, val top: Double, val width: Double, val height: Double, val fit: Viewport) {
-    /** F17-FR13: whether a view point ([x], [y]) is on the minimap. */
+data class MinimapFrame(
+    val left: Double,
+    val top: Double,
+    val width: Double,
+    val height: Double,
+    val fit: Viewport,
+    /** The −/+ row under the thumbnail. */
+    val buttonTop: Double,
+    val buttonH: Double,
+    /** The card's padding round the thumbnail and the row. */
+    val pad: Double,
+) {
+    val split get() = left + width / 2
+    val buttonBottom get() = buttonTop + buttonH
+    val cardLeft get() = left - pad
+    val cardTop get() = top - pad
+    val cardRight get() = left + width + pad
+    val cardBottom get() = buttonBottom + pad
+
+    /** F17-FR13: whether a view point ([x], [y]) is on the thumbnail. */
     fun contains(x: Double, y: Double) = x in left..(left + width) && y in top..(top + height)
+
+    /** Anywhere on the card: a touch there never reaches the canvas. */
+    fun inCard(x: Double, y: Double) = x in cardLeft..cardRight && y in cardTop..cardBottom
+
+    private fun inRow(y: Double) = y in buttonTop..buttonBottom
+
+    /** The − button; [split] is its, so − and + never overlap. */
+    fun inMinus(x: Double, y: Double) = inRow(y) && x in left..split
+
+    fun inPlus(x: Double, y: Double) = inRow(y) && x > split && x <= left + width
 
     /** The world point under a view point on the minimap (clamped to the box). */
     fun worldAt(x: Double, y: Double): Pair<Double, Double> =
         fit.worldX(x.coerceIn(left, left + width) - left) to fit.worldY(y.coerceIn(top, top + height) - top)
+
+    /** The part in view on the thumbnail (left, top, right, bottom), clamped to it. */
+    fun window(view: Viewport, w: Double, h: Double): DoubleArray {
+        val v = view.visible(w, h)
+        fun cx(x: Double) = (left + fit.screenX(x)).coerceIn(left, left + width)
+        fun cy(y: Double) = (top + fit.screenY(y)).coerceIn(top, top + height)
+        return doubleArrayOf(cx(v.left), cy(v.top), cx(v.right), cy(v.bottom))
+    }
 
     /** F17-FR13: a tap at ([x], [y]) moves the view there: that world point at its centre. */
     fun centreOn(x: Double, y: Double, view: Viewport, w: Double, h: Double): Viewport {
@@ -109,20 +147,37 @@ data class MinimapFrame(val left: Double, val top: Double, val width: Double, va
         return contains(x, y) && view.visible(w, h).contains(wx, wy)
     }
 
+    /** The − and + buttons: zoom about the view's centre. */
+    fun zoomed(view: Viewport, zoomIn: Boolean, w: Double, h: Double): Viewport =
+        view.zoomAbout(if (zoomIn) ZOOM_STEP else 1 / ZOOM_STEP, w / 2, h / 2)
+
     companion object {
-        const val WIDTH_PX = 300.0
-        const val MARGIN_PX = 24.0
-        const val PADDING_PX = 12.0
+        /** About a quarter of the canvas wide, never under 200 dp. */
+        const val MIN_WIDTH_DP = 200.0
+        const val MARGIN_DP = 12.0
+        const val PAD_DP = 6.0
+        const val INSET_DP = 8.0
+        const val BUTTON_DP = 48.0
+        const val GAP_DP = 6.0
+        const val ZOOM_STEP = 1.25
         const val LINGER_MS = 3000L
 
-        fun of(ink: WorldRect?, view: Viewport, w: Double, h: Double, barOnLeft: Boolean): MinimapFrame? {
+        /**
+         * The card for a [w] × [h] canvas at [density] px per dp, its top at [top] px (below the
+         * zoom pill when they share a corner). The thumbnail keeps the canvas's shape and fits
+         * the ink (or, with none, the view), so it changes only when the ink does.
+         */
+        fun of(ink: WorldRect?, view: Viewport, w: Double, h: Double, barOnLeft: Boolean, density: Double = 1.0, top: Double = MARGIN_DP * density): MinimapFrame? {
             if (w <= 0 || h <= 0) return null
-            val boxH = (WIDTH_PX * h / w).coerceIn(160.0, 420.0)
-            val visible = view.visible(w, h)
-            val world = ink?.union(visible) ?: visible
-            val left = if (barOnLeft) w - MARGIN_PX - WIDTH_PX else MARGIN_PX
-            val fit = Viewport.fit(world, WIDTH_PX, boxH, PADDING_PX, 0.0..Double.MAX_VALUE)
-            return MinimapFrame(left, h - MARGIN_PX - boxH, WIDTH_PX, boxH, fit)
+            val margin = MARGIN_DP * density
+            val pad = PAD_DP * density
+            val tw = maxOf(w / 4, MIN_WIDTH_DP * density).coerceAtMost(w - 2 * margin - 2 * pad).coerceAtLeast(1.0)
+            val th = tw * h / w
+            val left = if (barOnLeft) w - margin - pad - tw else margin + pad
+            val world = ink ?: view.visible(w, h)
+            val fit = Viewport.fit(world, tw, th, INSET_DP * density, 0.0..Double.MAX_VALUE)
+            val t = top + pad
+            return MinimapFrame(left, t, tw, th, fit, t + th + GAP_DP * density, BUTTON_DP * density, pad)
         }
     }
 }

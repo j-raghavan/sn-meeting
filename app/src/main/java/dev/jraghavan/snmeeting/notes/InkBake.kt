@@ -20,6 +20,10 @@ object InkBake {
 
     enum class Step { DRAW, REFRESH_PANEL, CLEAR_OVERLAY }
 
+    /** The events that change the ink itself (not just what is in view): F17-FR13's thumbnail
+     *  is rebuilt after these. */
+    val INK_CHANGES = setOf(Event.PEN_STROKE, Event.HIGHLIGHTER_STROKE, Event.ERASE, Event.UNDO_REDO, Event.LASSO_MOVE)
+
     private val BAKE = listOf(Step.DRAW, Step.REFRESH_PANEL, Step.CLEAR_OVERLAY)
 
     /** What the canvas does for [e]; [toolInks] is whether the tool now selected writes with

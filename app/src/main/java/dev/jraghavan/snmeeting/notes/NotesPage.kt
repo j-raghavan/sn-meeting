@@ -119,6 +119,9 @@ class NotesPage(
             host.listenAt(seek, hit.lineN)
         }
         override fun viewportChanged(v: Viewport) = fetch(InkBake.Event.VIEWPORT_SETTLED)
+        override fun allStrokes(bounds: WorldRect, done: (List<DrawStroke>) -> Unit) = scope.core({
+            NativeBridge.nativeInkStrokesForDraw(id, LAYER, bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat())
+        }) { json -> done(CoreJson.obj(json, InkView::from).getOrNull()?.strokes.orEmpty()) }
     })
 
     /** F17-FR14: the zoom pill's controls the hints point at. */
@@ -251,6 +254,8 @@ class NotesPage(
 
     init {
         canvas.inkHoles = { listOf(zoomPill) } // F17-FR4: the pen never inks over the pill
+        // F17-FR13: the minimap card sits under the zoom pill when the bar leaves it that corner.
+        canvas.minimapTop = { if (canvas.barOnLeft) 0 else zoomPill.bottom }
         layout()
     }
 

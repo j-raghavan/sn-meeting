@@ -61,21 +61,71 @@ class ViewportTest { // F13-FR1 / F17-FR1: pan, pinch-zoom 5 %–2000 %, the zoo
         assertNull(WorldRect.of(null))
     }
 
-    @Test fun theMinimapFramesInkAndViewAwayFromTheBar() {
+    @Test fun theMinimapCardSitsAtTheTopCornerAwayFromTheBar() { // F17-FR13
         val ink = WorldRect(0.0, 0.0, 5_000.0, 5_000.0)
         val view = Viewport(10_000.0, 10_000.0, 1.0)
-        val right = MinimapFrame.of(ink, view, 1_200.0, 1_400.0, barOnLeft = false)!!
-        assertEquals(MinimapFrame.MARGIN_PX, right.left, eps)
-        val left = MinimapFrame.of(ink, view, 1_200.0, 1_400.0, barOnLeft = true)!!
-        assertEquals(1_200.0 - 24.0 - 300.0, left.left, eps)
-        assertEquals(1_400.0 - 24.0 - left.height, left.top, eps)
-        // Both the ink and the far-away view fit inside the box.
-        val f = right.fit
-        assertTrue(f.screenX(0.0) >= 0 && f.screenX(11_200.0) <= MinimapFrame.WIDTH_PX)
+        val d = 2.0
+        // A quarter of a wide canvas; never under 200 dp on a narrow one.
+        val right = MinimapFrame.of(ink, view, 2_000.0, 2_400.0, barOnLeft = false, d, top = 100.0)!!
+        assertEquals(500.0, right.width, eps)
+        assertEquals(600.0, right.height, eps) // the canvas's shape
+        assertEquals(400.0, MinimapFrame.of(ink, view, 1_200.0, 1_400.0, false, d)!!.width, eps)
+        assertEquals((12.0 + 6.0) * d, right.left, eps)
+        assertEquals(100.0 + 6.0 * d, right.top, eps) // under the zoom pill
+        val left = MinimapFrame.of(ink, view, 2_000.0, 2_400.0, barOnLeft = true, d)!!
+        assertEquals(2_000.0 - (12.0 + 6.0) * d, left.left + left.width, eps)
+        assertEquals((12.0 + 6.0) * d, left.top, eps)
+        // The card wraps the thumbnail and the −/+ row.
+        assertEquals(right.left - 12.0, right.cardLeft, eps)
+        assertEquals(right.top + right.height + 6.0 * d, right.buttonTop, eps)
+        assertEquals(right.buttonTop + 48.0 * d + 12.0, right.cardBottom, eps)
         assertNull(MinimapFrame.of(ink, view, 0.0, 10.0, false))
-        assertTrue(MinimapFrame.of(null, view, 100.0, 100.0, false)!!.height >= 160.0)
         assertTrue(ink.contains(1.0, 1.0))
         assertFalse(ink.contains(-1.0, 1.0))
+    }
+
+    @Test fun theThumbnailFitsTheInkNotTheView() { // F17-FR13: so it is cached until the ink changes
+        val ink = WorldRect(0.0, 0.0, 5_000.0, 5_000.0)
+        val a = MinimapFrame.of(ink, Viewport(0.0, 0.0, 1.0), 2_000.0, 2_400.0, false, 2.0)!!
+        val b = MinimapFrame.of(ink, Viewport(9_000.0, 300.0, 0.5), 2_000.0, 2_400.0, false, 2.0)!!
+        assertEquals(a.fit, b.fit)
+        val f = a.fit
+        assertTrue(f.screenX(0.0) >= 16.0 - eps && f.screenX(5_000.0) <= a.width - 16.0 + eps)
+        assertTrue(f.screenY(0.0) >= 0 && f.screenY(5_000.0) <= a.height)
+        // No ink: the view is what it shows.
+        val empty = MinimapFrame.of(null, Viewport(0.0, 0.0, 1.0), 2_000.0, 2_400.0, false, 2.0)!!
+        assertEquals(empty.width / 2, empty.fit.screenX(1_000.0), 1e-6)
+        assertEquals(empty.height / 2, empty.fit.screenY(1_200.0), 1e-6)
+    }
+
+    @Test fun theWindowMarksThePartInViewClampedToTheThumbnail() { // F17-FR13
+        val ink = WorldRect(0.0, 0.0, 4_000.0, 4_800.0)
+        val f = MinimapFrame.of(ink, Viewport(0.0, 0.0, 1.0), 2_000.0, 2_400.0, false, 2.0)!!
+        val w = f.window(Viewport(1_000.0, 1_000.0, 1.0), 2_000.0, 2_400.0)
+        assertEquals(f.left + f.fit.screenX(1_000.0), w[0], eps)
+        assertEquals(f.top + f.fit.screenY(1_000.0), w[1], eps)
+        assertEquals(f.left + f.fit.screenX(3_000.0), w[2], eps)
+        val far = f.window(Viewport(-90_000.0, 0.0, 1.0), 2_000.0, 2_400.0)
+        assertEquals(f.left, far[0], eps)
+        assertEquals(f.left, far[2], eps)
+    }
+
+    @Test fun minusAndPlusSplitTheRowAndZoomAboutTheCentre() { // F17-FR13
+        val f = MinimapFrame.of(WorldRect(0.0, 0.0, 5_000.0, 5_000.0), Viewport(0.0, 0.0, 1.0), 2_000.0, 2_400.0, false, 2.0)!!
+        val y = f.buttonTop + f.buttonH / 2
+        assertTrue(f.inMinus(f.left + 1, y) && !f.inPlus(f.left + 1, y))
+        assertTrue(f.inMinus(f.split, y) && !f.inPlus(f.split, y))
+        assertTrue(f.inPlus(f.split + 1, y) && f.inPlus(f.left + f.width, y))
+        assertFalse(f.inMinus(f.left + 1, f.top + 1) || f.inPlus(f.split + 1, f.buttonBottom + 1))
+        assertTrue(f.inCard(f.cardLeft + 1, f.cardBottom - 1) && !f.inCard(f.cardRight + 1, y))
+        assertFalse(f.contains(f.left + 1, y))
+        val view = Viewport(100.0, 200.0, 1.0)
+        val zin = f.zoomed(view, zoomIn = true, 2_000.0, 2_400.0)
+        assertEquals(1.25, zin.zoom, eps)
+        val (cx, cy) = view.centre(2_000.0, 2_400.0)
+        val (zx, zy) = zin.centre(2_000.0, 2_400.0)
+        assertEquals(cx, zx, 1e-6); assertEquals(cy, zy, 1e-6)
+        assertEquals(0.8, f.zoomed(view, zoomIn = false, 2_000.0, 2_400.0).zoom, eps)
     }
 
     @Test fun aTapOnTheMinimapCentresTheViewThere() { // F17-FR13
