@@ -31,6 +31,7 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 | `res/drawable/ic_tool_{pen,highlighter,eraser}.xml`, `ic_sel_{undo,redo}.xml` (notes tools, via inkread) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_tool_lasso.xml` (lasso, from inkread) | inkread (same author) | AGPL-3.0-only |
 | `res/drawable/ic_tool_listen.xml` (speaker, the Listen tool) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable-nodpi/ic_cv_*.png` (F21's tools, actions, fills and outlines) | sn-canvas `assets/icons/*.png` (same author) | MIT (notice below) |
 
 ## Adapted source code
 

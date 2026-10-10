@@ -58,6 +58,16 @@ class TouchArbiterTest {
         assertEquals(Gesture.NONE, InputRules.forPen(NoteTool.LISTEN, inverted = false, recording = true))
     }
 
+    @Test fun theNewToolsActWithThePenAndTheInvertedPenStillErases() { // F21-FR2, F21-AC6
+        assertEquals(Gesture.SELECT, InputRules.forPen(NoteTool.SELECT, inverted = false, recording = false))
+        for (t in NoteTool.SHAPES) assertEquals(Gesture.SHAPE, InputRules.forPen(t, inverted = false, recording = true))
+        assertEquals(Gesture.PLACE, InputRules.forPen(NoteTool.TEXT, inverted = false, recording = false))
+        assertEquals(Gesture.PLACE, InputRules.forPen(NoteTool.NOTE, inverted = false, recording = false))
+        assertEquals(Gesture.TABLE, InputRules.forPen(NoteTool.TABLE, inverted = false, recording = false))
+        for (t in NoteTool.entries) assertEquals("$t", Gesture.ERASE, InputRules.forPen(t, inverted = true, recording = false))
+        assertTrue(NoteTool.ARROW.isShape && !NoteTool.TEXT.isShape && NoteTool.TABLE.isInsert && !NoteTool.SELECT.isInsert)
+    }
+
     @Test fun aFingerNeverDrawsAndATapSeeksOnlyWithListen() { // INV12b, F17-AC1c
         for (t in NoteTool.entries) {
             assertEquals(Gesture.PAN, InputRules.forFinger(t, isTap = false, palm = false, recording = false))

@@ -1,15 +1,22 @@
 package dev.jraghavan.snmeeting.notes
 
 import android.app.Activity
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.view.Gravity
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.jraghavan.snmeeting.Inkwell
 import dev.jraghavan.snmeeting.R
+import dev.jraghavan.snmeeting.notes.ToolBarModel.Act
 import dev.jraghavan.snmeeting.notes.ToolBarModel.Item
+import dev.jraghavan.snmeeting.notes.canvas.ShapeStyle
+import dev.jraghavan.snmeeting.notes.canvas.SizeStyle
+import dev.jraghavan.snmeeting.notes.canvas.StylePalette
 
 /**
  * DEVICE-UNVERIFIED (layout and refresh on the Manta). F17-FR2's docked tool bar, adapted from
@@ -17,7 +24,8 @@ import dev.jraghavan.snmeeting.notes.ToolBarModel.Item
  * removed, dragging gone and a docked collapse: a vertical bar on the canvas's right (or left)
  * edge, never floating. It draws [ToolBarModel.items]; Mark and the timer redraw in place
  * ([showTimer], [showMarked], [showCost]) so a second's tick touches only its own view
- * (F17-FR11).
+ * (F17-FR11). F21-FR2: Shapes ▸, Insert ▸, Style ● and ⋮ open their panels beside the bar
+ * (the host places them); with a selection the middle holds the selection's actions.
  */
 class DockedToolBar(private val a: Activity, private val ui: Inkwell, private val host: Host) {
     interface Host {
@@ -25,7 +33,10 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         fun onUndo()
         fun onRedo()
         fun onCollapse(collapsed: Boolean)
-        fun onOptions(anchor: View)
+        /** F21-FR2: a flyout or panel button: [panel] opens (or closes) beside [anchor]. */
+        fun onPanel(panel: ToolBarModel.Panel, anchor: View)
+        /** F21-FR2: one of the selection section's actions. */
+        fun onAction(act: Act, anchor: View)
         fun onMark()
         fun onStop()
         fun onPlay()
@@ -44,6 +55,8 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
     private var shown: List<Item> = emptyList()
     /** F17-FR14: each control's view, by the hint id that points at it. */
     val anchors = HashMap<String, View>()
+    /** F21-FR2: the bar is on the canvas's left (flyout markers point right). */
+    var onLeft = false
 
     /** The bar's width, expanded or collapsed: one button and a small margin each side, in
      *  plain dp (not the page's width-driven scale), so the canvas gets the rest (owner,
@@ -99,6 +112,10 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
 
     private fun hintId(i: Item): String? = when (i) {
         is Item.Tool -> i.tool.name.lowercase()
+        is Item.Shapes -> "shapes"
+        is Item.Insert -> "insert"
+        is Item.Style -> "style"
+        is Item.More -> "more"
         is Item.Undo -> "undo"
         is Item.Handle -> "handle"
         is Item.Mark -> "mark"
@@ -112,7 +129,8 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
     } else {
         LinearLayout.LayoutParams(ui.dp(BUTTON_DP), LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-            topMargin = ui.dp(5); bottomMargin = ui.dp(5)
+            // F21-AC17: every tool, the actions and the bottom group fit at 64 dp without scrolling.
+            topMargin = ui.dp(GAP_DP); bottomMargin = ui.dp(GAP_DP)
         }
     }
 
@@ -122,27 +140,98 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         if (isClickable) minHeight = ui.dp(TOUCH_DP)
     }
 
-    private fun icon(res: Int, selected: Boolean, enabled: Boolean, onClick: () -> Unit): View = ImageView(a).apply {
+    private fun icon(res: Int, selected: Boolean, enabled: Boolean, open: Boolean = false, onClick: () -> Unit): ImageView = ImageView(a).apply {
         setImageResource(res)
         val box = ui.dp(BUTTON_DP)
         layoutParams = LinearLayout.LayoutParams(box, box)
-        val pad = ui.dp(8) // the glyph stays ~40 dp, as before
+        val pad = ui.dp(if (res.isCanvasIcon()) 11 else 8) // the glyph stays ~34–40 dp, as before
         setPadding(pad, pad, pad, pad)
-        // inkread's palette: the active tool is a filled dark chip, the others plain line icons.
-        background = ui.outline(ui.dp(9), if (selected) ui.ink else Color.WHITE)
+        // inkread's palette: the active tool is a filled dark chip, the others plain line icons;
+        // a button whose panel is open is a light chip.
+        background = ui.outline(ui.dp(9), if (selected) ui.ink else if (open) OPEN_FILL else Color.WHITE)
         setColorFilter(if (selected) Color.WHITE else if (enabled) ui.ink else ui.textMuted)
         isEnabled = enabled
         isClickable = enabled
+        contentDescription = resources.getResourceEntryName(res)
         if (enabled) setOnClickListener { onClick() }
     }
 
+    private fun Int.isCanvasIcon() = a.resources.getResourceEntryName(this).startsWith("ic_cv_")
+
+    /** A flyout button: its icon with a small ▸ (◂ docked right) pointing where it opens. */
+    private fun flyout(res: Int, selected: Boolean, open: Boolean, onClick: (View) -> Unit): View {
+        val frame = FrameLayout(a)
+        val img = icon(res, selected, enabled = true, open = open) { onClick(frame) }
+        frame.addView(img, FrameLayout.LayoutParams(ui.dp(BUTTON_DP), ui.dp(BUTTON_DP)))
+        val mark = TextView(a).apply {
+            text = if (onLeft) "▸" else "◂"
+            textSize = 10f
+            setTextColor(if (selected) Color.WHITE else ui.ink)
+        }
+        frame.addView(mark, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or if (onLeft) Gravity.END else Gravity.START).apply { setMargins(ui.dp(5), 0, ui.dp(5), ui.dp(2)) })
+        return frame
+    }
+
+    /** F21-FR6: Style ●: the default colour as its e-ink grey, sized by the default size. */
+    private inner class Swatch(private val style: ShapeStyle, private val open: Boolean) : View(a) {
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.style = Paint.Style.FILL }
+        private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { this.style = Paint.Style.STROKE; strokeWidth = ui.dp(2).toFloat(); color = ui.ink }
+
+        init {
+            background = ui.outline(ui.dp(9), if (open) OPEN_FILL else Color.WHITE)
+            minimumHeight = ui.dp(BUTTON_DP)
+            contentDescription = "style"
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            val r = ui.dp(when (style.size) { SizeStyle.S -> 8; SizeStyle.M -> 11; SizeStyle.L -> 14; SizeStyle.XL -> 17 }).toFloat()
+            fill.color = StylePalette.EINK.stroke(style.color)
+            canvas.drawCircle(width / 2f, height / 2f, r, fill)
+            canvas.drawCircle(width / 2f, height / 2f, r, ring)
+        }
+    }
+
+    private fun actIcon(act: Act) = when (act) {
+        Act.DELETE -> R.drawable.ic_cv_action_delete
+        Act.DUPLICATE -> R.drawable.ic_cv_action_duplicate
+        Act.GROUP -> R.drawable.ic_cv_action_group
+        Act.UNGROUP -> R.drawable.ic_cv_action_ungroup
+        Act.LINK -> R.drawable.ic_cv_action_link
+        Act.TABLE -> R.drawable.ic_cv_tool_table
+        Act.DONE -> R.drawable.ic_cv_action_close
+        Act.FRONT, Act.BACK, Act.STYLE -> 0
+    }
+
+    private fun action(i: Item.Action, s: ToolBarModel.State): View = when (i.act) {
+        Act.FRONT, Act.BACK -> ui.eyebrow(if (i.act == Act.FRONT) "FRONT" else "BACK").apply {
+            setPadding(0, ui.dp(6), 0, ui.dp(6))
+            isClickable = true
+            setOnClickListener { host.onAction(i.act, this) }
+        }.control()
+        Act.STYLE -> Swatch(s.style, s.open == ToolBarModel.Panel.STYLE).apply { setOnClickListener { host.onAction(i.act, this) } }
+        else -> icon(actIcon(i.act), selected = false, enabled = i.enabled) {}.also { v ->
+            if (i.enabled) v.setOnClickListener { host.onAction(i.act, v) }
+        }
+    }
+
     private fun iconOf(t: NoteTool) = when (t) {
+        NoteTool.SELECT -> R.drawable.ic_cv_tool_select
         NoteTool.PEN -> R.drawable.ic_tool_pen
         NoteTool.HIGHLIGHTER -> R.drawable.ic_tool_highlighter
         NoteTool.ERASER -> R.drawable.ic_tool_eraser
         NoteTool.LASSO -> R.drawable.ic_tool_lasso
         NoteTool.LISTEN -> R.drawable.ic_tool_listen
+        NoteTool.RECTANGLE -> R.drawable.ic_cv_tool_rectangle
+        NoteTool.ELLIPSE -> R.drawable.ic_cv_tool_ellipse
+        NoteTool.LINE -> R.drawable.ic_cv_tool_line
+        NoteTool.ARROW -> R.drawable.ic_cv_action_arrow
+        NoteTool.TEXT -> R.drawable.ic_cv_tool_text
+        NoteTool.NOTE -> R.drawable.ic_cv_tool_note
+        NoteTool.TABLE -> R.drawable.ic_cv_tool_table
     }
+
+    fun iconFor(t: NoteTool) = iconOf(t)
 
     private fun build(i: Item, s: ToolBarModel.State): View = when (i) {
         is Item.Handle -> ui.eyebrow(if (i.collapsed) "‹ ›" else "› ‹").apply {
@@ -153,13 +242,15 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         is Item.Tool -> icon(iconOf(i.tool), i.selected, i.enabled) {
             if (s.collapsed) host.onCollapse(false) else host.onTool(i.tool)
         }
+        is Item.Shapes -> flyout(iconOf(i.shown), i.selected, i.open) { host.onPanel(ToolBarModel.Panel.SHAPES, it) }
+        is Item.Insert -> flyout(R.drawable.ic_cv_tool_image, i.selected, i.open) { host.onPanel(ToolBarModel.Panel.INSERT, it) }
+        is Item.Style -> Swatch(i.style, i.open).apply { setOnClickListener { host.onPanel(ToolBarModel.Panel.STYLE, this) } }
+        is Item.More -> icon(R.drawable.ic_cv_action_more, selected = false, enabled = true, open = i.open) {}.also { v ->
+            v.setOnClickListener { host.onPanel(ToolBarModel.Panel.MORE, v) }
+        }
+        is Item.Action -> action(i, s)
         is Item.Undo -> icon(R.drawable.ic_sel_undo, false, i.enabled) { host.onUndo() }
         is Item.Redo -> icon(R.drawable.ic_sel_redo, false, i.enabled) { host.onRedo() }
-        is Item.Options -> ui.eyebrow(if (i.focus) "FOCUS ✓" else "· · ·").apply {
-            setPadding(0, ui.dp(6), 0, ui.dp(6))
-            isClickable = true
-            setOnClickListener { host.onOptions(this) }
-        }.control()
         // "0:12:41" on one line: a smaller mono with no letter spacing fits the button's width.
         is Item.Timer -> ui.eyebrow(i.text).apply { textSize = TIMER_SP; letterSpacing = 0f; maxLines = 1; timer = this }.control()
         is Item.Cost -> ui.eyebrow(i.text.uppercase(), ui.inkSoft).apply { textSize = 8f; letterSpacing = 0f; cost = this }.control()
@@ -183,6 +274,10 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
         const val BAR_DP = 64
         const val TOUCH_DP = 48
         const val TIMER_SP = 11f
+        /** The space above and below each control (F21-AC17: the longer bar still fits). */
+        const val GAP_DP = 3
+        /** A button whose panel is open: a light chip (F21-FR2). */
+        const val OPEN_FILL = 0xFFDDDDDD.toInt()
         const val PILL_SP = 13f
 
         /** "◆  Mark" → "◆\nMark", "Marked 0:12:41" → "Marked\n0:12:41": two short lines fit

@@ -65,6 +65,8 @@ class NotesPage(
 
     var tool: NoteTool = NoteTool.PEN
         private set
+    /** F21-FR2: the last shape used shows on Shapes ▸. */
+    private var lastShape = NoteTool.RECTANGLE
     /** F17-FR11 / R14: the strip's and the timer's redraws wait while the pen writes. */
     val quiet = PenQuiet()
     /** F17-FR14: dialogs wait while the pen is in use (a dialog takes the pen's claim). */
@@ -80,7 +82,7 @@ class NotesPage(
         override val tool get() = this@NotesPage.tool
         override val recording get() = host.recordingSince() != null
         override val penWidthPx get() = PEN_WIDTH_PX
-        override fun touched() = hideHints()
+        override fun touched() { hideHints(); panels.close() }
 
         override fun pen(down: Boolean) {
             if (down) quiet.down() else quiet.up()
@@ -105,6 +107,7 @@ class NotesPage(
             val o = CoreJson.obj(json) { it }.getOrNull() ?: return@core
             selected = o.optJSONArray("ids")?.toString() ?: "[]"
             canvas.selection = InkView.rect(o.optJSONArray("bbox"))
+            refreshBar() // F21-FR2: the selection's actions replace the tools
         }
 
         override fun moveSelection(dx: Float, dy: Float) {
@@ -195,21 +198,96 @@ class NotesPage(
     }
 
     /** F17-FR2: the docked bar, on the canvas's right (or left) edge, never over it. */
-    val bar = DockedToolBar(a, ui, object : DockedToolBar.Host {
-        override fun onTool(t: NoteTool) { hideHints(); tool = t; canvas.selection = null; canvas.toolChanged(t); refreshBar() }
+    val bar: DockedToolBar = DockedToolBar(a, ui, object : DockedToolBar.Host {
+        override fun onTool(t: NoteTool) = pickTool(t)
         override fun onHelp() = if (hints.showing) hints.hide() else hints.show()
         override fun onUndo() = changed(InkBake.Event.UNDO_REDO) { NativeBridge.nativeInkUndo(id, LAYER) }
         override fun onRedo() = changed(InkBake.Event.UNDO_REDO) { NativeBridge.nativeInkRedo(id, LAYER) }
         override fun onCollapse(collapsed: Boolean) {
+            panels.close()
             host.savePrefs(NotesPatch.collapsed(collapsed))
             prefs = prefs.copy(collapsed = collapsed)
             layout()
         }
-        override fun onOptions(anchor: View) = options()
+        override fun onPanel(panel: ToolBarModel.Panel, anchor: View) = togglePanel(panel, anchor)
+        override fun onAction(act: ToolBarModel.Act, anchor: View) = selectionAction(act, anchor)
         override fun onMark() = host.mark()
         override fun onStop() = host.stop()
         override fun onPlay() { host.togglePlay(); refreshBar() }
     })
+
+    /** F21-FR2: a tool picked on the bar or in a flyout. Closing a panel bakes with the new
+     *  tool's ink state, so the change costs one redraw. */
+    private fun pickTool(t: NoteTool) {
+        hideHints()
+        tool = t
+        if (t.isShape) lastShape = t
+        clearSelection()
+        if (panels.view != null) panels.close() else canvas.toolChanged(t)
+        refreshBar()
+    }
+
+    /** F21-FR2: a flyout or panel button: the same one again closes it. */
+    private fun togglePanel(panel: ToolBarModel.Panel, anchor: View) {
+        hideHints()
+        if (panels.open == panel) { panels.close(); refreshBar(); return }
+        val content = when (panel) {
+            ToolBarModel.Panel.SHAPES -> panels.icons(NoteTool.SHAPES.map { Triple(bar.iconFor(it), it.label, it == tool) }) { i ->
+                pickTool(NoteTool.SHAPES[i])
+            }
+            ToolBarModel.Panel.INSERT -> panels.icons(NoteTool.INSERTS.map { Triple(bar.iconFor(it), it.label, it == tool) }) { i ->
+                pickTool(NoteTool.INSERTS[i])
+            }
+            ToolBarModel.Panel.MORE -> moreMenu()
+            else -> return
+        }
+        panels.show(panel, anchor, content)
+        refreshBar()
+    }
+
+    /** F21-FR12: ⋮, with what applies now. */
+    private fun moreMenu(): View {
+        val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus))
+        return panels.rows(entries.map { it.label }) { i -> more(entries[i]) }
+    }
+
+    private fun more(e: MoreMenu.Entry) {
+        panels.close()
+        when (e) {
+            MoreMenu.Entry.ZOOM_FIT -> canvas.fit()
+            MoreMenu.Entry.ZOOM_100 -> canvas.zoomPercent(100)
+            MoreMenu.Entry.FOCUS_ON, MoreMenu.Entry.FOCUS_OFF -> {
+                prefs = prefs.copy(focus = !prefs.focus)
+                host.savePrefs(NotesPatch.focus(prefs.focus))
+                showStrip(strip.state) // F17-AC8: hidden, or back with the newest lines
+            }
+            MoreMenu.Entry.REFRESH -> canvas.fullRefresh()
+            else -> Unit
+        }
+        refreshBar()
+    }
+
+    /** F21-FR2: the selection section's actions. */
+    private fun selectionAction(act: ToolBarModel.Act, anchor: View) {
+        hideHints()
+        when (act) {
+            ToolBarModel.Act.DELETE -> {
+                val ids = selected
+                clearSelection()
+                changed(InkBake.Event.ERASE) { NativeBridge.nativeInkDelete(id, LAYER, ids) }
+            }
+            ToolBarModel.Act.DONE -> clearSelection()
+            else -> Unit
+        }
+        refreshBar()
+    }
+
+    private fun selectedCount(): Int = org.json.JSONArray(selected).length()
+
+    private fun clearSelection() {
+        selected = "[]"
+        canvas.selection = null
+    }
 
     private var prefs = host.prefs()
 
@@ -219,10 +297,20 @@ class NotesPage(
     /** F17-FR14: the hand-drawn hints, over everything on the tab; they never take a touch. */
     private val hints: HintsOverlay = HintsOverlay(a, ::hintTips, ::inkCovers) { prefs.dock == NotesPrefs.Dock.LEFT }
 
-    /** The tab's content: the bar beside the canvas column, the hints over both. */
+    /** F21-FR2: where panels open beside the bar (empty, it takes no touch). */
+    private val panelLayer = FrameLayout(a)
+
+    /** The tab's content: the bar beside the canvas column, its panels, the hints over both. */
     val view = FrameLayout(a).apply {
         addView(row, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        addView(panelLayer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         addView(hints, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+    }
+
+    /** F21-FR2: one panel at a time beside the bar; firmware ink is off while one is open. */
+    private val panels: SidePanels = SidePanels(a, ui, panelLayer, { prefs.dock == NotesPrefs.Dock.LEFT },
+        { if (prefs.collapsed) bar.collapsedPx else bar.expandedPx }) { open ->
+        canvas.panelOpen(open)
     }
 
     fun hideHints() = hints.hide()
@@ -258,7 +346,8 @@ class NotesPage(
 
     init {
         canvas.images = images
-        canvas.inkHoles = { listOf(zoomPill) } // F17-FR4: the pen never inks over the pill
+        // F17-FR4 / F21-FR2: the pen never inks over the pill or an open panel.
+        canvas.inkHoles = { listOfNotNull(zoomPill, panels.view) }
         // F17-FR13: the minimap card sits under the zoom pill when the bar leaves it that corner.
         canvas.minimapTop = { if (canvas.barOnLeft) 0 else zoomPill.bottom }
         layout()
@@ -278,6 +367,7 @@ class NotesPage(
             row.addView(column, colParams); row.addView(rule, ruleParams); row.addView(bar.view, barParams)
         }
         canvas.barOnLeft = prefs.dock == NotesPrefs.Dock.LEFT
+        bar.onLeft = canvas.barOnLeft
         refreshBar()
     }
 
@@ -286,27 +376,11 @@ class NotesPage(
         val recording = host.recordingSince() != null
         if (recording && tool == NoteTool.LISTEN) tool = NoteTool.PEN // Listen is off while recording
         val ink = canvas.inkView
+        val n = selectedCount()
         bar.render(ToolBarModel.State(tool, prefs.collapsed, recording, ink.canUndo, ink.canRedo,
-            host.timer(), host.cost(), host.playing(), host.canPlay(), prefs.focus))
-    }
-
-    /** The tool options: Focus, Fit, a full refresh of the panel (F17-FR11, the user's choice). */
-    private fun options() {
-        val items = arrayOf(if (prefs.focus) "Focus off" else "Focus on", "Fit all ink", "Refresh the screen")
-        android.app.AlertDialog.Builder(a, dev.jraghavan.snmeeting.R.style.InkDialog).setTitle("Notes")
-            .setItems(items) { _, i ->
-                when (i) {
-                    0 -> {
-                        prefs = prefs.copy(focus = !prefs.focus)
-                        host.savePrefs(NotesPatch.focus(prefs.focus))
-                        showStrip(strip.state) // F17-AC8: hidden, or back with the newest lines
-                        refreshBar()
-                    }
-                    1 -> canvas.fit()
-                    else -> canvas.fullRefresh()
-                }
-            }
-            .setNegativeButton("CLOSE", null).show()
+            host.timer(), host.cost(), host.playing(), host.canPlay(), prefs.focus,
+            lastShape = lastShape, open = panels.open,
+            selection = if (n > 0) ToolBarModel.Selection(n) else null))
     }
 
     /** Opens the canvas at its last viewport, or fitted to its ink; or (F19-FR3) centred on
@@ -358,6 +432,7 @@ class NotesPage(
 
     /** The page goes: the pen is let go, the ink saved and the viewport kept. */
     fun close() {
+        panels.close()
         handler.removeCallbacks(save)
         canvas.releasePen()
         if (!opened) return

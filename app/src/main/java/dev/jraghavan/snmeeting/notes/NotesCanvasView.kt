@@ -252,6 +252,22 @@ class NotesCanvasView(
 
     fun releasePen() { firmware.teardown(); firmware.systemGestures(true); firmwareOn = false }
 
+    /**
+     * F21-FR2: a panel opened beside the bar ([v]) or closed (null). While one is open firmware
+     * ink is off over the whole window, so a pen tap on it never inks, and the panel is a
+     * disabled area too; closing it turns the tool's ink back on and bakes once.
+     */
+    fun panelOpen(v: View?) {
+        if (!firmwareOn) firmwareOn = firmware.setup("panel")
+        updateInkAreas()
+        if (v != null) {
+            firmware.setWritable(false)
+        } else {
+            firmware.setWritable(InkBake.overlayFor(host.tool))
+            bake(InkBake.Event.PANEL_CLOSED)
+        }
+    }
+
     fun fullRefresh() = bake(InkBake.Event.USER_REFRESH)
 
     private fun showMinimap() {
@@ -448,6 +464,7 @@ class NotesCanvasView(
                 selection = null
             }
             Gesture.LISTEN -> host.listen(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
+            Gesture.SELECT, Gesture.SHAPE, Gesture.PLACE, Gesture.TABLE -> Unit
             Gesture.PAN -> if (moved) {
                 host.viewportChanged(viewport) // the strokes now in view, once the drag ends
             } else {

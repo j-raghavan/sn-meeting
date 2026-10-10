@@ -16,13 +16,17 @@ object InkBake {
     enum class Event {
         PEN_STROKE, HIGHLIGHTER_STROKE, ERASE, UNDO_REDO, LASSO_MOVE,
         VIEWPORT_SETTLED, TOOL_CHANGED, PAGE_LEAVING, USER_REFRESH,
+        /** F21-FR2: a flyout, panel, menu or confirmation closed (firmware ink was off under it). */
+        PANEL_CLOSED,
+        /** F21: an edit of items (or a selection's actions) changed the canvas. */
+        EDIT,
     }
 
     enum class Step { DRAW, REFRESH_PANEL, CLEAR_OVERLAY }
 
     /** The events that change the ink itself (not just what is in view): F17-FR13's thumbnail
      *  is rebuilt after these. */
-    val INK_CHANGES = setOf(Event.PEN_STROKE, Event.HIGHLIGHTER_STROKE, Event.ERASE, Event.UNDO_REDO, Event.LASSO_MOVE)
+    val INK_CHANGES = setOf(Event.PEN_STROKE, Event.HIGHLIGHTER_STROKE, Event.ERASE, Event.UNDO_REDO, Event.LASSO_MOVE, Event.EDIT)
 
     private val BAKE = listOf(Step.DRAW, Step.REFRESH_PANEL, Step.CLEAR_OVERLAY)
 
