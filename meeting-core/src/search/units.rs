@@ -13,15 +13,18 @@ pub enum Kind {
     Minutes,
     Todo,
     Event,
+    /// F20-FR5: a meeting's tag, one unit per tag.
+    Tag,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 5] = [
+    pub const ALL: [Kind; 6] = [
         Kind::Notes,
         Kind::Transcript,
         Kind::Minutes,
         Kind::Todo,
         Kind::Event,
+        Kind::Tag,
     ];
 
     /// The id stored in the index.
@@ -32,6 +35,7 @@ impl Kind {
             Kind::Minutes => "minutes",
             Kind::Todo => "todo",
             Kind::Event => "event",
+            Kind::Tag => "tag",
         }
     }
 
@@ -47,6 +51,7 @@ impl Kind {
             Kind::Minutes => "MINUTES",
             Kind::Todo => "TO-DO",
             Kind::Event => "EVENT",
+            Kind::Tag => "TAG",
         }
     }
 }
@@ -57,7 +62,7 @@ impl Kind {
 pub struct Unit {
     pub kind: Kind,
     /// Stable within its group: `t:<segment>:<line>`, `mark:<id>`, `n:<region>:<line>`,
-    /// `summary`, `decision:<i>`, `section:<i>`, `todo:<id>`, `event`.
+    /// `summary`, `decision:<i>`, `section:<i>`, `todo:<id>`, `event`, `tag:<name>`.
     pub unit_id: String,
     /// Recording-clock ms for timed units (transcript lines, marks, timed note lines).
     pub at_ms: Option<u64>,
@@ -203,6 +208,14 @@ pub fn meeting_units(sc: &Sidecar, notes: &[Region], changed: &[u32]) -> Vec<Uni
             t.text.clone(),
         ));
     }
+    // F20-FR5: each tag is its own unit, `tag:<name>`; the hit opens the Tag Graph.
+    for t in &sc.tags {
+        out.push(Unit::new(
+            Kind::Tag,
+            format!("tag:{}", t.name),
+            t.name.clone(),
+        ));
+    }
     out.retain(|u| !u.text.is_empty());
     out
 }
@@ -285,7 +298,10 @@ mod tests {
         }
         assert_eq!(Kind::from_id("x"), None);
         let labels = Kind::ALL.map(Kind::label);
-        assert_eq!(labels, ["NOTES", "TRANSCRIPT", "MINUTES", "TO-DO", "EVENT"]);
+        assert_eq!(
+            labels,
+            ["NOTES", "TRANSCRIPT", "MINUTES", "TO-DO", "EVENT", "TAG"]
+        );
     }
 
     #[test]

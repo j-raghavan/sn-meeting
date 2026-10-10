@@ -74,7 +74,7 @@ class SearchActivity : Activity() {
 
     private fun buildView(): View {
         box = ui.field("").apply {
-            hint = "Search notes, transcripts, minutes, to-dos and events"
+            hint = "Search notes, transcripts, minutes, to-dos, events and #tags"
             imeOptions = EditorInfo.IME_ACTION_SEARCH
             inputType = android.text.InputType.TYPE_CLASS_TEXT
             setOnEditorActionListener { _, action, ev ->
@@ -242,6 +242,7 @@ class SearchActivity : Activity() {
                 startActivity(i)
                 overridePendingTransition(0, 0)
             }
+            is SearchModel.Open.Tag -> TagGraphActivity.open(this, o.name)
             // F18-FR8: the event's sheet; "● Record" goes back to Home, which records it.
             is SearchModel.Open.Event -> EventSheetDialog.open(this, ui, o.key, "The microphone Home shows") { key, template ->
                 startActivity(android.content.Intent(this, MainActivity::class.java)

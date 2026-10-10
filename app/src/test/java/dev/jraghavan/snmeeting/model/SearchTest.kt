@@ -46,8 +46,8 @@ class SearchTest {
     }
 
     @Test fun filtersAndMessages() {
-        assertEquals(listOf("all", "notes", "transcript", "minutes", "todos", "events"), SearchModel.Filter.values().map { it.id })
-        assertEquals(listOf("All", "Notes", "Transcript", "Minutes", "To-dos", "Events"), SearchModel.Filter.values().map { it.label })
+        assertEquals(listOf("all", "notes", "transcript", "minutes", "todos", "events", "tags"), SearchModel.Filter.values().map { it.id })
+        assertEquals(listOf("All", "Notes", "Transcript", "Minutes", "To-dos", "Events", "Tags"), SearchModel.Filter.values().map { it.label })
         assertEquals("No results for “budget” in notes", SearchModel.noResults(" budget ", SearchModel.Filter.NOTES))
         assertEquals("No results for “budget” anywhere", SearchModel.noResults("budget", SearchModel.Filter.ALL))
     }
@@ -77,6 +77,8 @@ class SearchTest {
         assertEquals(SearchModel.Open.Meeting(id, 761_000, "transcript"), SearchModel.open(m, hit("transcript", 761_000)))
         assertEquals(SearchModel.Open.Meeting(id, null, "summary"), SearchModel.open(m, hit("minutes", null)))
         assertEquals(SearchModel.Open.Meeting(id, null, "todos"), SearchModel.open(m, hit("todo", null)))
+        // F20-FR5: a tag hit opens the Tag Graph on that tag.
+        assertEquals(SearchModel.Open.Tag("vram"), SearchModel.open(m, hit("tag", null).copy(unitId = "tag:vram")))
         assertEquals(SearchModel.Open.Event("l1:u:-", "Budget sync", 1791820800000), SearchModel.open(e, e.hits[0]))
     }
 

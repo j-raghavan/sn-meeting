@@ -4,7 +4,7 @@
 use super::index::{Group, GroupKind, Index};
 use super::units::Kind;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// The snippet's emphasis markers (control characters never reach the index, `units::clean`).
 pub const BOLD_ON: char = '\u{2}';
@@ -92,6 +92,8 @@ pub enum Filter {
     Minutes,
     Todos,
     Events,
+    /// F20-FR5.
+    Tags,
 }
 
 impl Filter {
@@ -103,6 +105,7 @@ impl Filter {
             "minutes" => Filter::Minutes,
             "todos" => Filter::Todos,
             "events" => Filter::Events,
+            "tags" => Filter::Tags,
             _ => return None,
         })
     }
@@ -115,6 +118,7 @@ impl Filter {
             Filter::Minutes => Some(Kind::Minutes),
             Filter::Todos => Some(Kind::Todo),
             Filter::Events => Some(Kind::Event),
+            Filter::Tags => Some(Kind::Tag),
         }
     }
 }
@@ -224,8 +228,33 @@ pub fn spans(snippet: &str) -> Vec<Span> {
     out
 }
 
+/// F20-FR5: the `#name` terms of a query (normalised, F20-FR2) and the rest of it. A `#`
+/// inside quotes is plain text.
+pub fn split_tags(user: &str) -> (Vec<String>, String) {
+    let user: String = user.chars().take(MAX_QUERY_CHARS).collect();
+    let (mut tags, mut rest) = (Vec::new(), String::new());
+    for (i, part) in user.split('"').enumerate() {
+        if i > 0 {
+            rest.push('"');
+        }
+        if i % 2 == 1 {
+            rest.push_str(part);
+            continue;
+        }
+        for w in part.split_inclusive(char::is_whitespace) {
+            match w.trim().strip_prefix('#') {
+                Some(t) => tags.extend(crate::tags::normalise(t)),
+                None => rest.push_str(w),
+            }
+        }
+    }
+    (tags, rest)
+}
+
 /// F19-FR2: the matches for `user` under `filter`, grouped by meeting or event, at most
-/// `limit` groups. A query with no word gives no groups.
+/// `limit` groups. A query with no word gives no groups. F20-FR5: a `#name` term matches only
+/// tags (by prefix), and every one of them must match a tag of the meeting; the other words
+/// then match within those meetings. A plain word also finds tags.
 pub fn search(
     ix: &Index,
     user: &str,
@@ -241,13 +270,44 @@ pub fn search(
         total_groups: 0,
         indexing: false,
     };
-    let Some(fts) = fts_query(user) else {
+    let (tag_terms, plain) = split_tags(user);
+    let fts = fts_query(&plain);
+    let tag_fts: Vec<String> = tag_terms.iter().filter_map(|t| fts_query(t)).collect();
+    if fts.is_none() && tag_fts.is_empty() {
         return Ok(r);
-    };
-    // Rows best first, so each group's list keeps that order.
+    }
+    // Every `#name` narrows the meetings to those with a matching tag.
+    let mut allowed: Option<HashSet<String>> = None;
+    let mut tag_rows: Vec<Matched> = Vec::new();
+    for f in &tag_fts {
+        let m = matching(ix, f, Some(Kind::Tag))?;
+        let set: HashSet<String> = m.iter().map(|m| m.group.clone()).collect();
+        allowed = Some(match allowed {
+            None => set,
+            Some(a) => a.intersection(&set).cloned().collect(),
+        });
+        tag_rows.extend(m);
+    }
+    let ok = |g: &str| allowed.as_ref().is_none_or(|a| a.contains(g));
+    // Rows best first (the tag hits first), so each group's list keeps that order.
     let mut by_group: HashMap<String, Vec<i64>> = HashMap::new();
-    for m in matching(ix, &fts, filter.kind())? {
-        by_group.entry(m.group).or_default().push(m.row);
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut is_tag: HashSet<i64> = HashSet::new();
+    if fts.is_none() || matches!(filter, Filter::All | Filter::Tags) {
+        tag_rows.sort_by(|a, b| a.rank.total_cmp(&b.rank));
+        for m in tag_rows.into_iter().filter(|m| ok(&m.group)) {
+            if seen.insert(m.row) {
+                is_tag.insert(m.row);
+                by_group.entry(m.group).or_default().push(m.row);
+            }
+        }
+    }
+    if let Some(f) = &fts {
+        for m in matching(ix, f, filter.kind())? {
+            if ok(&m.group) && seen.insert(m.row) {
+                by_group.entry(m.group).or_default().push(m.row);
+            }
+        }
     }
     let mut groups: Vec<(Group, Vec<i64>)> = Vec::new();
     for (key, rows) in by_group {
@@ -264,7 +324,14 @@ pub fn search(
         .iter()
         .flat_map(|(_, rows)| rows.iter().take(MAX_HITS_PER_GROUP).copied())
         .collect();
-    let mut hits = details(ix, &fts, &shown)?;
+    let (tagged, rest): (Vec<i64>, Vec<i64>) = shown.into_iter().partition(|r| is_tag.contains(r));
+    let mut hits = match &fts {
+        Some(f) => details(ix, f, &rest)?,
+        None => HashMap::new(),
+    };
+    if !tagged.is_empty() {
+        hits.extend(details(ix, &tag_fts.join(" OR "), &tagged)?);
+    }
     for (g, rows) in groups {
         r.groups.push(GroupHits {
             kind: g.kind,
@@ -343,6 +410,14 @@ mod tests {
     }
 
     #[test]
+    fn hash_terms_are_tags() {
+        let (t, rest) = split_tags("#VRAM budget #Local-AI \"#not a tag\" #!! plan");
+        assert_eq!(t, ["vram", "local-ai"]);
+        assert_eq!(rest, "budget \"#not a tag\" plan");
+        assert_eq!(split_tags("plain words"), (vec![], "plain words".into()));
+    }
+
+    #[test]
     fn snippets_become_runs() {
         let s = spans("a \u{2}Budget\u{3} line\nnext \u{2}b\u{3}");
         let want = [
@@ -365,6 +440,7 @@ mod tests {
             ("minutes", Filter::Minutes),
             ("todos", Filter::Todos),
             ("events", Filter::Events),
+            ("tags", Filter::Tags),
         ] {
             assert_eq!(Filter::from_id(id), Some(f));
             assert_eq!(serde_json::json!(f), id);
