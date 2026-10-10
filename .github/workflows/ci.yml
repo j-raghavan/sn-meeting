@@ -1,7 +1,9 @@
 name: CI
 
-# F8-FR1 / NFR5: every gate in scripts/gates.sh, run on every pull request (any base branch)
-# and on pushes to main and feature branches. One job per gate group, so a failure names the
+# F8-FR1 / NFR5: every gate in scripts/gates.sh, run once a pull request is ready for review
+# (any base branch). Draft pull requests and branch pushes don't run it: the gates run
+# locally first (scripts/quick-check.sh, scripts/gates.sh) and CI is the final check, which
+# keeps a private repo inside its Actions minutes. One job per gate group, so a failure names the
 # gate. The Rust core is built and tested on the host first (INV5: no `jni` in its graph),
 # then cross-built for the device with cargo-ndk, and the full ./buildApk.sh pipeline assembles
 # the release APK (debug-keystore signed; no secrets).
@@ -11,9 +13,7 @@ name: CI
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
-  push:
-    branches: [main, "feat/**"]
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -38,6 +38,7 @@ env:
 jobs:
   rust-host:
     name: rust host (fmt, clippy, build, test, INV5)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -79,6 +80,7 @@ jobs:
 
   coverage:
     name: coverage (>= 97% lines)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -108,6 +110,7 @@ jobs:
 
   android-target:
     name: android target (cargo-ndk, aarch64-linux-android)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -135,6 +138,7 @@ jobs:
 
   licenses:
     name: licences of linked crates
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -149,6 +153,7 @@ jobs:
 
   kotlin:
     name: kotlin (lintRelease, unit tests)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -175,6 +180,7 @@ jobs:
 
   apk:
     name: apk (buildApk.sh, size budget)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -221,6 +227,7 @@ jobs:
 
   scripts:
     name: scripts (install guard, check-audio)
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
