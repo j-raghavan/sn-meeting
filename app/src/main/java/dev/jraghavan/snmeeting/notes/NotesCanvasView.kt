@@ -58,6 +58,12 @@ class NotesCanvasView(
         fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
         /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
         fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR10: a pen drag with Table, from ([x0], [y0]) to ([x1], [y1]). */
+        fun createTable(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR10: a pen tap with Table at a world point (a cell to type into). */
+        fun tableTap(x: Float, y: Float) {}
+        /** F21-FR10: a selected table's row edge dragged to a world point. */
+        fun rowDragged(ref: String, row: Int, x: Float, y: Float) {}
         /** F21-FR9: a pen tap with Text or Sticky note at a world point. */
         fun place(tool: NoteTool, x: Float, y: Float) {}
         /** F21-FR8: a pen drag with a shape tool, from ([x0], [y0]) to ([x1], [y1]) in world units. */
@@ -98,6 +104,11 @@ class NotesCanvasView(
     private var lastPreview = 0L
     /** F21-FR5: the handle a Select drag took, if it took one. */
     private var dragging: Handles.Handle? = null
+    /** F21-FR10: the row edge of the selected table a Select drag took. */
+    private var rowDrag: Int? = null
+    /** F21-FR10: the target cell's box, marked with corner brackets (world, unrotated). */
+    var targetCell: WorldRect? = null
+        set(v) { if (v != field) { field = v; invalidate() } }
 
     /** F21-FR5: the one selected thing, which shows handles. */
     private fun soleSelected(): DrawEntry? = ink.selection.singleOrNull()?.let { r -> ink.entries.firstOrNull { it.ref == r } }
@@ -444,8 +455,10 @@ class NotesCanvasView(
                     if (c.isEraser && firmwareOn) firmware.setWritable(false)
                     val wxd = viewport.worldX(c.x.toDouble()); val wyd = viewport.worldY(c.y.toDouble())
                     dragging = if (gesture == Gesture.SELECT) Handles.at(handles(), wxd, wyd, viewport.zoom) else null
+                    rowDrag = (soleSelected() as? DrawEntry.Thing)?.item?.takeIf { gesture == Gesture.SELECT && dragging == null }
+                        ?.let { dev.jraghavan.snmeeting.notes.canvas.TableCells.rowEdge(it, wxd, wyd, ROW_EDGE_PX / viewport.zoom) }
                     val sel = selection
-                    movingSelection = dragging == null && gesture != Gesture.ERASE && sel != null && sel.contains(wxd, wyd)
+                    movingSelection = dragging == null && rowDrag == null && gesture != Gesture.ERASE && sel != null && sel.contains(wxd, wyd)
                     path += c.x; path += c.y
                 }
                 else -> Unit
@@ -504,6 +517,7 @@ class NotesCanvasView(
             }
             Gesture.LISTEN -> host.listen(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
             Gesture.SELECT -> when {
+                rowDrag != null -> if (moved) soleSelected()?.let { host.rowDragged(it.ref, rowDrag!!, wx(x), wy(y)) }
                 dragging != null -> if (moved) {
                     soleSelected()?.let { host.handleDragged(it.ref, dragging!!, wx(x), wy(y)) }
                 }
@@ -516,7 +530,11 @@ class NotesCanvasView(
                 host.createShape(penTool, wx(downX), wy(downY), wx(x), wy(y))
             }
             Gesture.PLACE -> host.place(penTool, wx(x), wy(y))
-            Gesture.TABLE -> Unit
+            Gesture.TABLE -> if (hypot(x - downX, y - downY) >= MIN_SHAPE_PX) {
+                host.createTable(wx(downX), wy(downY), wx(x), wy(y))
+            } else {
+                host.tableTap(wx(x), wy(y))
+            }
             Gesture.PAN -> if (moved) {
                 host.viewportChanged(viewport) // the strokes now in view, once the drag ends
             } else {
@@ -526,7 +544,7 @@ class NotesCanvasView(
             }
             Gesture.NONE -> Unit
         }
-        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null
+        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null; rowDrag = null
         host.pen(false)
         // A pen stroke the firmware inked is not repainted (inkread); anything else drew a band
         // or loop of its own, which the next draw removes.
@@ -545,7 +563,7 @@ class NotesCanvasView(
     private fun overlayInks(g: Gesture = gesture): Boolean = firmwareOn && g == Gesture.DRAW && penTool == NoteTool.PEN
 
     private fun abandon() {
-        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null
+        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null; rowDrag = null
         host.pen(false)
         invalidate()
     }
@@ -586,6 +604,11 @@ class NotesCanvasView(
             box(canvas, sel, dashPaint)
             canvas.restore()
         }
+        targetCell?.let { brackets(canvas, it) }
+        if (gesture == Gesture.TABLE && moved) {
+            canvas.drawRect(minOf(downX, lastX), minOf(downY, lastY), maxOf(downX, lastX), maxOf(downY, lastY), dashPaint)
+        }
+        if (gesture == Gesture.SELECT && rowDrag != null && moved) canvas.drawLine(0f, lastY, width.toFloat(), lastY, dashPaint)
         if (gesture == Gesture.SHAPE && moved) {
             // F21-FR8: the shape's outline while the pen drags (firmware ink is off).
             val l = minOf(downX, lastX); val t = minOf(downY, lastY); val r = maxOf(downX, lastX); val b = maxOf(downY, lastY)
@@ -683,6 +706,18 @@ class NotesCanvasView(
                 canvas.drawRect(x - HANDLE_PX, y - HANDLE_PX, x + HANDLE_PX, y + HANDLE_PX, handleFill)
                 canvas.drawRect(x - HANDLE_PX, y - HANDLE_PX, x + HANDLE_PX, y + HANDLE_PX, handleStroke)
             }
+        }
+    }
+
+    /** F21-FR10: corner brackets round the target cell. */
+    private fun brackets(canvas: Canvas, r: WorldRect) {
+        val v = viewport
+        val l = v.screenX(r.left).toFloat(); val t = v.screenY(r.top).toFloat()
+        val rr = v.screenX(r.right).toFloat(); val b = v.screenY(r.bottom).toFloat()
+        val k = minOf(BRACKET_PX, (rr - l) / 3, (b - t) / 3)
+        for ((x, y, dx, dy) in listOf(listOf(l, t, 1f, 1f), listOf(rr, t, -1f, 1f), listOf(l, b, 1f, -1f), listOf(rr, b, -1f, -1f))) {
+            canvas.drawLine(x, y, x + dx * k, y, handleStroke)
+            canvas.drawLine(x, y, x, y + dy * k, handleStroke)
         }
     }
 
@@ -807,6 +842,9 @@ class NotesCanvasView(
         const val MIN_SHAPE_PX = 8f
         /** Half a handle's side on screen. */
         const val HANDLE_PX = 9f
+        /** F21-FR10: how near a row edge the pen must land to drag it. */
+        const val ROW_EDGE_PX = 10.0
+        const val BRACKET_PX = 16f
         val MUTED = Color.rgb(170, 170, 170)
     }
 }

@@ -118,7 +118,21 @@ class NotesPage(
             val sole = canvas.inkView.selection.singleOrNull()
             val text = textItemAt(x.toDouble(), y.toDouble())
             if (text != null && text.ref == sole) return editText(text)
+            // F21-FR10: a pen tap on a table's cell targets it and opens the keyboard for it.
+            if (cellTap(x.toDouble(), y.toDouble())) return
+            target = null
             select("""{"op":"select","at":[$x,$y],"r":$radiusWorld}""")
+        }
+
+        override fun createTable(x0: Float, y0: Float, x1: Float, y1: Float) =
+            edit("""{"op":"create","type":"table","from":[$x0,$y0],"to":[$x1,$y1]${recMs()}}""")
+
+        override fun tableTap(x: Float, y: Float) { cellTap(x.toDouble(), y.toDouble()) }
+
+        override fun rowDragged(ref: String, row: Int, x: Float, y: Float) {
+            val item = canvas.inkView.items.firstOrNull { it.ref == ref } ?: return
+            val h = dev.jraghavan.snmeeting.notes.canvas.TableCells.rowHeightAt(item, row, x.toDouble(), y.toDouble())
+            edit("""{"op":"table.resizeRow","ref":${CoreJson.quote(ref)},"row":$row,"height":$h}""", keepSelection = true)
         }
 
         override fun place(tool: NoteTool, x: Float, y: Float) {
@@ -263,6 +277,7 @@ class NotesPage(
             }
             ToolBarModel.Panel.MORE -> moreMenu()
             ToolBarModel.Panel.STYLE -> stylePanel()
+            ToolBarModel.Panel.TABLE -> tableMenu() ?: return
             else -> return
         }
         panels.show(panel, anchor, content)
@@ -302,7 +317,7 @@ class NotesPage(
     /** F21-FR12: ⋮, with what applies now. */
     private fun moreMenu(): View {
         val ink = canvas.inkView
-        val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus,
+        val entries = MoreMenu.items(MoreMenu.State(selection = selectedCount() > 0, focus = prefs.focus, tableCell = tableTargeted(),
             hasContent = ink.bounds != null, canRestore = ink.canRestore))
         return panels.rows(entries.map { it.label }) { i -> more(entries[i]) }
     }
@@ -319,6 +334,7 @@ class NotesPage(
             }
             MoreMenu.Entry.REFRESH -> canvas.fullRefresh()
             MoreMenu.Entry.CLEAR -> askClear()
+            MoreMenu.Entry.TABLE -> bar.anchors["more"]?.let { m -> tableMenu()?.let { panels.show(ToolBarModel.Panel.TABLE, m, it) } }
             MoreMenu.Entry.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
             MoreMenu.Entry.BACK -> edit("""{"op":"back"}""", keepSelection = true)
             MoreMenu.Entry.RESTORE -> edit("""{"op":"restoreCleared"}""")
@@ -389,6 +405,58 @@ class NotesPage(
         }
     }
 
+    /** F21-FR10: the target cell (table ref, row, col), marked with corner brackets. */
+    private var target: Triple<String, Int, Int>? = null
+        set(v) {
+            field = v
+            canvas.targetCell = v?.let { (r, row, col) ->
+                canvas.inkView.items.firstOrNull { it.ref == r }?.let { dev.jraghavan.snmeeting.notes.canvas.TableCells.rect(it, row, col) }
+            }
+        }
+
+    /** A tap on a table cell: it becomes the target (its table selected) and is typed into. */
+    private fun cellTap(x: Double, y: Double): Boolean {
+        val table = canvas.inkView.items.lastOrNull { it.table != null && dev.jraghavan.snmeeting.notes.canvas.TableCells.at(it, x, y) != null }
+            ?: return false
+        val (row, col) = dev.jraghavan.snmeeting.notes.canvas.TableCells.at(table, x, y) ?: return false
+        target = Triple(table.ref, row, col)
+        if (canvas.inkView.selection != listOf(table.ref)) select("""{"op":"select","refs":[${CoreJson.quote(table.ref)}]}""")
+        editCell(table, row, col)
+        return true
+    }
+
+    /** F21-FR10: type into a cell; committed as F21-FR9's text, one step; the row grows. */
+    private fun editCell(item: DrawItem, row: Int, col: Int) {
+        val t = item.table ?: return
+        val box = dev.jraghavan.snmeeting.notes.canvas.TableCells.rect(item, row, col) ?: return
+        val font = item.style.size.fontSize * TextLayout.TABLE_FONT_SCALE
+        val initial = t.cells[row * t.cols + col]
+        openEditor(dev.jraghavan.snmeeting.notes.canvas.TextEditor.Target(item.id, row * t.cols + col), box.left, box.top,
+            box.right - box.left, font, initial) { text ->
+            if (text == initial) return@openEditor
+            val h = if (text.isEmpty()) 0.0 else TextLayout.height(text, box.right - box.left, font)
+            edit("""{"op":"table.setCell","ref":${CoreJson.quote(item.ref)},"row":$row,"col":$col,"text":${CoreJson.quote(text)},"height":$h${recMs()}}""",
+                keepSelection = true)
+        }
+    }
+
+    /** F21-FR10: the Table actions on the target cell; Remove is off at one row or column, Add
+     *  at the limit (12 × 8). */
+    private fun tableMenu(): View? {
+        val (ref, row, col) = target ?: return null
+        val t = canvas.inkView.items.firstOrNull { it.ref == ref }?.table ?: return null
+        val labels = listOf("Add row", "Add column", "Remove this row", "Remove this column")
+        val on = listOf(t.rows < 12, t.cols < 8, t.rows > 1, t.cols > 1)
+        val ops = listOf("table.addRow" to "row", "table.addColumn" to "col", "table.removeRow" to "row", "table.removeColumn" to "col")
+        return panels.rows(labels, { on[it] }) { i ->
+            panels.close()
+            val (op, k) = ops[i]
+            val v = if (k == "row") row else col
+            target = null
+            edit("""{"op":"$op","ref":${CoreJson.quote(ref)},"$k":$v}""", keepSelection = true)
+        }
+    }
+
     /** F21-FR15 / OQ36: `,"recMs":t` for something made now while recording, else nothing. */
     private fun recMs(): String {
         val since = host.recordingSince() ?: return ""
@@ -412,6 +480,7 @@ class NotesPage(
             ToolBarModel.Act.DUPLICATE -> edit("""{"op":"duplicate"}""", keepSelection = true)
             ToolBarModel.Act.DONE -> clearSelection()
             ToolBarModel.Act.STYLE -> togglePanel(ToolBarModel.Panel.STYLE, anchor)
+            ToolBarModel.Act.TABLE -> togglePanel(ToolBarModel.Panel.TABLE, anchor)
             ToolBarModel.Act.GROUP -> edit("""{"op":"group"}""", keepSelection = true)
             ToolBarModel.Act.UNGROUP -> edit("""{"op":"ungroup"}""", keepSelection = true)
             ToolBarModel.Act.FRONT -> edit("""{"op":"front"}""", keepSelection = true)
@@ -423,13 +492,16 @@ class NotesPage(
 
     private fun selectedCount(): Int = canvas.inkView.selection.size
 
+    /** F21-FR10: a cell of the one selected table is the target. */
+    private fun tableTargeted(): Boolean = target?.first?.let { canvas.inkView.selection == listOf(it) } ?: false
+
     /** F21-FR4: the selection the bar acts on: its size, and whether it is one group. */
     private fun selectionState(): ToolBarModel.Selection? {
         val v = canvas.inkView
         if (v.selection.isEmpty()) return null
         val groups = v.selection.map { r -> v.entries.firstOrNull { it.ref == r }?.let(::groupOf) }
         val grouped = groups.isNotEmpty() && groups.all { it != null && it == groups[0] }
-        return ToolBarModel.Selection(v.selection.size, grouped = grouped)
+        return ToolBarModel.Selection(v.selection.size, grouped = grouped, tableCell = tableTargeted())
     }
 
     private fun groupOf(e: DrawEntry): String? = when (e) {
@@ -667,6 +739,7 @@ class NotesPage(
                 val history = it.canUndo != before.canUndo || it.canRedo != before.canRedo
                 val selection = it.selection != before.selection
                 canvas.show(it, event)
+                target = target?.takeIf { t -> it.items.any { i -> i.ref == t.first } }
                 placeMarks()
                 // Undo and Redo light up or grey out; a selection swaps the tools for its actions.
                 if (history || selection || it.defaultStyle != before.defaultStyle) refreshBar()

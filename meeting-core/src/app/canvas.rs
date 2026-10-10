@@ -6,6 +6,7 @@ use crate::api::error_json;
 use crate::canvas::draw::{bbox_json, refs_json};
 use crate::canvas::edits::{Corner, Made, Measured};
 use crate::canvas::geom::Pt;
+use crate::canvas::table::TableEdit;
 use crate::canvas::{Ref, Scene, Style};
 use crate::ink::BBox;
 use crate::notes::{self, Layer};
@@ -44,6 +45,14 @@ fn pair(op: &Value, k: &str) -> Result<Pt, String> {
         .filter(|v| v.len() == 2)
         .ok_or_else(|| format!("{k} must be [x, y]"))?;
     Ok(Pt::new(f64::from(v[0]), f64::from(v[1])))
+}
+
+/// A row or column index of an op.
+fn index(op: &Value, k: &str) -> Result<usize, String> {
+    op.get(k)
+        .and_then(Value::as_u64)
+        .and_then(|v| usize::try_from(v).ok())
+        .ok_or_else(|| format!("{k} must be a whole number"))
 }
 
 /// The op's one `ref`.
@@ -138,6 +147,58 @@ impl App {
         out.map_or_else(|e| error_json(&e), |v| v.to_string())
     }
 
+    /// `nativeCanvasHit(id, x, y, r)` (F21-FR10, FR15): the topmost stroke or item at a world
+    /// point: `{ref, cell: {row, col}|null, atMs|null}`; a timed one also gives where Listen
+    /// starts (`seekMs`, `segIndex`, `segOffsetMs`, `lineN`), as `nativeInkHit` does.
+    pub fn canvas_hit_json(&self, id: &str, x: f32, y: f32, r: f32) -> String {
+        let p = Pt::new(f64::from(x), f64::from(y));
+        let hit = self.with_ink(id, Layer::Canvas, |o| {
+            let s = &o.scene;
+            let rf = s.top_at(p, f64::from(r))?;
+            let (cell, at) = match &rf {
+                Ref::Stroke(n) => (
+                    None,
+                    s.ink()
+                        .get(crate::ink::StrokeId(*n))
+                        .and_then(|st| st.rec_ms),
+                ),
+                Ref::Item(i) => {
+                    let it = s.item(i)?;
+                    let cell = crate::canvas::table::cell_at(it, p);
+                    let cell_at = cell.and_then(|(row, col)| {
+                        let t = it.table.as_ref()?;
+                        t.cell_rec_ms[t.index(row, col)?]
+                    });
+                    (cell, cell_at.or(it.rec_ms))
+                }
+            };
+            Some((rf, cell, at))
+        });
+        let hit = match hit {
+            Ok(h) => h,
+            Err(e) => return error_json(&e),
+        };
+        let Some((rf, cell, at)) = hit else {
+            return json!({"ref": null, "cell": null, "atMs": null}).to_string();
+        };
+        let mut v = json!({"ref": rf.to_string(), "atMs": at,
+            "cell": cell.map(|(row, col)| json!({"row": row, "col": col}))});
+        if let Some(t) = at {
+            match self.library().get(id) {
+                Ok(m) => {
+                    let sc = m.meeting;
+                    let s = notes::seek(&sc, t);
+                    v["seekMs"] = json!(s.seek_ms);
+                    v["segIndex"] = json!(s.seg_index);
+                    v["segOffsetMs"] = json!(s.seg_offset_ms);
+                    v["lineN"] = json!(super::live::line_at(&super::live::transcript_rows(&sc), t));
+                }
+                Err(e) => return error_json(&e.to_string()),
+            }
+        }
+        v.to_string()
+    }
+
     /// `nativeCanvasEdit(id, opJson)` (F21): one user gesture on the canvas, one undo step.
     /// `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`.
     pub fn canvas_edit_json(&self, id: &str, op: &str) -> String {
@@ -178,6 +239,11 @@ impl App {
                             let h = op.get("height").and_then(Value::as_f64);
                             o.scene.create_text(kind, pair(&op, "at")?, text, h, &made)
                         }
+                        // F21-FR10: a table from a drag.
+                        "table" => {
+                            o.scene
+                                .create_table(pair(&op, "from")?, pair(&op, "to")?, &made)
+                        }
                         _ => {
                             o.scene
                                 .create_shape(kind, pair(&op, "from")?, pair(&op, "to")?, &made)
@@ -214,6 +280,37 @@ impl App {
                     o.scene.resize(&one(&op)?, corner, at(&op)?, &m)
                 }
                 "rotate" => o.scene.rotate(&one(&op)?, at(&op)?),
+                "table.setCell" => {
+                    let text = op
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or("text is needed")?;
+                    let h = op.get("height").and_then(Value::as_f64);
+                    o.scene.set_cell(
+                        &one(&op)?,
+                        index(&op, "row")?,
+                        index(&op, "col")?,
+                        text,
+                        h,
+                        made.rec_ms,
+                    )
+                }
+                "table.addRow" => o
+                    .scene
+                    .edit_table(&one(&op)?, TableEdit::AddRow(index(&op, "row")?)),
+                "table.addColumn" => o
+                    .scene
+                    .edit_table(&one(&op)?, TableEdit::AddColumn(index(&op, "col")?)),
+                "table.removeRow" => o
+                    .scene
+                    .edit_table(&one(&op)?, TableEdit::RemoveRow(index(&op, "row")?)),
+                "table.removeColumn" => o
+                    .scene
+                    .edit_table(&one(&op)?, TableEdit::RemoveColumn(index(&op, "col")?)),
+                "table.resizeRow" => {
+                    let e = TableEdit::ResizeRow(index(&op, "row")?, num(&op, "height")?);
+                    o.scene.edit_table(&one(&op)?, e)
+                }
                 "setText" => {
                     let text = op
                         .get("text")

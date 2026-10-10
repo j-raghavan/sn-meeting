@@ -694,3 +694,74 @@ fn text_boxes_through_the_app() {
     assert_eq!(d["entries"][1]["item"]["height"], 200.0);
     assert!(edit(&f, json!({"op": "setText", "ref": t}))["error"].is_string());
 }
+
+/// F21-FR10 through the app: a table from a drag, a cell typed into, rows and columns where
+/// the target is; a hit names the cell and its time.
+#[test]
+fn tables_through_the_app() {
+    let f = fixture();
+    let r = edit(
+        &f,
+        json!({"op": "create", "type": "table", "from": [0, 0], "to": [480, 144], "recMs": 1000}),
+    );
+    let t = r["created"].as_str().unwrap().to_owned();
+    let c = edit(
+        &f,
+        json!({"op": "table.setCell", "ref": t, "row": 1, "col": 2, "text": "Sam",
+                            "height": 30.0, "recMs": 761_000}),
+    );
+    assert!(c["dirty"].is_array());
+    let h = parse(&f.app.canvas_hit_json(&f.id, 400.0, 70.0, 6.0));
+    assert_eq!(
+        (h["ref"].clone(), h["cell"].clone()),
+        (json!(t), json!({"row": 1, "col": 2}))
+    );
+    assert_eq!(
+        (h["atMs"].clone(), h["seekMs"].clone()),
+        (json!(761_000), json!(759_000))
+    );
+    let h0 = parse(&f.app.canvas_hit_json(&f.id, 10.0, 10.0, 6.0));
+    assert_eq!(h0["atMs"], 1000, "an untyped cell: the table's own time");
+    assert_eq!(
+        parse(&f.app.canvas_hit_json(&f.id, -500.0, 0.0, 6.0))["ref"],
+        Value::Null
+    );
+    for op in ["table.addRow", "table.removeRow"] {
+        assert!(
+            edit(&f, json!({"op": op, "ref": t, "row": 0}))["dirty"].is_array(),
+            "{op}"
+        );
+    }
+    for op in ["table.addColumn", "table.removeColumn"] {
+        assert!(
+            edit(&f, json!({"op": op, "ref": t, "col": 0}))["dirty"].is_array(),
+            "{op}"
+        );
+    }
+    assert!(
+        edit(
+            &f,
+            json!({"op": "table.resizeRow", "ref": t, "row": 0, "height": 99.0})
+        )["dirty"]
+            .is_array()
+    );
+    assert!(edit(&f, json!({"op": "table.addRow", "ref": t}))["error"].is_string());
+    assert!(
+        edit(
+            &f,
+            json!({"op": "table.setCell", "ref": t, "row": 0, "col": 0})
+        )["error"]
+            .is_string()
+    );
+    assert!(
+        parse(&f.app.canvas_hit_json("../x", 0.0, 0.0, 1.0))
+            .get("error")
+            .is_some()
+    );
+    std::fs::write(f.dir.join(format!("{}.json", f.id)), b"{bad").unwrap();
+    assert!(
+        parse(&f.app.canvas_hit_json(&f.id, 400.0, 70.0, 6.0))
+            .get("error")
+            .is_some()
+    );
+}

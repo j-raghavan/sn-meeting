@@ -169,6 +169,11 @@ object NativeBridge {
      *  `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`. */
     external fun nativeCanvasEdit(id: String, opJson: String): String
 
+    /** F21-FR10/FR15: the topmost stroke or item within [r] of a world point: `{ref|null, cell:
+     *  {row, col}|null, atMs|null}`, and for a timed one where Listen starts (`seekMs`, `segIndex`,
+     *  `segOffsetMs`, `lineN`). */
+    external fun nativeCanvasHit(id: String, x: Float, y: Float, r: Float): String
+
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,
      *  atMs: null}`; none `{strokeId: null}`. */

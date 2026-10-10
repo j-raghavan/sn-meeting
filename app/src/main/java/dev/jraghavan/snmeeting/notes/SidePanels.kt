@@ -140,18 +140,20 @@ class SidePanels(
     }
 
     /** A column of text rows (⋮, Clear canvas), each at least the touch minimum tall. */
-    fun rows(labels: List<String>, onPick: (Int) -> Unit): View = LinearLayout(a).apply {
+    fun rows(labels: List<String>, enabled: (Int) -> Boolean = { true }, onPick: (Int) -> Unit): View = LinearLayout(a).apply {
         orientation = LinearLayout.VERTICAL
         labels.forEachIndexed { i, label ->
+            val on = enabled(i)
             addView(TextView(a).apply {
                 text = label
                 textSize = 17f
                 typeface = ui.serif
-                setTextColor(ui.ink)
+                setTextColor(if (on) ui.ink else ui.textMuted)
+                isEnabled = on
                 gravity = Gravity.CENTER_VERTICAL
                 minHeight = ui.dp(DockedToolBar.TOUCH_DP)
                 setPadding(ui.dp(14), 0, ui.dp(18), 0)
-                setOnClickListener { onPick(i) }
+                if (on) setOnClickListener { onPick(i) }
             })
             if (i < labels.size - 1) addView(ui.hairline())
         }

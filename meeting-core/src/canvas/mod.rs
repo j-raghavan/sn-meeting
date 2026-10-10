@@ -12,6 +12,7 @@ pub mod hit;
 pub mod item;
 pub mod scene;
 pub mod style;
+pub mod table;
 
 pub use item::{Item, Ref};
 pub use scene::{Doc, LoadReport, Scene};

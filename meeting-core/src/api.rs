@@ -389,6 +389,11 @@ pub fn canvas_edit(id: &str, op: &str) -> String {
     with_app(|app| app.canvas_edit_json(id, op))
 }
 
+/// `nativeCanvasHit(id, x, y, r)` (F21-FR10, FR15): the topmost stroke or item at a point.
+pub fn canvas_hit(id: &str, x: f32, y: f32, r: f32) -> String {
+    with_app(|app| app.canvas_hit_json(id, x, y, r))
+}
+
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.
 pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))
