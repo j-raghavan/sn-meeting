@@ -23,6 +23,9 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 |------|--------|---------|
 | `res/drawable/ic_settings.xml` (gear) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_search.xml` (magnifier, Search) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_tool_{pen,highlighter,eraser}.xml`, `ic_sel_{undo,redo}.xml` (notes tools, via inkread) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable/ic_tool_lasso.xml` (lasso, from inkread) | inkread (same author) | AGPL-3.0-only |
+| `res/drawable/ic_tool_listen.xml` (speaker, the Listen tool) | Material Design Icons (Google) | Apache License 2.0 |
 
 ## Adapted source code
 
@@ -36,6 +39,7 @@ Each adapted file names its origin in its header.
 | `app/.../notes/TouchArbiter.kt` (`PalmRule`), `app/.../notes/NoteTool.kt` (`forPen`) | inkread `PalmFilter.kt`, `ToolPalette.kt` (`Tool.forStylus`) | AGPL-3.0-only |
 | `app/.../notes/Viewport.kt` (pan, zoom, fit, minimap frame) | sn-canvas `CanvasCore.kt`, `ViewTransforms.kt`, `Minimap.kt` | MIT (notice below) |
 | `app/.../notes/SupernoteInk.kt` | inkread `eink/SupernoteInk.kt`, `eink/SupernoteEinkAdapter.kt` | AGPL-3.0-only |
+| `app/.../notes/DockedToolBar.kt` | inkread `ToolPalette.kt` (vertical docked palette, Define removed, docked collapse) | AGPL-3.0-only |
 
 ## Rust crates linked into `libmeeting.so`
 

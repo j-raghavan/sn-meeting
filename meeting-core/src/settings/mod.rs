@@ -63,6 +63,8 @@ pub struct Settings {
     pub rates: Vec<Value>,
     /// F18: the calendar's refresh interval and rules.
     pub calendar: CalendarSettings,
+    /// F17: the notes tool bar's side and state, Focus, and whether notes go with the minutes.
+    pub notes: NotesSettings,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -84,6 +86,7 @@ impl Default for Settings {
             updates: UpdateSettings::default(),
             rates: Vec::new(),
             calendar: CalendarSettings::default(),
+            notes: NotesSettings::default(),
             extra: Extra::new(),
         }
     }
@@ -105,6 +108,61 @@ pub enum Recorder {
 fn lenient_recorder<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Recorder, D::Error> {
     let v = Value::deserialize(d)?;
     Ok(serde_json::from_value(v).unwrap_or_default())
+}
+
+/// F17-FR2: the side the notes tool bar docks to. There is no top (OQ13).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Dock {
+    #[default]
+    Right,
+    Left,
+}
+
+/// F17-FR2: the tool bar expanded (every tool) or collapsed to an edge strip.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Sidebar {
+    #[default]
+    Expanded,
+    Collapsed,
+}
+
+fn lenient_enum<'de, D: serde::Deserializer<'de>, T: Default + serde::de::DeserializeOwned>(
+    d: D,
+) -> Result<T, D::Error> {
+    let v = Value::deserialize(d)?;
+    Ok(serde_json::from_value(v).unwrap_or_default())
+}
+
+/// F17's settings (`settings.json` → `notes`): the bar's side and state, Focus mode, whether
+/// the notes go with the minutes (F17-FR9, on by default; OQ20) and that one-time notice.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct NotesSettings {
+    #[serde(deserialize_with = "lenient_enum")]
+    pub dock: Dock,
+    #[serde(deserialize_with = "lenient_enum")]
+    pub sidebar: Sidebar,
+    pub focus: bool,
+    pub use_for_minutes: bool,
+    /// OQ20: "images of your notes go to <provider> at Stop", answered per provider.
+    pub notice_shown: NoticeShown,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Default for NotesSettings {
+    fn default() -> Self {
+        NotesSettings {
+            dock: Dock::Right,
+            sidebar: Sidebar::Expanded,
+            focus: false,
+            use_for_minutes: true,
+            notice_shown: NoticeShown::default(),
+            extra: Extra::new(),
+        }
+    }
 }
 
 /// F18-FR4's refresh intervals, in minutes: 15 min / 30 min / 1 h / 4 h / manual only (0).
@@ -560,6 +618,25 @@ pub fn apply(current: &Settings, patch: &Value, ctx: &Ctx<'_>) -> Result<Setting
         return Err(err(
             "calendar.refreshMin",
             "refresh every 15, 30, 60 or 240 minutes, or 0 for manual only",
+        ));
+    }
+    if let Some(d) = patch
+        .get("notes")
+        .and_then(|n| n.get("dock"))
+        .filter(|v| !v.is_null())
+        && serde_json::from_value::<Dock>(d.clone()).is_err()
+    {
+        return Err(err("notes.dock", "the tool bar docks right or left"));
+    }
+    if let Some(d) = patch
+        .get("notes")
+        .and_then(|n| n.get("sidebar"))
+        .filter(|v| !v.is_null())
+        && serde_json::from_value::<Sidebar>(d.clone()).is_err()
+    {
+        return Err(err(
+            "notes.sidebar",
+            "the tool bar is expanded or collapsed",
         ));
     }
     let mut v = serde_json::to_value(current).map_err(|e| SettingsError {

@@ -527,3 +527,39 @@ fn the_recorder_is_standard_unless_near_live_is_chosen() {
     .unwrap();
     assert_eq!(get(&e.app())["settings"]["recorder"], "standard");
 }
+
+/// F17-FR2 (OQ13): the notes tool bar docks right or left, never top; it is expanded or
+/// collapsed, and the choice survives a restart. Notes go with the minutes by default (OQ20).
+#[test]
+fn the_notes_bar_docks_right_or_left_and_its_state_persists() {
+    let e = Env::new();
+    let app = e.app();
+    let s = get(&app);
+    assert_eq!(s["settings"]["notes"]["dock"], "right");
+    assert_eq!(s["settings"]["notes"]["sidebar"], "expanded");
+    assert_eq!(s["settings"]["notes"]["useForMinutes"], true);
+    let v = set(&app, json!({"notes": {"dock": "top"}}));
+    assert_eq!(
+        v,
+        json!({"error": "the tool bar docks right or left", "field": "notes.dock"})
+    );
+    let v = set(&app, json!({"notes": {"sidebar": "floating"}}));
+    assert_eq!(v["field"], "notes.sidebar");
+    set(
+        &app,
+        json!({"notes": {"dock": "left", "sidebar": "collapsed", "focus": true}}),
+    );
+    let back = get(&e.app());
+    assert_eq!(back["settings"]["notes"]["dock"], "left");
+    assert_eq!(back["settings"]["notes"]["sidebar"], "collapsed");
+    assert_eq!(back["settings"]["notes"]["focus"], true);
+    // A hand-edited "top" in the file reads as the default, right.
+    fs::write(
+        e.data.path().join("settings.json"),
+        r#"{"notes": {"dock": "top", "sidebar": 3}}"#,
+    )
+    .unwrap();
+    let hand = get(&e.app());
+    assert_eq!(hand["settings"]["notes"]["dock"], "right");
+    assert_eq!(hand["settings"]["notes"]["sidebar"], "expanded");
+}

@@ -72,6 +72,8 @@ data class SettingsView(
     val recorder: String = STANDARD,
     /** F15-FR12: the near-live notice answered, per provider. */
     val liveNoticeShown: Map<String, Boolean> = emptyMap(),
+    /** F17-FR2: the notes bar's side and state, Focus, and notes with the minutes. */
+    val notes: dev.jraghavan.snmeeting.notes.NotesPrefs = dev.jraghavan.snmeeting.notes.NotesPrefs(),
 ) {
     val nearLive get() = recorder == NEAR_LIVE
 
@@ -113,6 +115,7 @@ data class SettingsView(
                 updates = UpdatePrefs.from(s.obj("updates")),
                 recorder = if (s.str("recorder") == NEAR_LIVE) NEAR_LIVE else STANDARD,
                 liveNoticeShown = PROVIDERS.associateWith { s.obj("liveNoticeShown")?.bool(it) ?: false },
+                notes = dev.jraghavan.snmeeting.notes.NotesPrefs.from(s.obj("notes")),
             )
         }
     }

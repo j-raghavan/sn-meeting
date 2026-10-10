@@ -206,6 +206,17 @@ class MeetingActivity : Activity() {
         if (onNotes && notes == null) {
             notes = NotesPage(this, ui, scope, id, object : NotesPage.Host {
                 override fun recordingSince(): Long? = recordingHere()
+                override fun prefs() = settings?.notes ?: dev.jraghavan.snmeeting.notes.NotesPrefs()
+                override fun savePrefs(patch: String) = scope.core({ NativeBridge.nativeSetSettings(patch) }) { json ->
+                    CoreJson.obj(json, SettingsView::from).getOrNull()?.let { settings = it }
+                }
+                override fun timer(): String = clockText()
+                override fun cost(): String? = live?.soFar?.takeIf { view?.meeting?.nearLive == true }
+                override fun playing() = playback?.playing == true
+                override fun canPlay() = playback?.canPlay == true && recordingHere() == null
+                override fun togglePlay() { playback?.toggle() }
+                override fun mark() { this@MeetingActivity.mark(null) }
+                override fun stop() { if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity) }
             }).also {
                 notesHost.addView(it.view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
                 it.open()
@@ -221,11 +232,19 @@ class MeetingActivity : Activity() {
     private fun showClock() {
         val since = recordingHere()
         val text = if (since != null) {
-            "●  " + Format.duration(LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), since))
+            "●  " + clockText()
         } else {
             view?.let { v -> MeetingHeader.of(v.meeting, v.cost).let { h -> listOf(h.stamp, h.length).filter { it.isNotEmpty() }.joinToString("  ·  ") } }.orEmpty()
         }
         if (topTimer.text.toString() != text) topTimer.text = text
+        notes?.bar?.showTimer(clockText()) // the bar's timer: its own view only (F17-FR11)
+    }
+
+    /** The recording's time, or the playback position when not recording. */
+    private fun clockText(): String {
+        val since = recordingHere()
+        if (since != null) return Format.duration(LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), since))
+        return playback?.let { Format.duration(it.positionMs()) } ?: ""
     }
 
     override fun onResume() {
@@ -644,12 +663,20 @@ class MeetingActivity : Activity() {
         showLive()
     }
 
-    private fun markNow(pill: TextView) {
+    private fun markNow(pill: TextView) = mark(pill)
+
+    /** F17-FR3: Mark from the minutes' row ([pill]) or the notes bar: "Marked 0:12:41" for 2 s,
+     *  redrawing only the button. */
+    private fun mark(pill: TextView?) {
         val rec = RecordingService.hub.state as? RecState.Recording ?: return
         if (rec.id != id) return
         val at = LiveClock.nowMs(android.os.SystemClock.elapsedRealtime(), rec.startElapsedMs)
-        ui.stylePill(pill, "Marked ${Format.duration(at)}", filled = false)
-        handler.postDelayed({ ui.stylePill(pill, "◆  Mark", filled = false) }, MARKED_MS)
+        pill?.let { ui.stylePill(it, "Marked ${Format.duration(at)}", filled = false) }
+        notes?.bar?.showMarked("Marked\n${Format.duration(at)}")
+        handler.postDelayed({
+            pill?.let { ui.stylePill(it, "◆  Mark", filled = false) }
+            notes?.bar?.showMarked(dev.jraghavan.snmeeting.notes.ToolBarModel.MARK)
+        }, MARKED_MS)
         scope.core({ NativeBridge.nativeAddMark(id, at) }) { json ->
             (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't add the mark", it.message) }
             fetchLive()

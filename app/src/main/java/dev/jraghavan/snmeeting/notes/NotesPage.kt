@@ -33,6 +33,18 @@ class NotesPage(
     interface Host {
         /** The recording under way is this meeting's: its start (elapsed ms), else null. */
         fun recordingSince(): Long?
+        /** F17-FR2: the bar's side and state, from settings.json. */
+        fun prefs(): NotesPrefs
+        fun savePrefs(patch: String)
+        /** The timer slot: "0:12:41" while recording, the position when not. */
+        fun timer(): String
+        /** F16-FR5: "≈ $0.08 so far" while recording near-live, else null. */
+        fun cost(): String?
+        fun playing(): Boolean
+        fun canPlay(): Boolean
+        fun togglePlay()
+        fun mark()
+        fun stop()
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -42,8 +54,11 @@ class NotesPage(
     private var front = true
 
     var tool: NoteTool = NoteTool.PEN
+        private set
+    /** The lasso selection's stroke ids (`[id, …]`), while there is one. */
+    private var selected = "[]"
 
-    val canvas = NotesCanvasView(a, object : NotesCanvasView.Host {
+    val canvas: NotesCanvasView = NotesCanvasView(a, object : NotesCanvasView.Host {
         override val tool get() = this@NotesPage.tool
         override val recording get() = host.recordingSince() != null
         override val penWidthPx get() = PEN_WIDTH_PX
@@ -57,9 +72,22 @@ class NotesPage(
             NativeBridge.nativeInkStroke(id, LAYER, tool.core, widthWorld, xypt)
         }
 
-        override fun erase(xy: FloatArray, radiusWorld: Float) = changed { NativeBridge.nativeInkErase(id, LAYER, xy, radiusWorld) }
-        override fun lasso(xy: FloatArray) = Unit
-        override fun moveSelection(dx: Float, dy: Float) = Unit
+        override fun erase(xy: FloatArray, radiusWorld: Float) = changed(redraw = true) { NativeBridge.nativeInkErase(id, LAYER, xy, radiusWorld) }
+        override fun lasso(xy: FloatArray) = scope.core({ NativeBridge.nativeInkLasso(id, LAYER, xy) }) { json ->
+            val o = CoreJson.obj(json) { it }.getOrNull() ?: return@core
+            selected = o.optJSONArray("ids")?.toString() ?: "[]"
+            canvas.selection = InkView.rect(o.optJSONArray("bbox"))
+        }
+
+        override fun moveSelection(dx: Float, dy: Float) {
+            val ids = selected
+            scope.core({ NativeBridge.nativeInkMove(id, LAYER, ids, dx, dy) }) { json ->
+                if (reportError(json, "Couldn't move that")) return@core
+                canvas.selection = canvas.selection?.let { WorldRect(it.left + dx, it.top + dy, it.right + dx, it.bottom + dy) }
+                fetch(redraw = true)
+                scheduleSave()
+            }
+        }
         override fun listen(x: Float, y: Float, radiusWorld: Float) = Unit
         override fun viewportChanged(v: Viewport) = fetch(redraw = true)
     })
@@ -85,13 +113,74 @@ class NotesPage(
             Gravity.TOP or Gravity.START).apply { topMargin = ui.dim(12); marginStart = ui.dim(12) })
     }
 
-    /** The tab's content: the canvas column (the bar and strip join it in later steps). */
+    /** The canvas column (the strip joins it in F17-FR6). */
     val column = LinearLayout(a).apply {
         orientation = LinearLayout.VERTICAL
         addView(canvasFrame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
     }
 
-    val view: View get() = column
+    /** F17-FR2: the docked bar, on the canvas's right (or left) edge, never over it. */
+    val bar = DockedToolBar(a, ui, object : DockedToolBar.Host {
+        override fun onTool(t: NoteTool) { tool = t; canvas.selection = null; canvas.toolChanged(t); refreshBar() }
+        override fun onUndo() = changed(redraw = true) { NativeBridge.nativeInkUndo(id, LAYER) }
+        override fun onRedo() = changed(redraw = true) { NativeBridge.nativeInkRedo(id, LAYER) }
+        override fun onCollapse(collapsed: Boolean) {
+            host.savePrefs(NotesPatch.collapsed(collapsed))
+            prefs = prefs.copy(collapsed = collapsed)
+            layout()
+        }
+        override fun onOptions(anchor: View) = options()
+        override fun onMark() = host.mark()
+        override fun onStop() = host.stop()
+        override fun onPlay() { host.togglePlay(); refreshBar() }
+    })
+
+    private var prefs = host.prefs()
+
+    /** The tab's content: the bar beside the canvas column. */
+    val view = LinearLayout(a).apply { orientation = LinearLayout.HORIZONTAL }
+
+    init { layout() }
+
+    /** Bar and column in dock order, the bar at its expanded or collapsed width: one redraw. */
+    private fun layout() {
+        view.removeAllViews()
+        val barParams = LinearLayout.LayoutParams(if (prefs.collapsed) bar.collapsedPx else bar.expandedPx,
+            LinearLayout.LayoutParams.MATCH_PARENT)
+        val colParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f)
+        val rule = View(a).apply { setBackgroundColor(ui.ink) }
+        val ruleParams = LinearLayout.LayoutParams(maxOf(1, ui.dp(1)), LinearLayout.LayoutParams.MATCH_PARENT)
+        if (prefs.dock == NotesPrefs.Dock.LEFT) {
+            view.addView(bar.view, barParams); view.addView(rule, ruleParams); view.addView(column, colParams)
+        } else {
+            view.addView(column, colParams); view.addView(rule, ruleParams); view.addView(bar.view, barParams)
+        }
+        canvas.barOnLeft = prefs.dock == NotesPrefs.Dock.LEFT
+        refreshBar()
+    }
+
+    /** The bar's state now; it rebuilds only when its items change, else edits in place. */
+    fun refreshBar() {
+        val recording = host.recordingSince() != null
+        if (recording && tool == NoteTool.LISTEN) tool = NoteTool.PEN // Listen is off while recording
+        val ink = canvas.inkView
+        bar.render(ToolBarModel.State(tool, prefs.collapsed, recording, ink.canUndo, ink.canRedo,
+            host.timer(), host.cost(), host.playing(), host.canPlay(), prefs.focus))
+    }
+
+    /** The tool options: Focus, Fit, a full refresh of the panel (F17-FR11, the user's choice). */
+    private fun options() {
+        val items = arrayOf(if (prefs.focus) "Focus off" else "Focus on", "Fit all ink", "Refresh the screen")
+        android.app.AlertDialog.Builder(a, dev.jraghavan.snmeeting.R.style.InkDialog).setTitle("Notes")
+            .setItems(items) { _, i ->
+                when (i) {
+                    0 -> { prefs = prefs.copy(focus = !prefs.focus); host.savePrefs(NotesPatch.focus(prefs.focus)); refreshBar() }
+                    1 -> canvas.fit()
+                    else -> canvas.fullRefresh()
+                }
+            }
+            .setNegativeButton("CLOSE", null).show()
+    }
 
     /** Opens the canvas at its last viewport, or fitted to its ink. */
     fun open() {
@@ -140,14 +229,18 @@ class NotesPage(
 
     /** A change to the ink: run [call], fetch what is in view (drawn once the pen rests) and
      *  arm the deferred save. */
-    private fun changed(call: () -> String) {
+    private fun changed(redraw: Boolean = false, call: () -> String) {
         scope.core(call) { json ->
             if (!reportError(json, "Couldn't keep that")) {
-                fetch(redraw = false)
-                handler.removeCallbacks(save)
-                handler.postDelayed(save, SAVE_MS)
+                fetch(redraw)
+                scheduleSave()
             }
         }
+    }
+
+    private fun scheduleSave() {
+        handler.removeCallbacks(save)
+        handler.postDelayed(save, SAVE_MS)
     }
 
     /** The strokes in view (plus a margin, so a small pan needs no fetch). */
@@ -159,7 +252,11 @@ class NotesPage(
             NativeBridge.nativeInkStrokesForDraw(id, LAYER, (r.left - m).toFloat(), (r.top - m).toFloat(),
                 (r.right + m).toFloat(), (r.bottom + m).toFloat())
         }) { json ->
-            CoreJson.obj(json, InkView::from).getOrNull()?.let { canvas.show(it, redraw) }
+            CoreJson.obj(json, InkView::from).getOrNull()?.let {
+                val history = it.canUndo != canvas.inkView.canUndo || it.canRedo != canvas.inkView.canRedo
+                canvas.show(it, redraw)
+                if (history) refreshBar() // Undo and Redo light up or grey out
+            }
         }
     }
 

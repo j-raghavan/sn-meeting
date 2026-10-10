@@ -22,7 +22,9 @@ fn defaults_json() -> Value {
             {"keyword": "one on one", "templateId": "one-on-one"}, {"keyword": "stand-up", "templateId": "standup"},
             {"keyword": "standup", "templateId": "standup"}, {"keyword": "daily", "templateId": "standup"},
             {"keyword": "interview", "templateId": "interview"}, {"keyword": "lecture", "templateId": "lecture"},
-            {"keyword": "talk", "templateId": "lecture"}]}
+            {"keyword": "talk", "templateId": "lecture"}]},
+        "notes": {"dock": "right", "sidebar": "expanded", "focus": false, "useForMinutes": true,
+                  "noticeShown": {"openai": false, "gemini": false, "anthropic": false}}
     })
 }
 
@@ -62,6 +64,8 @@ fn unknown_fields_survive_a_save_at_every_level() {
         "recorder": "near-live",
         "updates": {"autoCheck": false, "autoInstall": false, "lastCheckMs": 7, "skipVersion": "0.2.0", "w": 4},
         "calendar": {"refreshMin": 60, "linkByTime": false, "eventInMinutes": false, "templateRules": [{"keyword": "sync", "templateId": "general"}], "v": 5},
+        "notes": {"dock": "left", "sidebar": "collapsed", "focus": true, "useForMinutes": false,
+                  "noticeShown": {"openai": false, "gemini": true, "anthropic": false}, "u": 6},
         "transcriptOptions": {"z": 3}
     });
     fs::write(&p, v.to_string()).unwrap();

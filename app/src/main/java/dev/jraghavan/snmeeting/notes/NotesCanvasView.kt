@@ -114,7 +114,7 @@ class NotesCanvasView(context: Context, private val host: Host) : View(context) 
      *  the firmware's ink shows the stroke just written (it comes when the pen rests). */
     fun show(next: InkView, redraw: Boolean = true) {
         ink = next
-        if (redraw) invalidate()
+        if (redraw) { clearFirmwareInk(); invalidate() }
     }
 
     val inkView: InkView get() = ink

@@ -283,6 +283,23 @@ class SettingsActivity : Activity() {
     }
 
     /**
+     * F17-FR2 (OQ13): the notes tool bar docks right (the default) or left, never top.
+     */
+    private fun notesSection(column: LinearLayout) {
+        val n = settings?.notes ?: return
+        ui.section(column, "Notes").apply {
+            choice("Tool bar on the right", null, n.dock == dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.RIGHT) {
+                patch(dev.jraghavan.snmeeting.notes.NotesPatch.dock(dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.RIGHT))
+            }
+            addView(ui.hairline())
+            choice("Tool bar on the left", null, n.dock == dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.LEFT) {
+                patch(dev.jraghavan.snmeeting.notes.NotesPatch.dock(dev.jraghavan.snmeeting.notes.NotesPrefs.Dock.LEFT))
+            }
+            errors["notes.dock"]?.let { addView(error(it)) }
+        }
+    }
+
+    /**
      * F10-FR3: EXPORT/sn-meeting, Document/Meetings or a folder typed relative to internal
      * storage. The core validates it (inside storage, writable, not a keys or templates folder)
      * and its reason shows under the field.
@@ -544,6 +561,7 @@ class SettingsActivity : Activity() {
 
         micSection(column)
         recorderSection(column)
+        notesSection(column)
         errors[""]?.let { column.addView(error(it)) }
 
         saveSection(column)
