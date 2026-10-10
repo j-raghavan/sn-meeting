@@ -29,9 +29,10 @@ import dev.jraghavan.snmeeting.model.SearchResults
  * filter or Show more, never as a live-updating list (e-ink). Queries run on the local index
  * only (F19-FR10).
  *
- * The box is in keyboard mode (⌨). M12 hook: the ✎ ink strip (QueryInk, F19-FR1) arrives with
- * the notes surface; it renders the strip to a PNG and sends it through nativeRecogniseQuery,
- * falling back here on `{error}` with "Can't read handwriting offline — type your search".
+ * The box takes the keyboard (⌨) or, with ✎, a pen strip under it (F19-FR1): a moment after
+ * the pen lifts, the strip goes as a PNG through nativeRecogniseQuery and the words read fill
+ * the box and search; on `{error}` it falls back to the keyboard with "Can't read handwriting
+ * offline — type your search".
  */
 class SearchActivity : Activity() {
 
@@ -41,6 +42,9 @@ class SearchActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var results: LinearLayout
     private var filter = Filter.ALL
+    private lateinit var ink: dev.jraghavan.snmeeting.notes.QueryInkView
+    private lateinit var inkRow: LinearLayout
+    private lateinit var penToggle: TextView
     private var limit = SearchModel.PAGE_GROUPS
     /** Bumped per request, so an older answer arriving late never replaces a newer one. */
     private var asked = 0
@@ -81,6 +85,17 @@ class SearchActivity : Activity() {
         chips = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
         status = ui.note("", 14f).apply { gravity = Gravity.CENTER; visibility = View.GONE }
         results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        ink = dev.jraghavan.snmeeting.notes.QueryInkView(this) { png -> read(png) }
+        inkRow = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            background = ui.outline(ui.dim(6))
+            addView(ink, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, ui.dim(150)))
+            addView(ui.eyebrow("Clear", ui.inkSoft).apply {
+                gravity = Gravity.END; setPadding(ui.dim(10), ui.dim(6), ui.dim(12), ui.dim(8))
+                isClickable = true; setOnClickListener { ink.clear() }
+            }, ui.fullWidth())
+        }
         showChips()
         showHint()
         val column = ui.column().apply {
@@ -92,7 +107,10 @@ class SearchActivity : Activity() {
                 addView(box, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                 addView(ui.pill("Search", filled = true, size = 16f) { limit = SearchModel.PAGE_GROUPS; search() },
                     ui.wrap().apply { marginStart = ui.dim(12) })
+                addView(ui.pill("✎", size = 16f) { writing(inkRow.visibility != View.VISIBLE) }.also { penToggle = it },
+                    ui.wrap().apply { marginStart = ui.dim(8) })
             }, ui.fullWidth())
+            addView(inkRow, ui.fullWidth().apply { topMargin = ui.dim(12) })
             addView(ui.spacer(ui.dim(18)))
             addView(chips, ui.fullWidth())
             addView(ui.spacer(ui.dim(14)))
@@ -104,6 +122,31 @@ class SearchActivity : Activity() {
             addView(ui.closingMark())
         }
         return ui.page(column)
+    }
+
+    /** F19-FR1: ✎ shows the pen strip (and hides the keyboard); ⌨ goes back to typing. */
+    private fun writing(on: Boolean) {
+        inkRow.visibility = if (on) View.VISIBLE else View.GONE
+        ui.stylePill(penToggle, if (on) "⌨" else "✎", filled = false)
+        val im = getSystemService(InputMethodManager::class.java)
+        if (on) im?.hideSoftInputFromWindow(box.windowToken, 0) else { ink.clear(); box.requestFocus(); im?.showSoftInput(box, 0) }
+    }
+
+    /** F19-FR9: the strip read by the summarise provider (≤ 15 s), or the keyboard. */
+    private fun read(png: ByteArray) {
+        showMessage("Reading your handwriting…")
+        SearchJobs.query({ NativeBridge.nativeRecogniseQuery(png) }) { json ->
+            if (isDestroyed) return@query
+            val text = dev.jraghavan.snmeeting.notes.QueryStrip.text(json)
+            if (text == null) {
+                writing(false)
+                return@query showMessage(dev.jraghavan.snmeeting.notes.QueryStrip.OFFLINE)
+            }
+            box.setText(text)
+            ink.clear()
+            limit = SearchModel.PAGE_GROUPS
+            search()
+        }
     }
 
     /** All / Notes / Transcript / Minutes / To-dos / Events: keyline chips, the chosen one inverted. */
