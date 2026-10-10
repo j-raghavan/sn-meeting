@@ -61,6 +61,28 @@ class MeetingActivity : Activity() {
     /** F17-FR1: the tab shown; chosen once, from the meeting's status, on the first load. */
     private var tab: String? = null
     private var notes: NotesPage? = null
+    /** F17-FR10: the Minutes tab's ink area, kept across redraws. */
+    private var minutesInk: dev.jraghavan.snmeeting.notes.MinutesInk? = null
+
+    /** F17-FR10: a tap on the minutes opens a plain-text editor; the field becomes the user's. */
+    private val edits = object : MeetingCards.Edits {
+        override fun summary(current: String) = correct("Edit the summary", current) { org.json.JSONObject().put("summary", it) }
+        override fun decision(i: Int, current: String) = correct(if (current.isEmpty()) "Add a decision" else "Edit the decision", current) {
+            org.json.JSONObject().put("decision", org.json.JSONObject().put("index", i).put("text", it))
+        }
+        override fun section(i: Int, heading: String, current: String) = correct(heading, current) {
+            org.json.JSONObject().put("section", org.json.JSONObject().put("index", i).put("body", it))
+        }
+    }
+
+    private fun correct(title: String, current: String, patch: (String) -> org.json.JSONObject) {
+        InkDialog.text(this, ui, title, current) { text ->
+            scope.core({ NativeBridge.nativeEditMinutes(id, patch(text).toString()) }) { json ->
+                (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Couldn't change it", it.message) }
+                load()
+            }
+        }
+    }
     private var settings: SettingsView? = null
     private var templates: List<TemplateRow> = emptyList()
     private var pickingTemplate = false
@@ -286,6 +308,7 @@ class MeetingActivity : Activity() {
 
     override fun onStop() {
         notes?.close() // F17-FR5: the ink saved and the viewport kept; the pen given back
+        minutesInk?.close()
         handler.removeCallbacks(clock)
         unLive?.invoke(); unLive = null
         unHub?.invoke(); unHub = null
@@ -560,7 +583,7 @@ class MeetingActivity : Activity() {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("Summary").also { anchors["summary"] = it })
                 addView(ui.spacer(ui.dim(14)))
-                addView(cards.summary(c))
+                addView(cards.summary(c, edits.takeIf { !LongJobs.lane.isRunning(this@MeetingActivity.id) }))
             }
             if (m.todos.isNotEmpty() || m.status == Status.DONE) {
                 addView(ui.spacer(ui.dim(36)))
@@ -593,6 +616,16 @@ class MeetingActivity : Activity() {
                 addView(cards.transcript(pages, transcriptPage, mark) { transcriptPage = it })
             }
 
+            // F17-FR10: the user's own ink on the minutes, after the recording.
+            if (m.status != Status.RECORDING) {
+                addView(ui.spacer(ui.dim(36)))
+                addView(ui.eyebrowItalic("Your notes on the minutes"))
+                addView(ui.spacer(ui.dim(14)))
+                val ink = minutesInk ?: dev.jraghavan.snmeeting.notes.MinutesInk(this@MeetingActivity, ui, scope, this@MeetingActivity.id)
+                    .also { minutesInk = it; it.load() }
+                (ink.view.parent as? android.view.ViewGroup)?.removeView(ink.view)
+                addView(ink.view, ui.fullWidth())
+            }
             addView(ui.spacerWeighted(ui.phi))
             addView(ui.spacer(ui.dim(32)))
             if (actions?.canDelete == true) {

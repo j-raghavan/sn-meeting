@@ -320,9 +320,8 @@ pub fn merge(
         sc.title = Some(t);
         sc.title_source = Some(TitleSource::Auto);
     }
-    sc.summary = Some(x.summary);
-    sc.decisions = x.decisions;
-    sc.sections = x
+    // F17-FR10: a field the user corrected is never replaced.
+    let sections = x
         .sections
         .into_iter()
         .map(|(heading, body)| Section {
@@ -331,6 +330,7 @@ pub fn merge(
             extra: Default::default(),
         })
         .collect();
+    crate::minutes::merge_ai(sc, x.summary, x.decisions, sections);
     for t in x.todos {
         let key = normalise(&t.text);
         if key.is_empty() {

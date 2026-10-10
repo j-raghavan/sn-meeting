@@ -26,7 +26,13 @@ import kotlin.math.hypot
  * - Nothing else redraws the canvas but ink, pan/zoom and the playback emphasis (F17-FR11).
  */
 @SuppressLint("ViewConstructor")
-class NotesCanvasView(context: Context, private val host: Host) : View(context) {
+class NotesCanvasView(
+    context: Context,
+    private val host: Host,
+    /** F17-FR10's ink area on the Minutes tab: a fixed sheet in a scrolling page. A finger
+     *  scrolls the page (it is not taken here) and the canvas draws the live stroke itself. */
+    private val fixed: Boolean = false,
+) : View(context) {
 
     interface Host {
         val tool: NoteTool
@@ -182,7 +188,10 @@ class NotesCanvasView(context: Context, private val host: Host) : View(context) 
 
     @SuppressLint("ClickableViewAccessibility") // the canvas is not a button: taps are Listen's
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (!arbiter.isPenActive) scale.onTouchEvent(e)
+        val pen = e.getToolType(e.actionIndex).let { it == MotionEvent.TOOL_TYPE_STYLUS || it == MotionEvent.TOOL_TYPE_ERASER }
+        if (fixed && e.actionMasked == MotionEvent.ACTION_DOWN && !pen) return false // the page scrolls
+        if (fixed) parent?.requestDisallowInterceptTouchEvent(true)
+        if (!arbiter.isPenActive && !fixed) scale.onTouchEvent(e)
         val inputs: List<PointerInput> = when (e.actionMasked) {
             MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
                 val c = contact(e, e.actionIndex)
@@ -247,7 +256,10 @@ class NotesCanvasView(context: Context, private val host: Host) : View(context) 
     private fun move(m: PointerInput.Move, at: Long) {
         if (hypot(m.x - downX, m.y - downY) > TAP_SLOP_PX) moved = true
         when (gesture) {
-            Gesture.DRAW -> buffer?.add(m.x, m.y, m.pressure, at)
+            Gesture.DRAW -> {
+                buffer?.add(m.x, m.y, m.pressure, at)
+                if (!firmwareOn) invalidate() // no firmware ink here: the canvas draws the live stroke
+            }
             Gesture.ERASE, Gesture.LASSO -> {
                 path += m.x; path += m.y
                 if (!movingSelection) invalidate() // the band or loop is drawn by the canvas itself
@@ -334,6 +346,16 @@ class NotesCanvasView(context: Context, private val host: Host) : View(context) 
                 drawPath.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2
             }
             canvas.drawPath(drawPath, inkPaint)
+        }
+        val live = buffer
+        if (gesture == Gesture.DRAW && !firmwareOn && live != null && live.size > 1) {
+            val xy = live.xy()
+            livePath.reset()
+            livePath.moveTo(xy[0], xy[1])
+            var k = 2
+            while (k + 1 < xy.size) { livePath.lineTo(xy[k], xy[k + 1]); k += 2 }
+            inkPaint.color = Color.BLACK; inkPaint.strokeWidth = host.penWidthPx
+            canvas.drawPath(livePath, inkPaint)
         }
         markGlyphs.forEach { (x, y) -> canvas.drawText("◆", v.screenX(x).toFloat(), v.screenY(y).toFloat(), glyphPaint) }
         outline?.let { box(canvas, it, dashPaint) }

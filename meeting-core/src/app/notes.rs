@@ -330,6 +330,23 @@ impl App {
         (saved, error)
     }
 
+    /// `nativeEditMinutes(id, patchJson)` (F17-FR10): one correction to the minutes, marking
+    /// that field the user's. `{meeting}`.
+    pub fn edit_minutes_json(&self, id: &str, patch: &str) -> String {
+        let Ok(patch) = serde_json::from_str::<Value>(patch) else {
+            return error_json("the correction must be JSON");
+        };
+        let _w = self.write_lock();
+        let r = self.library().update(id, |sc, _| {
+            crate::minutes::edit(sc, &patch).map_err(crate::library::LibError::Invalid)?;
+            Ok(sc.clone())
+        });
+        match r {
+            Ok(sc) => json!({"meeting": sc}).to_string(),
+            Err(e) => error_json(&e.to_string()),
+        }
+    }
+
     /// `nativeInkSave(id)`: the deferred flush (F17-FR5). `{saved}`, or `{error}`.
     pub fn ink_save_json(&self, id: &str) -> String {
         match self.flush_ink(Some(id)) {

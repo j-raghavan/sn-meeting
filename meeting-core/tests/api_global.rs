@@ -78,6 +78,7 @@ fn app_exports() -> Vec<(&'static str, String)> {
             api::ink_strokes("x", "canvas", [0.0; 4]),
         ),
         ("inkSave", api::ink_save("x")),
+        ("editMinutes", api::edit_minutes("x", "{}")),
         ("inkHit", api::ink_hit("x", "canvas", 0.0, 0.0, 1.0)),
         ("notesClose", api::notes_close("x", 0.0, 0.0, 1.0)),
         (

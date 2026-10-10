@@ -118,6 +118,16 @@ class PresentersTest {
         assertEquals(Actions.Job.TRANSCRIBE, Actions.of(sc(Status.RECORDED), false, found, found).primary)
     }
 
+    @Test fun aCorrectionAddressesTheSidecarsOwnIndex() { // F17-FR10
+        val m = sc(Status.DONE).copy(decisions = listOf(" ", "Ship it", "Hire"),
+            sections = listOf(Section("", " "), Section("Risks", "Budget")))
+        val c = SummaryCard.of(m)!!
+        assertEquals(listOf("Ship it", "Hire"), c.decisions)
+        assertEquals(listOf(1, 2), c.decisionIndex)
+        assertEquals(listOf(1), c.sectionIndex)
+        assertEquals(3, c.decisionCount)
+    }
+
     @Test fun theActionFollowsTheStatus() { // F7-FR2
         fun job(st: Status, f: FailedAt? = null) = Actions.of(sc(st, f), false, found, found).primary
         assertEquals(Actions.Job.TRANSCRIBE, job(Status.RECORDED))

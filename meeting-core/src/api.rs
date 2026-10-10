@@ -378,6 +378,11 @@ pub fn ink_hit(id: &str, layer: &str, x: f32, y: f32, r: f32) -> String {
     with_app(|app| app.ink_hit_json(id, layer, x, y, r))
 }
 
+/// `nativeEditMinutes(id, patchJson)` (F17-FR10): a correction, marked the user's.
+pub fn edit_minutes(id: &str, patch: &str) -> String {
+    with_app(|app| app.edit_minutes_json(id, patch))
+}
+
 /// `nativeInkSave(id)` (F17-FR5): the deferred flush.
 pub fn ink_save(id: &str) -> String {
     with_app(|app| app.ink_save_json(id))

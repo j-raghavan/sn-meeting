@@ -52,22 +52,34 @@ class MeetingCards(private val a: Activity, private val ui: Inkwell) {
      * S5: the summary, then Decisions as bullets, then each section under its mono eyebrow
      * heading. Static text in one card: the page scrolls, the card never does (e-ink).
      */
-    fun summary(c: SummaryCard): View = ui.card(padV = ui.dim(22)).apply {
+    /** F17-FR10: what a tap on the minutes corrects (null: they can't be edited now). */
+    interface Edits {
+        fun summary(current: String)
+        /** [i] is the decision's index in the sidecar; [i] = count adds one. */
+        fun decision(i: Int, current: String)
+        fun section(i: Int, heading: String, current: String)
+    }
+
+    fun summary(c: SummaryCard, edits: Edits? = null): View = ui.card(padV = ui.dim(22)).apply {
         var first = true
         /** The space above a block: none for the first. */
         fun top(): Int = if (first) { first = false; 0 } else ui.dim(22)
-        c.summary?.let { addView(ui.body(it, 17f).apply { setLineSpacing(0f, 1.35f) }, ui.fullWidth().apply { topMargin = top() }) }
-        if (c.decisions.isNotEmpty()) {
+        fun TextView.tap(f: () -> Unit) = apply { if (edits != null) { isClickable = true; setOnClickListener { f() } } }
+        c.summary?.let { s -> addView(ui.body(s, 17f).apply { setLineSpacing(0f, 1.35f) }.tap { edits?.summary(s) }, ui.fullWidth().apply { topMargin = top() }) }
+        if (c.decisions.isNotEmpty() || edits != null) {
             addView(ui.eyebrow("Decisions"), ui.wrap().apply { topMargin = top() })
-            c.decisions.forEach { d ->
-                addView(ui.body("•  $d", 17f).apply { setLineSpacing(0f, 1.3f) }, ui.fullWidth().apply { topMargin = ui.dim(8) })
+            c.decisions.forEachIndexed { i, d ->
+                addView(ui.body("•  $d", 17f).apply { setLineSpacing(0f, 1.3f) }.tap { edits?.decision(c.decisionIndex[i], d) },
+                    ui.fullWidth().apply { topMargin = ui.dim(8) })
             }
+            if (edits != null) addView(ui.note("＋  Add a decision", 15f, ui.textMuted).tap { edits.decision(c.decisionCount, "") },
+                ui.fullWidth().apply { topMargin = ui.dim(10) })
         }
-        c.sections.forEach { sec ->
+        c.sections.forEachIndexed { i, sec ->
             addView(ui.eyebrow(sec.heading), ui.wrap().apply { topMargin = top() })
-            if (sec.body.isNotBlank()) {
-                addView(ui.body(sec.body.trim(), 17f).apply { setLineSpacing(0f, 1.35f) }, ui.fullWidth().apply { topMargin = ui.dim(8) })
-            }
+            val body = sec.body.trim()
+            addView(ui.body(body.ifEmpty { "—" }, 17f).apply { setLineSpacing(0f, 1.35f) }.tap { edits?.section(c.sectionIndex[i], sec.heading, body) },
+                ui.fullWidth().apply { topMargin = ui.dim(8) })
         }
     }
 

@@ -157,6 +157,11 @@ object NativeBridge {
      *  atMs: null}`; none `{strokeId: null}`. */
     external fun nativeInkHit(id: String, layer: String, x: Float, y: Float, r: Float): String
 
+    /** F17-FR10: one correction to the minutes — `{"summary": text}`, `{"decision": {index,
+     *  text}}` (index = count adds; "" deletes) or `{"section": {index, body}}`; the field
+     *  becomes the user's and Summarise again keeps it. `{meeting}`. */
+    external fun nativeEditMinutes(id: String, patchJson: String): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 

@@ -171,3 +171,49 @@ fn with_the_setting_off_no_note_goes() {
     assert_eq!(reqs.len(), 1);
     assert!(images(&reqs[0]).is_empty());
 }
+
+/// F17-AC7: a user-edited summary survives Summarise again, the AI-sourced decisions are
+/// replaced, and no `.inkbin` file is written by it (INV12).
+#[test]
+fn summarise_again_keeps_the_users_summary_and_never_writes_ink() {
+    let fx = fixture();
+    parse(&fx.app.run_job_json(&fx.id, Job::Summarise));
+    let e = parse(
+        &fx.app
+            .edit_minutes_json(&fx.id, r#"{"summary": "My own words."}"#),
+    );
+    assert_eq!(e["meeting"]["summarySource"], "user");
+    assert!(
+        parse(&fx.app.edit_minutes_json(&fx.id, "nope"))
+            .get("error")
+            .is_some()
+    );
+    assert!(
+        parse(&fx.app.edit_minutes_json(&fx.id, "{}"))
+            .get("error")
+            .is_some()
+    );
+    assert!(
+        parse(
+            &fx.app
+                .edit_minutes_json("meeting-20990101-000000", r#"{"summary": "x"}"#)
+        )
+        .get("error")
+        .is_some()
+    );
+    let canvas = meeting::notes::path(&fx.dir, &fx.id, meeting::notes::Layer::Canvas);
+    let before = std::fs::metadata(&canvas).unwrap().modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let out = parse(&fx.app.run_job_json(&fx.id, Job::Summarise));
+    assert_eq!(out["meeting"]["summary"], "My own words.");
+    assert_eq!(
+        out["meeting"]["decisions"],
+        json!(["Ship"]),
+        "the AI's decisions, replaced"
+    );
+    assert_eq!(
+        std::fs::metadata(&canvas).unwrap().modified().unwrap(),
+        before
+    );
+    assert!(!meeting::notes::path(&fx.dir, &fx.id, meeting::notes::Layer::Minutes).exists());
+}

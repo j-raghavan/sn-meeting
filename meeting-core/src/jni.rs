@@ -1037,3 +1037,18 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeInkHit<'l
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeEditMinutes<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    id: JString<'local>,
+    patch_json: JString<'local>,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        let id: String = id.try_to_string(env)?;
+        let patch_json: String = patch_json.try_to_string(env)?;
+        env.new_string(crate::api::edit_minutes(&id, &patch_json))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}

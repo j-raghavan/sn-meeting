@@ -111,14 +111,21 @@ data class MeetingHeader(
 }
 
 /** F7-FR3: what the meeting screen's Summary card shows; null when there is no summary yet. */
-data class SummaryCard(val summary: String?, val decisions: List<String>, val sections: List<Section>) {
+data class SummaryCard(
+    val summary: String?, val decisions: List<String>, val sections: List<Section>,
+    /** F17-FR10: each shown decision's and section's index in the sidecar (for a correction). */
+    val decisionIndex: List<Int> = decisions.indices.toList(),
+    val sectionIndex: List<Int> = sections.indices.toList(),
+    /** How many decisions the sidecar holds (the index a new one takes). */
+    val decisionCount: Int = decisions.size,
+) {
     companion object {
         fun of(m: Sidecar): SummaryCard? {
             val summary = m.summary?.trim()?.ifEmpty { null }
-            val decisions = m.decisions.map { it.trim() }.filter { it.isNotEmpty() }
-            val sections = m.sections.filter { it.heading.isNotBlank() || it.body.isNotBlank() }
-            if (summary == null && decisions.isEmpty() && sections.isEmpty()) return null
-            return SummaryCard(summary, decisions, sections)
+            val d = m.decisions.withIndex().filter { it.value.isNotBlank() }
+            val s = m.sections.withIndex().filter { it.value.heading.isNotBlank() || it.value.body.isNotBlank() }
+            if (summary == null && d.isEmpty() && s.isEmpty()) return null
+            return SummaryCard(summary, d.map { it.value.trim() }, s.map { it.value }, d.map { it.index }, s.map { it.index }, m.decisions.size)
         }
     }
 }
