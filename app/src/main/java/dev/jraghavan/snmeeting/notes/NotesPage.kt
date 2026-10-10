@@ -112,8 +112,19 @@ class NotesPage(
         override fun moveSelection(dx: Float, dy: Float) =
             edit("""{"op":"move","dx":$dx,"dy":$dy}""", keepSelection = true)
 
-        override fun selectAt(x: Float, y: Float, radiusWorld: Float) =
-            if (x.isNaN()) clearSelection() else select("""{"op":"select","at":[$x,$y],"r":$radiusWorld}""")
+        override fun selectAt(x: Float, y: Float, radiusWorld: Float) {
+            if (x.isNaN()) return clearSelection()
+            // F21-FR9: a pen tap on a selected text box or note edits it again.
+            val sole = canvas.inkView.selection.singleOrNull()
+            val text = textItemAt(x.toDouble(), y.toDouble())
+            if (text != null && text.ref == sole) return editText(text)
+            select("""{"op":"select","at":[$x,$y],"r":$radiusWorld}""")
+        }
+
+        override fun place(tool: NoteTool, x: Float, y: Float) {
+            val hit = textItemAt(x.toDouble(), y.toDouble())
+            if (hit != null) editText(hit) else newText(tool, x.toDouble(), y.toDouble())
+        }
 
         override fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) =
             select("""{"op":"select","rect":[$x0,$y0,$x1,$y1]}""")
@@ -330,6 +341,52 @@ class NotesPage(
             }) { edit("""{"op":"clear"}""") }
         }
         refreshBar()
+    }
+
+    /** F21-FR9: the keyboard editor over the canvas. */
+    private val textEditor by lazy { dev.jraghavan.snmeeting.notes.canvas.TextEditor(a, canvasFrame) }
+
+    /** The topmost text box or note under a world point (shell geometry, rotation included). */
+    private fun textItemAt(x: Double, y: Double): DrawItem? = canvas.inkView.items.lastOrNull { it ->
+        (it.type == "text" || it.type == "note") && it.toLocal(x, y).let { l ->
+            l.x in it.x..(it.x + it.width) && l.y in it.y..(it.y + it.height)
+        }
+    }
+
+    private fun openEditor(t: dev.jraghavan.snmeeting.notes.canvas.TextEditor.Target, wx: Double, wy: Double, ww: Double,
+        font: Double, initial: String, done: (String) -> Unit) {
+        val v = canvas.viewport
+        canvas.overlayOff(true)
+        canvas.editing = t.itemId?.let { it to t.cell }
+        textEditor.show(t, v.screenX(wx).toInt(), v.screenY(wy).toInt(), (ww * v.zoom).toInt(), (font * v.zoom).toFloat(), initial) { text ->
+            canvas.editing = null
+            canvas.overlayOff(false)
+            done(text)
+        }
+    }
+
+    /** F21-FR9: a new text box (top-left at the tap) or note (centred on it); placing it and
+     *  its text is one step, made when Done or Back commits; an empty one is discarded. */
+    private fun newText(tool: NoteTool, x: Double, y: Double) {
+        val note = tool == NoteTool.NOTE
+        val style = canvas.inkView.defaultStyle
+        val w = if (note) NOTE_SIDE else TEXT_WIDTH
+        val (left, top) = if (note) (x - w / 2) to (y - w / 2) else x to y
+        openEditor(dev.jraghavan.snmeeting.notes.canvas.TextEditor.Target(null, null), left, top, w, style.size.fontSize, "") { text ->
+            if (text.isBlank()) return@openEditor
+            val h = TextLayout.height(text, w, style.size.fontSize)
+            edit("""{"op":"create","type":"${if (note) "note" else "text"}","at":[$x,$y],"text":${CoreJson.quote(text)},"height":$h${recMs()}}""")
+        }
+    }
+
+    /** F21-FR9: edit a text box's or note's text again: one step per session. */
+    private fun editText(item: DrawItem) {
+        openEditor(dev.jraghavan.snmeeting.notes.canvas.TextEditor.Target(item.id, null), item.x, item.y, item.width,
+            item.style.size.fontSize, item.text.orEmpty()) { text ->
+            if (text == item.text) return@openEditor
+            val h = TextLayout.height(text, item.width, item.style.size.fontSize)
+            edit("""{"op":"setText","ref":${CoreJson.quote(item.ref)},"text":${CoreJson.quote(text)},"height":$h${recMs()}}""", keepSelection = true)
+        }
     }
 
     /** F21-FR15 / OQ36: `,"recMs":t` for something made now while recording, else nothing. */
@@ -568,6 +625,7 @@ class NotesPage(
     /** The page goes: the pen is let go, the ink saved and the viewport kept. */
     fun close() {
         panels.close()
+        if (textEditor.open) textEditor.commit()
         handler.removeCallbacks(save)
         canvas.releasePen()
         if (!opened) return
@@ -626,6 +684,9 @@ class NotesPage(
 
     companion object {
         const val LAYER = "canvas"
+        /** sn-canvas `TextElements.TEXT_WIDTH`, `NOTE_SIZE` (the core's too). */
+        const val TEXT_WIDTH = 320.0
+        const val NOTE_SIDE = 200.0
         const val CLEAR_TITLE = "Clear this canvas?"
         const val CLEAR_BODY = "Everything on this canvas is removed. Undo brings it back."
         const val CLEAR_YES = "Clear canvas"

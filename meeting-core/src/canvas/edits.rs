@@ -97,7 +97,7 @@ pub fn resized_image(it: &Item, corner: Corner, p: Pt, aspect: f64) -> (f64, f64
 }
 
 impl Scene {
-    fn editable_item(&self, r: &Ref) -> Option<&Item> {
+    pub(crate) fn editable_item(&self, r: &Ref) -> Option<&Item> {
         match r {
             Ref::Item(i) => self.item(i).filter(|it| it.known()),
             Ref::Stroke(_) => None,
@@ -398,6 +398,85 @@ impl Scene {
             (it.width, it.height) = ((to.x - from.x).abs(), (to.y - from.y).abs());
         }
         self.add_item(it)
+    }
+}
+
+/// A new text box's width in world units; its height follows its text (`TextElements.kt`).
+pub const TEXT_WIDTH: f64 = 320.0;
+/// A new sticky note's side; it stays at least square.
+pub const NOTE_SIZE: f64 = 200.0;
+/// The least a text box is tall (one line's padding).
+pub const MIN_TEXT_HEIGHT: f64 = 16.0;
+
+/// A measured text height, clamped (the shell measures; the core keeps it sane).
+fn text_height(h: Option<f64>) -> f64 {
+    h.filter(|h| h.is_finite())
+        .unwrap_or(MIN_TEXT_HEIGHT)
+        .clamp(MIN_TEXT_HEIGHT, super::item::MAX_COORD)
+}
+
+impl Scene {
+    /// F21-FR9: a text box (its top-left at `at`, 320 wide) or a sticky note (centred on
+    /// `at`, at least square), with its first text, as one step; an empty one is not made. Its
+    /// `recMs` is when that text was committed (OQ36).
+    pub fn create_text(
+        &mut self,
+        kind: &str,
+        at: Pt,
+        text: &str,
+        height: Option<f64>,
+        made: &Made<'_>,
+    ) -> Option<Ref> {
+        if !matches!(kind, "text" | "note")
+            || text.trim().is_empty()
+            || text.len() > super::item::MAX_TEXT
+        {
+            return None;
+        }
+        if !at.x.is_finite() || !at.y.is_finite() {
+            return None;
+        }
+        let mut it = Item::new("", kind, made.style.clone());
+        it.text = Some(text.to_owned());
+        it.rec_ms = made.rec_ms;
+        it.created_at = Some(made.created_at.to_owned());
+        let h = text_height(height);
+        if kind == "text" {
+            (it.x, it.y, it.width, it.height) = (at.x, at.y, TEXT_WIDTH, h);
+        } else {
+            let side = NOTE_SIZE;
+            (it.x, it.y, it.width, it.height) =
+                (at.x - side / 2.0, at.y - side / 2.0, side, h.max(side));
+        }
+        self.add_item(it)
+    }
+
+    /// F21-FR9: a text box's or note's text set (one step per editing session), its height
+    /// refitted. A text box left blank is removed, as in tldraw; a note keeps its square. A
+    /// first text written while recording times it, if it had no time (OQ36).
+    pub fn set_text(
+        &mut self,
+        r: &Ref,
+        text: &str,
+        height: Option<f64>,
+        rec_ms: Option<u64>,
+    ) -> Option<BBox> {
+        let it = self.editable_item(r)?.clone();
+        if !matches!(it.kind.as_str(), "text" | "note") || text.len() > super::item::MAX_TEXT {
+            return None;
+        }
+        if it.kind == "text" && text.trim().is_empty() {
+            return self.delete(std::slice::from_ref(r)).1;
+        }
+        let first = it.text.as_deref().unwrap_or("").is_empty();
+        self.edit_item(&it.id, |n| {
+            n.text = Some(text.to_owned());
+            let h = text_height(height.or(Some(n.height)));
+            n.height = if n.kind == "note" { h.max(n.width) } else { h };
+            if first && n.rec_ms.is_none() {
+                n.rec_ms = rec_ms;
+            }
+        })
     }
 }
 
@@ -876,6 +955,89 @@ mod tests {
         assert_ne!(s.add_item(dup), Some(r), "a taken id gets a fresh one");
         let (mut broken, _) = Scene::load(InkLayer::new(), Err("io".into()));
         assert_eq!(broken.add_item(rect("b", 0.0, 0.0)), None);
+    }
+
+    /// F21-FR9: text boxes and notes, made with their first text, timed then; edits refit
+    /// them and never re-time them; a blank text box goes.
+    #[test]
+    fn text_boxes_and_sticky_notes() {
+        let mut s = empty();
+        let made = Made {
+            style: Style::default(),
+            rec_ms: Some(761_000),
+            created_at: "t",
+        };
+        assert_eq!(
+            s.create_text("text", Pt::new(0.0, 0.0), "  ", Some(30.0), &made),
+            None,
+            "empty: discarded"
+        );
+        let t = s
+            .create_text(
+                "text",
+                Pt::new(10.0, 20.0),
+                "Budget owner?",
+                Some(40.0),
+                &made,
+            )
+            .unwrap();
+        let Ref::Item(tid) = &t else { panic!() };
+        let it = s.item(tid).unwrap().clone();
+        assert_eq!(
+            (it.x, it.y, it.width, it.height, it.rec_ms),
+            (10.0, 20.0, 320.0, 40.0, Some(761_000))
+        );
+        let n = s
+            .create_text("note", Pt::new(500.0, 500.0), "Ask Sam", Some(30.0), &made)
+            .unwrap();
+        let Ref::Item(nid) = &n else { panic!() };
+        let note = s.item(nid).unwrap().clone();
+        assert_eq!((note.x, note.width, note.height), (400.0, 200.0, 200.0));
+        assert!(
+            s.set_text(&t, "Budget owner? Sam", Some(80.0), Some(999))
+                .is_some()
+        );
+        let it = s.item(tid).unwrap();
+        assert_eq!(
+            (it.height, it.rec_ms),
+            (80.0, Some(761_000)),
+            "edits never re-time it"
+        );
+        assert!(s.set_text(&n, "", Some(10.0), None).is_some());
+        assert_eq!(
+            s.item(nid).unwrap().height,
+            200.0,
+            "a blank note keeps its square"
+        );
+        assert!(s.set_text(&n, "now timed", Some(10.0), Some(5)).is_some());
+        assert_eq!(
+            s.item(nid).unwrap().rec_ms,
+            Some(761_000),
+            "it already had a time"
+        );
+        s.set_text(&t, "   ", None, None);
+        assert!(s.item(tid).is_none(), "a blank text box goes");
+        assert_eq!(
+            s.create_text("rect", Pt::new(0.0, 0.0), "x", None, &made),
+            None
+        );
+        assert_eq!(
+            s.create_text("text", Pt::new(f64::NAN, 0.0), "x", None, &made),
+            None
+        );
+        let r = s
+            .create_shape("rectangle", Pt::new(0.0, 0.0), Pt::new(9.0, 9.0), &made)
+            .unwrap();
+        assert_eq!(s.set_text(&r, "x", None, None), None, "not a text item");
+        let mut untimed = Item::new("u", "note", Style::default());
+        untimed.text = Some(String::new());
+        with_item(&mut s, untimed);
+        s.set_text(&Ref::Item("u".into()), "first", Some(20.0), Some(42));
+        assert_eq!(
+            s.item("u").unwrap().rec_ms,
+            Some(42),
+            "its first text times it"
+        );
     }
 
     #[test]

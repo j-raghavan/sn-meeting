@@ -171,8 +171,18 @@ impl App {
                 // F21-FR8: a shape or connector from a pen drag, in the default style.
                 "create" => {
                     let kind = op.get("type").and_then(Value::as_str).unwrap_or("");
-                    let (from, to) = (pair(&op, "from")?, pair(&op, "to")?);
-                    created_ref = o.scene.create_shape(kind, from, to, &made);
+                    created_ref = match kind {
+                        // F21-FR9: a text box or note with its first text.
+                        "text" | "note" => {
+                            let text = op.get("text").and_then(Value::as_str).unwrap_or("");
+                            let h = op.get("height").and_then(Value::as_f64);
+                            o.scene.create_text(kind, pair(&op, "at")?, text, h, &made)
+                        }
+                        _ => {
+                            o.scene
+                                .create_shape(kind, pair(&op, "from")?, pair(&op, "to")?, &made)
+                        }
+                    };
                     if created_ref.is_none() {
                         return Err(format!("can't make a {kind:?} there"));
                     }
@@ -204,6 +214,14 @@ impl App {
                     o.scene.resize(&one(&op)?, corner, at(&op)?, &m)
                 }
                 "rotate" => o.scene.rotate(&one(&op)?, at(&op)?),
+                "setText" => {
+                    let text = op
+                        .get("text")
+                        .and_then(Value::as_str)
+                        .ok_or("text is needed")?;
+                    let h = op.get("height").and_then(Value::as_f64);
+                    o.scene.set_text(&one(&op)?, text, h, made.rec_ms)
+                }
                 "endpoint" => {
                     let start = op.get("which").and_then(Value::as_str) == Some("start");
                     o.scene.move_end(&one(&op)?, start, at(&op)?)

@@ -652,3 +652,45 @@ fn new_shapes_take_the_default_style_and_arrows_attach() {
             .is_string()
     );
 }
+
+/// F21-FR9: a text box placed with its first text is one step, timed then; editing it again
+/// is one more; a blank one is discarded.
+#[test]
+fn text_boxes_through_the_app() {
+    let f = fixture();
+    let r = edit(
+        &f,
+        json!({"op": "create", "type": "text", "at": [10, 20], "text": "Budget owner?",
+                            "height": 40.0, "recMs": 761_000}),
+    );
+    let t = r["created"].as_str().unwrap().to_owned();
+    let n = edit(
+        &f,
+        json!({"op": "create", "type": "note", "at": [500, 500], "text": "Ask Sam", "height": 30.0}),
+    );
+    assert!(n["created"].is_string());
+    assert!(
+        edit(
+            &f,
+            json!({"op": "create", "type": "text", "at": [0, 0], "text": ""})
+        )["error"]
+            .is_string()
+    );
+    let e = edit(
+        &f,
+        json!({"op": "setText", "ref": t, "text": "Budget owner: Sam", "height": 70.0, "recMs": 5}),
+    );
+    assert!(e["dirty"].is_array());
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e4, -1e4, 1e4, 1e4]));
+    let it = &d["entries"][0]["item"];
+    assert_eq!(
+        (
+            it["text"].clone(),
+            it["height"].clone(),
+            it["recMs"].clone()
+        ),
+        (json!("Budget owner: Sam"), json!(70.0), json!(761_000))
+    );
+    assert_eq!(d["entries"][1]["item"]["height"], 200.0);
+    assert!(edit(&f, json!({"op": "setText", "ref": t}))["error"].is_string());
+}

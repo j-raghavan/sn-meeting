@@ -58,6 +58,8 @@ class NotesCanvasView(
         fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
         /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
         fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR9: a pen tap with Text or Sticky note at a world point. */
+        fun place(tool: NoteTool, x: Float, y: Float) {}
         /** F21-FR8: a pen drag with a shape tool, from ([x0], [y0]) to ([x1], [y1]) in world units. */
         fun createShape(tool: NoteTool, x0: Float, y0: Float, x1: Float, y1: Float) {}
         /** F21-FR5: a handle of the one selected thing ([ref]) dragged to a world point. */
@@ -73,6 +75,10 @@ class NotesCanvasView(
 
     var viewport = Viewport(0.0, 0.0, 1.0)
         private set
+
+    /** F21-FR9: the text (item id, table cell) the keyboard editor shows in place, left blank. */
+    var editing: Pair<String, Int?>? = null
+        set(v) { field = v; invalidate() }
 
     /** F21-FR11: where image items' pixels come from (the page's [canvas.ImageCache]). */
     var images: ImageSource = ImageSource.NONE
@@ -283,10 +289,14 @@ class NotesCanvasView(
      * ink is off over the whole window, so a pen tap on it never inks, and the panel is a
      * disabled area too; closing it turns the tool's ink back on and bakes once.
      */
-    fun panelOpen(v: View?) {
+    fun panelOpen(v: View?) = overlayOff(v != null)
+
+    /** F21-FR2/FR9: firmware ink off over the window while a panel or the keyboard editor is
+     *  open; back on (the tool's own) and one bake when it closes. */
+    fun overlayOff(off: Boolean) {
         if (!firmwareOn) firmwareOn = firmware.setup("panel")
         updateInkAreas()
-        if (v != null) {
+        if (off) {
             firmware.setWritable(false)
         } else {
             firmware.setWritable(InkBake.overlayFor(host.tool))
@@ -505,7 +515,8 @@ class NotesCanvasView(
             Gesture.SHAPE -> if (hypot(x - downX, y - downY) >= MIN_SHAPE_PX) {
                 host.createShape(penTool, wx(downX), wy(downY), wx(x), wy(y))
             }
-            Gesture.PLACE, Gesture.TABLE -> Unit
+            Gesture.PLACE -> host.place(penTool, wx(x), wy(y))
+            Gesture.TABLE -> Unit
             Gesture.PAN -> if (moved) {
                 host.viewportChanged(viewport) // the strokes now in view, once the drag ends
             } else {
@@ -547,7 +558,7 @@ class NotesCanvasView(
         canvas.drawColor(Color.WHITE)
         val v = viewport
         val z = v.zoom.toFloat()
-        val ctx = ItemPainter.Context(v, StylePalette.EINK)
+        val ctx = ItemPainter.Context(v, StylePalette.EINK, editing)
         for (e in ink.entries) {
             when (e) {
                 is DrawEntry.Ink -> drawStroke(canvas, e.stroke, z, v)
