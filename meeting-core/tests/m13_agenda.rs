@@ -98,7 +98,8 @@ fn a_day_of_events_and_recordings() {
     );
     assert_eq!(
         s["marks"],
-        json!({"recording": true, "notes": false, "minutes": true, "todosOpen": 0, "todosTotal": 1})
+        json!({"recording": true, "notes": false, "minutes": true, "todosOpen": 0, "todosTotal": 1,
+               "status": "recorded", "audioLost": false})
     );
     assert_eq!(s["people"], "Priya Shah");
     assert_eq!(s["calendar"], "Work");

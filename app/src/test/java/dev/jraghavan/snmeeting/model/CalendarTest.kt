@@ -89,6 +89,26 @@ class CalendarTest {
     }
 
     @Test
+    fun a_meeting_says_what_it_has_in_words() { // F18-FR7 (owner, 2026-10-09)
+        fun m(minutes: Boolean = false, notes: Boolean = false, todos: Int = 0, status: String? = "done", lost: Boolean = false) =
+            Marks(true, notes, minutes, todos, todos, status, lost)
+        assertEquals("MINUTES · NOTES · 2 TO-DOS", CalendarFormat.has(m(minutes = true, notes = true, todos = 2)))
+        assertEquals("MINUTES · 1 TO-DO", CalendarFormat.has(m(minutes = true, todos = 1)))
+        assertEquals("NOTES", CalendarFormat.has(m(notes = true, status = "recording")))
+        assertEquals("NOT TRANSCRIBED", CalendarFormat.has(m(status = "recorded")))
+        assertEquals("NOT TRANSCRIBED", CalendarFormat.has(m(status = "failed")))
+        assertEquals("TRANSCRIBING…", CalendarFormat.has(m(status = "recorded"), jobRunning = true))
+        assertEquals("TRANSCRIBING…", CalendarFormat.has(m(status = "transcribing")))
+        assertEquals("SUMMARISING…", CalendarFormat.has(m(status = "transcribed"), jobRunning = true))
+        assertEquals("SUMMARISING…", CalendarFormat.has(m(status = "done"), jobRunning = true))
+        assertEquals("AUDIO COULDN'T BE RECOVERED", CalendarFormat.has(m(status = "recorded", lost = true)))
+        assertEquals("", CalendarFormat.has(m(status = "recording")))
+        assertEquals("", CalendarFormat.has(Marks.NONE))
+        assertEquals(Marks(true, false, true, 0, 1, "recorded", true),
+            Marks.from(JSONObject("""{"recording":true,"minutes":true,"todosTotal":1,"status":"recorded","audioLost":true}""")))
+    }
+
+    @Test
     fun a_recordings_length_is_m_ss_then_h_mm_ss() { // F18-FR7 (device finding 2026-10-09)
         assertEquals("0:00", CalendarFormat.length(0L))
         assertEquals("0:15", CalendarFormat.length(15_000L))
@@ -107,9 +127,7 @@ class CalendarTest {
         assertEquals("10:00", CalendarFormat.range(ten, ten, la))
         assertEquals("Room 4 · Priya Shah, Ana Ruiz", CalendarFormat.detail(sync))
         assertEquals("Weekly sync", CalendarFormat.rowTitle(sync))
-        assertEquals(listOf("●" to true, "✎" to false, "≡" to true, "☐ 2" to false), CalendarFormat.marks(sync.marks))
-        // No open to-dos: the slot stays empty.
-        assertNull(CalendarFormat.marks(Marks(false, false, false, 0, 3))[3])
+        assertEquals("MINUTES · 2 TO-DOS", CalendarFormat.has(sync.marks))
         val untitled = sync.copy(isEvent = false, unscheduled = false, title = " ")
         assertNull(CalendarFormat.rowTitle(untitled))
         val titled = untitled.copy(title = "Budget", durationMs = 38 * 60_000L, cost = "≈ \$0.01")

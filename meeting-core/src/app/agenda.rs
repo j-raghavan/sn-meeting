@@ -18,7 +18,8 @@ const PEOPLE_SHOWN: usize = 4;
 /// A meeting's marks (F18-FR7): filled when it exists or is done.
 pub fn marks(sc: Option<&Sidecar>, folder: Option<&str>) -> Value {
     let Some(sc) = sc else {
-        return json!({"recording": false, "notes": false, "minutes": false, "todosOpen": 0, "todosTotal": 0});
+        return json!({"recording": false, "notes": false, "minutes": false, "todosOpen": 0, "todosTotal": 0,
+                      "status": null, "audioLost": false});
     };
     let notes_dir = folder.map(|f| std::path::Path::new(f).join(format!("{}.notes", sc.id)));
     json!({
@@ -27,6 +28,9 @@ pub fn marks(sc: Option<&Sidecar>, folder: Option<&str>) -> Value {
         "minutes": sc.summary.as_deref().is_some_and(|s| !s.trim().is_empty()),
         "todosOpen": sc.todos.iter().filter(|t| !t.done).count(),
         "todosTotal": sc.todos.len(),
+        // F18-FR7: the row says the meeting's state in words when it has nothing else.
+        "status": sc.status,
+        "audioLost": sc.error.as_deref() == Some(crate::library::AUDIO_LOST),
     })
 }
 

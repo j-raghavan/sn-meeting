@@ -195,30 +195,11 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
                     setOnClickListener { actions.onUnscheduled(r) }
                 })
             }, ui.fullWidth().apply { topMargin = ui.dim(4) })
+            // F18-FR7: what the meeting has, in words (also what a screen reader says).
+            val has = CalendarFormat.has(r.marks, r.meetingId?.let { LongJobs.lane.isRunning(it) } == true)
+            if (has.isNotEmpty()) addView(ui.eyebrow(has, ui.inkSoft).apply { contentDescription = has },
+                ui.fullWidth().apply { topMargin = ui.dim(4) })
         }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        addView(marks(r.marks))
-    }
-
-    /**
-     * ● ✎ ≡ ☐ n as small boxes in fixed slots (the mock-up): white on black when it exists,
-     * outlined when not yet; the to-do box shows the open count and is left empty at none.
-     */
-    private fun marks(m: Marks): View = LinearLayout(a).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        val box = ui.dim(30)
-        CalendarFormat.marks(m).forEachIndexed { i, mark ->
-            val wide = i == 3
-            addView(TextView(a).apply {
-                gravity = Gravity.CENTER; includeFontPadding = false
-                textSize = ui.fs(if (wide) 12f else 14f); typeface = ui.serifBold
-                if (mark == null) { visibility = View.INVISIBLE; return@apply }
-                val (glyph, filled) = mark
-                text = glyph
-                setTextColor(if (filled) Color.WHITE else ui.ink)
-                background = ui.outline(ui.dim(4), if (filled) ui.ink else Color.WHITE)
-            }, LinearLayout.LayoutParams(if (wide) ui.dim(50) else box, box).apply { marginStart = ui.dim(6) })
-        }
     }
 
     /** The current event: boxed, with "● Record" (or the running timer) and "From last time". */

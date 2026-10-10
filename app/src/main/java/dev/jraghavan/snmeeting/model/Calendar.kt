@@ -10,12 +10,18 @@ import java.time.temporal.TemporalAdjusters
 import java.util.Locale
 
 /** F18-FR7's four marks: filled when it exists or is done, outlined when not yet. */
-data class Marks(val recording: Boolean, val notes: Boolean, val minutes: Boolean, val todosOpen: Int, val todosTotal: Int) {
+data class Marks(
+    val recording: Boolean, val notes: Boolean, val minutes: Boolean, val todosOpen: Int, val todosTotal: Int,
+    /** F18-FR7: the meeting's status ("recorded", "transcribing", …), null for no meeting. */
+    val status: String? = null,
+    /** F15-FR8: its audio couldn't be recovered. */
+    val audioLost: Boolean = false,
+) {
     companion object {
         val NONE = Marks(false, false, false, 0, 0)
         fun from(o: JSONObject?): Marks = if (o == null) NONE else Marks(
             o.bool("recording") ?: false, o.bool("notes") ?: false, o.bool("minutes") ?: false,
-            o.int("todosOpen") ?: 0, o.int("todosTotal") ?: 0,
+            o.int("todosOpen") ?: 0, o.int("todosTotal") ?: 0, o.str("status"), o.bool("audioLost") ?: false,
         )
     }
 }
@@ -170,16 +176,26 @@ object CalendarFormat {
     }
 
     /**
-     * F18-FR7's marks in their fixed slots, as boxes: (glyph, filled), filled (white on black)
-     * when it exists, outlined when not yet. The fourth is "☐ n", the open to-dos, and is null
-     * (an empty slot) when none are open.
+     * F18-FR7 (owner, 2026-10-09: words, not icon boxes): what a meeting has, in this order,
+     * only what exists: "MINUTES · NOTES · 2 TO-DOS". With none of these, its state:
+     * "AUDIO COULDN'T BE RECOVERED", "TRANSCRIBING…", "SUMMARISING…" or "NOT TRANSCRIBED".
+     * [jobRunning]: a transcribe or summarise job for it is on the lane now. Empty for no meeting.
      */
-    fun marks(m: Marks): List<Pair<String, Boolean>?> = listOf(
-        "●" to m.recording,
-        "✎" to m.notes,
-        "≡" to m.minutes,
-        if (m.todosOpen > 0) "☐ ${m.todosOpen}" to false else null,
-    )
+    fun has(m: Marks, jobRunning: Boolean = false): String {
+        val parts = listOfNotNull(
+            "MINUTES".takeIf { m.minutes },
+            "NOTES".takeIf { m.notes },
+            when (m.todosOpen) { 0 -> null; 1 -> "1 TO-DO"; else -> "${m.todosOpen} TO-DOS" },
+        )
+        if (parts.isNotEmpty()) return parts.joinToString(" · ")
+        return when {
+            m.audioLost -> "AUDIO COULDN'T BE RECOVERED"
+            m.status == "transcribing" || (m.status == "recorded" && jobRunning) -> "TRANSCRIBING…"
+            (m.status == "transcribed" || m.status == "done") && jobRunning -> "SUMMARISING…"
+            m.status == "recorded" || m.status == "failed" -> "NOT TRANSCRIBED"
+            else -> ""
+        }
+    }
 
     /** A row's main line: the event's title, or the meeting's (null for an untitled one). */
     fun rowTitle(r: AgendaRow): String? = if (r.isEvent) r.title?.ifBlank { null } ?: "(No title)" else r.title?.ifBlank { null }
