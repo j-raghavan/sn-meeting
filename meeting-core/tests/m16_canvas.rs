@@ -395,3 +395,52 @@ fn edits_are_refused_while_items_json_is_unreadable() {
         1
     );
 }
+
+/// F21-FR4 through the app: select by rectangle, move all as one step, duplicate, delete.
+#[test]
+fn select_move_duplicate_and_delete() {
+    let f = fixture();
+    let all = every_item();
+    let file = json!({"version": 1, "items": [all[0], all[1]]});
+    std::fs::create_dir_all(notes::folder(&f.dir, &f.id)).unwrap();
+    std::fs::write(items_path(&f), serde_json::to_vec(&file).unwrap()).unwrap();
+    stroke(&f, 0.0, 60.0, 5.0);
+    let r = edit(
+        &f,
+        json!({"op": "select", "rect": [390.0, 70.0, -10.0, 0.0]}),
+    );
+    assert_eq!(r["selection"], json!(["i:rect1", "i:ell1", "s:0"]), "{r}");
+    assert!(r["selectionBounds"].is_array());
+    let m = edit(&f, json!({"op": "move", "dx": 0.0, "dy": 100.0}));
+    assert!(m["dirty"].is_array());
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e5, -1e5, 1e5, 1e5]));
+    assert_eq!(d["entries"][0]["item"]["y"], 100.0);
+    assert_eq!(
+        parse(&f.app.ink_history_json(&f.id, "canvas", false))["changed"],
+        true
+    );
+    let d = parse(&f.app.canvas_for_draw_json(&f.id, [-1e5, -1e5, 1e5, 1e5]));
+    assert_eq!(d["entries"][0]["item"]["y"], 0.0, "one step for all three");
+    let t = edit(&f, json!({"op": "select", "at": [50.0, 25.0], "r": 6.0}));
+    assert_eq!(t["selection"], json!(["i:rect1"]));
+    let dup = edit(&f, json!({"op": "duplicate"}));
+    assert_eq!(dup["selection"].as_array().unwrap().len(), 1);
+    assert_ne!(dup["selection"][0], "i:rect1");
+    let del = edit(&f, json!({"op": "delete", "refs": ["i:ell1"]}));
+    assert!(del["dirty"].is_array());
+    assert_eq!(
+        edit(&f, json!({"op": "select", "none": true}))["selection"],
+        json!([])
+    );
+    let lasso = edit(
+        &f,
+        json!({"op": "select", "polygon": [-10.0, -10.0, 120.0, -10.0, 120.0, 70.0, -10.0, 70.0]}),
+    );
+    assert_eq!(lasso["selection"], json!(["i:rect1", "s:0"]));
+    assert_eq!(
+        edit(&f, json!({"op": "select", "refs": ["s:0"]}))["selection"],
+        json!(["s:0"])
+    );
+    assert!(edit(&f, json!({"op": "select"}))["error"].is_string());
+    assert!(edit(&f, json!({"op": "move", "dx": "x"}))["error"].is_string());
+}

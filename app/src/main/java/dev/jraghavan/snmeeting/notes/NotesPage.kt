@@ -75,8 +75,6 @@ class NotesPage(
     /** F21-FR11: the canvas's image copies, decoded for drawing. */
     val images = dev.jraghavan.snmeeting.notes.canvas.ImageCache()
 
-    /** The lasso selection's stroke ids (`[id, …]`), while there is one. */
-    private var selected = "[]"
 
     val canvas: NotesCanvasView = NotesCanvasView(a, object : NotesCanvasView.Host {
         override val tool get() = this@NotesPage.tool
@@ -103,22 +101,17 @@ class NotesPage(
         }
 
         override fun erase(xy: FloatArray, radiusWorld: Float) = changed(InkBake.Event.ERASE) { NativeBridge.nativeInkErase(id, LAYER, xy, radiusWorld) }
-        override fun lasso(xy: FloatArray) = scope.core({ NativeBridge.nativeInkLasso(id, LAYER, xy) }) { json ->
-            val o = CoreJson.obj(json) { it }.getOrNull() ?: return@core
-            selected = o.optJSONArray("ids")?.toString() ?: "[]"
-            canvas.selection = InkView.rect(o.optJSONArray("bbox"))
-            refreshBar() // F21-FR2: the selection's actions replace the tools
-        }
+        // F17 / F21-FR4: the lasso takes strokes and enclosed items; the selection is the core's.
+        override fun lasso(xy: FloatArray) = select(polygonOp(xy))
 
-        override fun moveSelection(dx: Float, dy: Float) {
-            val ids = selected
-            scope.core({ NativeBridge.nativeInkMove(id, LAYER, ids, dx, dy) }) { json ->
-                if (reportError(json, "Couldn't move that")) return@core
-                canvas.selection = canvas.selection?.let { WorldRect(it.left + dx, it.top + dy, it.right + dx, it.bottom + dy) }
-                fetch(InkBake.Event.LASSO_MOVE)
-                scheduleSave()
-            }
-        }
+        override fun moveSelection(dx: Float, dy: Float) =
+            edit("""{"op":"move","dx":$dx,"dy":$dy}""", keepSelection = true)
+
+        override fun selectAt(x: Float, y: Float, radiusWorld: Float) =
+            if (x.isNaN()) clearSelection() else select("""{"op":"select","at":[$x,$y],"r":$radiusWorld}""")
+
+        override fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) =
+            select("""{"op":"select","rect":[$x0,$y0,$x1,$y1]}""")
         override fun listen(x: Float, y: Float, radiusWorld: Float) = scope.core({ NativeBridge.nativeInkHit(id, LAYER, x, y, radiusWorld) }) { json ->
             val hit = CoreJson.obj(json, ListenHit::from).getOrNull() ?: return@core
             val seek = hit.seekMs ?: return@core // an untimed stroke, or no stroke: nothing happens
@@ -297,8 +290,8 @@ class NotesPage(
 
     /** F21: one gesture on the canvas through the core (one undo step), then what is in view
      *  is fetched again and baked, and the deferred save armed. */
-    private fun edit(op: String) {
-        clearSelection()
+    private fun edit(op: String, keepSelection: Boolean = false) {
+        if (!keepSelection) clearSelection()
         changed(InkBake.Event.EDIT) { NativeBridge.nativeCanvasEdit(id, op) }
     }
 
@@ -306,22 +299,40 @@ class NotesPage(
     private fun selectionAction(act: ToolBarModel.Act, anchor: View) {
         hideHints()
         when (act) {
-            ToolBarModel.Act.DELETE -> {
-                val ids = selected
-                clearSelection()
-                changed(InkBake.Event.ERASE) { NativeBridge.nativeInkDelete(id, LAYER, ids) }
-            }
+            ToolBarModel.Act.DELETE -> edit("""{"op":"delete"}""")
+            ToolBarModel.Act.DUPLICATE -> edit("""{"op":"duplicate"}""", keepSelection = true)
             ToolBarModel.Act.DONE -> clearSelection()
             else -> Unit
         }
         refreshBar()
     }
 
-    private fun selectedCount(): Int = org.json.JSONArray(selected).length()
+    private fun selectedCount(): Int = canvas.inkView.selection.size
+
+    /** F21-FR4: the selection the bar acts on: its size, and whether it is one group. */
+    private fun selectionState(): ToolBarModel.Selection? {
+        val v = canvas.inkView
+        if (v.selection.isEmpty()) return null
+        val groups = v.selection.map { r -> v.entries.firstOrNull { it.ref == r }?.let(::groupOf) }
+        val grouped = groups.isNotEmpty() && groups.all { it != null && it == groups[0] }
+        return ToolBarModel.Selection(v.selection.size, grouped = grouped)
+    }
+
+    private fun groupOf(e: DrawEntry): String? = when (e) {
+        is DrawEntry.Ink -> e.stroke.groupId
+        is DrawEntry.Thing -> e.item.groupId
+    }
+
+    /** F21-FR4: a selection op (not an undo step): one fetch, one redraw of canvas and bar. */
+    private fun select(op: String) = scope.core({ NativeBridge.nativeCanvasEdit(id, op) }) { json ->
+        if (!reportError(json, "Couldn't select that")) fetch(null)
+    }
+
+    private fun polygonOp(xy: FloatArray) = """{"op":"select","polygon":[${xy.joinToString(",")}]}"""
 
     private fun clearSelection() {
-        selected = "[]"
-        canvas.selection = null
+        if (canvas.inkView.selection.isEmpty()) return
+        select("""{"op":"select","none":true}""")
     }
 
     private var prefs = host.prefs()
@@ -411,11 +422,10 @@ class NotesPage(
         val recording = host.recordingSince() != null
         if (recording && tool == NoteTool.LISTEN) tool = NoteTool.PEN // Listen is off while recording
         val ink = canvas.inkView
-        val n = selectedCount()
         bar.render(ToolBarModel.State(tool, prefs.collapsed, recording, ink.canUndo, ink.canRedo,
             host.timer(), host.cost(), host.playing(), host.canPlay(), prefs.focus,
             lastShape = lastShape, open = panels.open,
-            selection = if (n > 0) ToolBarModel.Selection(n) else null))
+            selection = selectionState()))
     }
 
     /** Opens the canvas at its last viewport, or fitted to its ink; or (F19-FR3) centred on
@@ -505,10 +515,13 @@ class NotesPage(
                 (r.right + m).toFloat(), (r.bottom + m).toFloat())
         }) { json ->
             CoreJson.obj(json, InkView::from).getOrNull()?.let {
-                val history = it.canUndo != canvas.inkView.canUndo || it.canRedo != canvas.inkView.canRedo
+                val before = canvas.inkView
+                val history = it.canUndo != before.canUndo || it.canRedo != before.canRedo
+                val selection = it.selection != before.selection
                 canvas.show(it, event)
                 placeMarks()
-                if (history) refreshBar() // Undo and Redo light up or grey out
+                // Undo and Redo light up or grey out; a selection swaps the tools for its actions.
+                if (history || selection) refreshBar()
             }
         }
     }

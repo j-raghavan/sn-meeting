@@ -15,6 +15,9 @@ use crate::ink::{BBox, InkLayer, Stroke, StrokeId};
 use serde_json::{Map, Value, json};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+/// How far a duplicate lands from its original, down and right (`CanvasActions.kt:32`).
+pub const DUPLICATE_OFFSET: f64 = 24.0;
+
 /// The steps Undo can go back (F21-FR1 [Recommendation]).
 pub const HISTORY_CAP: usize = 200;
 /// `items.json`'s version.
@@ -704,16 +707,175 @@ impl Scene {
         }
     }
 
-    /// The strokes a lasso loop takes (F17), as refs in paint order.
+    /// F17 / F21-FR4: what a lasso loop takes: strokes it encloses or crosses, and items whose
+    /// outline it encloses, in paint order (groups not yet expanded).
     #[must_use]
     pub fn lasso(&self, poly: &[(f32, f32)]) -> Vec<Ref> {
         let ids = crate::ink::select_in_polygon(&self.ink, poly);
+        #[allow(clippy::cast_possible_truncation)] // world coordinates fit f32
+        let inside = |p: &Pt| {
+            poly.len() >= 3 && crate::ink::select::point_in_polygon(p.x as f32, p.y as f32, poly)
+        };
         self.doc
             .order
             .iter()
-            .filter(|r| r.stroke().is_some_and(|s| ids.contains(&s)))
+            .filter(|r| match r {
+                Ref::Stroke(n) => ids.contains(&StrokeId(*n)),
+                Ref::Item(i) => self.item(i).is_some_and(|it| {
+                    let pts = match self.ends(it) {
+                        Some((a, b)) => vec![a, b],
+                        None => geom::corners(it).to_vec(),
+                    };
+                    pts.iter().all(inside)
+                }),
+            })
             .cloned()
             .collect()
+    }
+
+    /// F21-FR4: the topmost stroke or item under a pen tap at `p` (within `r`): an item's box
+    /// counts, inside and out, as a line's segment and a stroke's ink do.
+    #[must_use]
+    pub fn top_at(&self, p: Pt, r: f64) -> Option<Ref> {
+        #[allow(clippy::cast_possible_truncation)]
+        let hits = self.ink.strokes_hit(p.x as f32, p.y as f32, r as f32);
+        self.doc
+            .order
+            .iter()
+            .rev()
+            .find(|x| match x {
+                Ref::Stroke(n) => hits.contains(&StrokeId(*n)),
+                Ref::Item(i) => self.item(i).is_some_and(|it| {
+                    let ends = self.ends(it);
+                    super::hit::touches(it, ends, p, r) || (ends.is_none() && geom::contains(it, p))
+                }),
+            })
+            .cloned()
+    }
+
+    /// F21-FR4: everything a selection rectangle touches (its bounds meet the rectangle,
+    /// `CanvasCore.elementsIn`), in paint order.
+    #[must_use]
+    pub fn in_rect(&self, rect: BBox) -> Vec<Ref> {
+        self.doc
+            .order
+            .iter()
+            .filter(|r| self.bounds_of_ref(r).is_some_and(|b| b.meets(rect)))
+            .cloned()
+            .collect()
+    }
+
+    /// F21-FR4: select `refs` and the rest of their groups (not an undo step).
+    pub fn select(&mut self, refs: &[Ref]) {
+        let refs: Vec<Ref> = refs.iter().filter(|r| self.exists(r)).cloned().collect();
+        self.selection = self.with_groups(&refs);
+    }
+
+    /// F21-FR4: copies of `refs` 24 world units down and right, on top, with new ids and new
+    /// groups (`CanvasActions.kt:32`), as one step; the copies become the selection. A copied
+    /// arrow stays bound only to shapes copied with it; its other ends are frozen where they
+    /// are now. Copies are untimed (OQ36). `created_at` stamps the new items.
+    pub fn duplicate(&mut self, refs: &[Ref], created_at: &str) -> Option<BBox> {
+        if !self.items_ok {
+            return None;
+        }
+        let refs = self.with_groups(refs);
+        if refs.is_empty() {
+            return None;
+        }
+        let d = DUPLICATE_OFFSET;
+        let mut copies = Vec::new();
+        let area = self.step(|s| {
+            let mut strokes: HashMap<u32, u32> = HashMap::new();
+            let mut ids: HashMap<String, String> = HashMap::new();
+            let mut groups: HashMap<String, String> = HashMap::new();
+            let mut new_group = |s: &Scene, g: &Option<String>| -> Option<String> {
+                g.as_ref().map(|g| {
+                    groups
+                        .entry(g.clone())
+                        .or_insert_with(|| format!("g-{}", &s.fresh_id()[..4]))
+                        .clone()
+                })
+            };
+            let mut added = Vec::new();
+            for r in &refs {
+                if let Ref::Stroke(n) = r
+                    && let Some(st) = s.ink.get(StrokeId(*n))
+                {
+                    let mut c = st.clone();
+                    c.id = s.ink.next_id();
+                    c.rec_ms = None;
+                    #[allow(clippy::cast_possible_truncation)]
+                    for p in &mut c.points {
+                        p.x += d as f32;
+                        p.y += d as f32;
+                    }
+                    strokes.insert(*n, c.id.0);
+                    added.push((s.ink.strokes().len() + added.len(), c));
+                }
+            }
+            for r in &refs {
+                if let Ref::Item(i) = r {
+                    let fresh = loop {
+                        let f = s.fresh_id();
+                        if !ids.values().any(|v| *v == f) {
+                            break f;
+                        }
+                    };
+                    ids.insert(i.clone(), fresh);
+                }
+            }
+            let mut new_items = Vec::new();
+            for r in &refs {
+                let Ref::Item(i) = r else { continue };
+                let Some(it) = s.item(i) else { continue };
+                let mut c = it.clone();
+                let now = s.ends(it);
+                c.id.clone_from(&ids[i]);
+                c.x += d;
+                c.y += d;
+                c.rec_ms = None;
+                c.created_at = Some(created_at.to_owned());
+                c.group_id = new_group(s, &it.group_id);
+                if let (Some((a, b)), Some(st), Some(en)) = (now, c.start.as_mut(), c.end.as_mut())
+                {
+                    for (e, at) in [(st, a), (en, b)] {
+                        let kept = match &e.bind {
+                            Some(Ref::Item(t)) => ids.get(t).map(|n| Ref::Item(n.clone())),
+                            Some(Ref::Stroke(t)) => strokes.get(t).map(|n| Ref::Stroke(*n)),
+                            None => None,
+                        };
+                        if kept.is_none() {
+                            (e.x, e.y) = (at.x + d, at.y + d);
+                        } else {
+                            (e.x, e.y) = (e.x + d, e.y + d);
+                        }
+                        e.bind = kept;
+                    }
+                }
+                new_items.push(c);
+            }
+            s.ink.put(&added);
+            for (old, new) in &strokes {
+                if let Some(e) = s.doc.extras.get(old).cloned() {
+                    let mut e = e;
+                    e.group_id = new_group(s, &e.group_id);
+                    s.doc.extras.insert(*new, e);
+                }
+            }
+            for r in &refs {
+                let c = match r {
+                    Ref::Stroke(n) => Ref::Stroke(strokes[n]),
+                    Ref::Item(i) => Ref::Item(ids[i].clone()),
+                };
+                s.doc.order.push(c.clone());
+                copies.push(c);
+            }
+            s.doc.items.extend(new_items);
+            (Vec::new(), added)
+        });
+        self.selection = copies;
+        area
     }
 
     // ---- saving --------------------------------------------------------------------------
@@ -1065,6 +1227,113 @@ pub(crate) mod tests {
         pen(&mut broken, &[(0.0, 0.0)], None);
         assert_eq!(broken.clear(), None);
         assert_eq!(broken.absorb(&kept), None);
+    }
+
+    fn bound_arrow(id: &str, from: &str, to: Option<&str>) -> Item {
+        let mut ar = Item::new(id, "arrow", Style::default());
+        ar.start = Some(End {
+            x: 0.0,
+            y: 0.0,
+            bind: Some(Ref::Item(from.into())),
+        });
+        ar.end = Some(End {
+            x: 800.0,
+            y: 25.0,
+            bind: to.map(|t| Ref::Item(t.into())),
+        });
+        ar
+    }
+
+    /// F21-FR4 / AC7 (selection part): a pen rectangle touching 2 shapes and 1 stroke selects
+    /// all 3; a tap takes the topmost; the lasso takes enclosed items too.
+    #[test]
+    fn selecting_by_rectangle_tap_and_loop() {
+        let mut s = empty();
+        with_item(&mut s, rect("a", 0.0, 0.0));
+        with_item(&mut s, rect("b", 200.0, 0.0));
+        pen(&mut s, &[(0.0, 300.0), (50.0, 300.0)], None);
+        with_item(&mut s, rect("far", 5000.0, 0.0));
+        let r = BBox {
+            x0: 50.0,
+            y0: 40.0,
+            x1: 210.0,
+            y1: 310.0,
+        };
+        assert_eq!(
+            s.in_rect(r),
+            vec![Ref::Item("a".into()), Ref::Item("b".into()), Ref::Stroke(0)]
+        );
+        with_item(&mut s, rect("top", 20.0, 10.0));
+        assert_eq!(
+            s.top_at(Pt::new(50.0, 25.0), 4.0),
+            Some(Ref::Item("top".into()))
+        );
+        assert_eq!(s.top_at(Pt::new(25.0, 300.0), 4.0), Some(Ref::Stroke(0)));
+        assert_eq!(s.top_at(Pt::new(-500.0, 0.0), 4.0), None);
+        let lasso = s.lasso(&[(-10.0, -10.0), (110.0, -10.0), (110.0, 60.0), (-10.0, 60.0)]);
+        assert_eq!(
+            lasso,
+            vec![Ref::Item("a".into())],
+            "top sticks out of the loop"
+        );
+        with_item(&mut s, bound_arrow("ar", "a", None));
+        assert!(
+            !s.lasso(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)])
+                .contains(&Ref::Item("ar".into()))
+        );
+        s.select(&[Ref::Item("a".into()), Ref::Item("gone".into())]);
+        assert_eq!(s.selection, vec![Ref::Item("a".into())]);
+    }
+
+    /// F21-FR4: duplicates land 24 units down and right with new ids and groups, untimed; an
+    /// arrow keeps only bindings to shapes copied with it.
+    #[test]
+    fn duplicates_are_new_untimed_and_keep_inner_bindings() {
+        let mut s = empty();
+        let mut a = rect("a", 0.0, 0.0);
+        a.rec_ms = Some(5);
+        a.group_id = Some("g".into());
+        with_item(&mut s, a);
+        with_item(&mut s, rect("b", 400.0, 0.0));
+        with_item(&mut s, bound_arrow("ar", "a", Some("b")));
+        let st = pen(&mut s, &[(0.0, 100.0)], Some(7));
+        s.doc.extras.insert(
+            st.0,
+            StrokeExtra {
+                group_id: Some("g".into()),
+                ..StrokeExtra::default()
+            },
+        );
+        let area = s.duplicate(
+            &[Ref::Item("a".into()), Ref::Item("ar".into())],
+            "2026-10-10T09:00:00+00:00",
+        );
+        assert!(area.is_some());
+        assert_eq!(s.selection.len(), 3, "a, its group's stroke and the arrow");
+        let ca = s.item(&s.selection[0].to_string()[2..]).unwrap().clone();
+        assert_eq!((ca.x, ca.y, ca.rec_ms), (24.0, 24.0, None));
+        assert!(ca.group_id.is_some() && ca.group_id.as_deref() != Some("g"));
+        assert_eq!(ca.created_at.as_deref(), Some("2026-10-10T09:00:00+00:00"));
+        let car = s.item(&s.selection[1].to_string()[2..]).unwrap().clone();
+        assert_eq!(
+            car.start.as_ref().unwrap().bind,
+            Some(Ref::Item(ca.id.clone()))
+        );
+        let end = car.end.as_ref().unwrap();
+        assert_eq!(
+            (end.bind.clone(), end.x),
+            (None, 424.0),
+            "frozen where b's edge was"
+        );
+        let cs = s.selection[2].stroke().unwrap();
+        assert_eq!(s.ink().get(cs).unwrap().rec_ms, None);
+        assert_eq!(s.ink().get(cs).unwrap().points[0].x, 24.0);
+        assert_eq!(s.doc().extras[&cs.0].group_id, ca.group_id);
+        s.undo();
+        assert_eq!(s.doc().items.len(), 3);
+        assert_eq!(s.duplicate(&[], "t"), None);
+        let (mut broken, _) = Scene::load(InkLayer::new(), Err("io".into()));
+        assert_eq!(broken.duplicate(&[Ref::Stroke(0)], "t"), None);
     }
 
     #[test]

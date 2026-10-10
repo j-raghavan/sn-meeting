@@ -53,6 +53,10 @@ class NotesCanvasView(
         fun erase(xy: FloatArray, radiusWorld: Float)
         fun lasso(xy: FloatArray)
         fun moveSelection(dx: Float, dy: Float)
+        /** F21-FR4: the Select tool's pen tap (the topmost thing, or nothing: deselect). */
+        fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
+        /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
+        fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
         /** A Listen tap at a world point (F17-FR7). */
         fun listen(x: Float, y: Float, radiusWorld: Float)
         /** The viewport moved: the visible strokes are fetched again. */
@@ -77,9 +81,10 @@ class NotesCanvasView(
     /** A search hit's line, outlined with a 2 px dashed box (F19-FR3). */
     var outline: WorldRect? = null
         set(v) { field = v; invalidate() }
-    /** The lasso selection's box, while there is one. */
-    var selection: WorldRect? = null
-        set(v) { field = v; invalidate() }
+    /** The selection's box (F21-FR4, from the core), while there is one. */
+    val selection: WorldRect? get() = ink.selectionBounds
+    /** F21-FR4: a drag's preview is redrawn at most every [PREVIEW_MS] (F21-FR2). */
+    private var lastPreview = 0L
     /** F17-FR3: ◆ beside the stroke written before each mark. */
     var markGlyphs: List<Pair<Double, Double>> = emptyList()
         set(v) { field = v; invalidate() }
@@ -186,8 +191,9 @@ class NotesCanvasView(
     fun show(next: InkView, event: InkBake.Event? = InkBake.Event.VIEWPORT_SETTLED) {
         // F17-FR13: the thumbnail is rebuilt only when the ink itself changed.
         if (next.bounds != ink.bounds || (event != null && event in InkBake.INK_CHANGES)) { thumbStrokes = null; thumbKey = null }
+        val selectionMoved = next.selectionBounds != ink.selectionBounds
         ink = next
-        event?.let(::bake)
+        if (event != null) bake(event) else if (selectionMoved) invalidate() // F21-FR4: one redraw
     }
 
     /** F17-FR4: run InkBake's plan for [e]: draw, then (after that frame) refresh the panel,
@@ -404,10 +410,10 @@ class NotesCanvasView(
             gesture = InputRules.forPen(host.tool, c.isEraser, host.recording)
             when (gesture) {
                 Gesture.DRAW -> buffer = StrokeBuffer(host.strokeTimes()).also { it.add(c.x, c.y, c.pressure, at) }
-                Gesture.ERASE, Gesture.LASSO -> {
+                Gesture.ERASE, Gesture.LASSO, Gesture.SELECT -> {
                     if (c.isEraser && firmwareOn) firmware.setWritable(false)
                     val sel = selection
-                    movingSelection = gesture == Gesture.LASSO && sel != null &&
+                    movingSelection = gesture != Gesture.ERASE && sel != null &&
                         sel.contains(viewport.worldX(c.x.toDouble()), viewport.worldY(c.y.toDouble()))
                     path += c.x; path += c.y
                 }
@@ -428,7 +434,9 @@ class NotesCanvasView(
             Gesture.ERASE, Gesture.LASSO -> {
                 path += m.x; path += m.y
                 if (!movingSelection) invalidate() // the band or loop is drawn by the canvas itself
+                else preview()
             }
+            Gesture.SELECT -> preview() // the rectangle, or the selection following the pen
             Gesture.PAN -> if (moved && !palmNear()) {
                 setViewport(viewport.panBy((m.x - lastX).toDouble(), (m.y - lastY).toDouble()), notify = false)
             }
@@ -461,10 +469,15 @@ class NotesCanvasView(
                 path += x; path += y
                 host.lasso(world(path))
             } else {
-                selection = null
+                host.selectAt(Float.NaN, Float.NaN, 0f) // a tap off the selection lets it go
             }
             Gesture.LISTEN -> host.listen(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
-            Gesture.SELECT, Gesture.SHAPE, Gesture.PLACE, Gesture.TABLE -> Unit
+            Gesture.SELECT -> when {
+                !moved -> host.selectAt(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
+                movingSelection -> host.moveSelection(wx(x) - wx(downX), wy(y) - wy(downY))
+                else -> host.selectRect(wx(downX), wy(downY), wx(x), wy(y))
+            }
+            Gesture.SHAPE, Gesture.PLACE, Gesture.TABLE -> Unit
             Gesture.PAN -> if (moved) {
                 host.viewportChanged(viewport) // the strokes now in view, once the drag ends
             } else {
@@ -479,6 +492,14 @@ class NotesCanvasView(
         // A pen stroke the firmware inked is not repainted (inkread); anything else drew a band
         // or loop of its own, which the next draw removes.
         if (was != Gesture.DRAW || !overlayInks(was)) invalidate()
+    }
+
+    /** F21-FR2: a drag's outline or handles, redrawn at most every [PREVIEW_MS]. */
+    private fun preview() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastPreview < PREVIEW_MS) return
+        lastPreview = now
+        invalidate()
     }
 
     /** Whether the stroke being written is the firmware's (the Pen, with the overlay claimed). */
@@ -517,7 +538,18 @@ class NotesCanvasView(
         }
         markGlyphs.forEach { (x, y) -> canvas.drawText("◆", v.screenX(x).toFloat(), v.screenY(y).toFloat(), glyphPaint) }
         outline?.let { box(canvas, it, dashPaint) }
-        selection?.let { box(canvas, it, dashPaint) }
+        val sel = selection
+        if (sel != null) {
+            val (dx, dy) = if (movingSelection && (gesture == Gesture.SELECT || gesture == Gesture.LASSO)) {
+                (lastX - downX) to (lastY - downY)
+            } else 0f to 0f
+            canvas.save(); canvas.translate(dx, dy)
+            box(canvas, sel, dashPaint)
+            canvas.restore()
+        }
+        if (gesture == Gesture.SELECT && !movingSelection && moved) {
+            canvas.drawRect(minOf(downX, lastX), minOf(downY, lastY), maxOf(downX, lastX), maxOf(downY, lastY), dashPaint)
+        }
         if ((gesture == Gesture.ERASE || gesture == Gesture.LASSO) && !movingSelection && path.size >= 4) {
             livePaint.strokeWidth = if (gesture == Gesture.ERASE) ERASE_RADIUS_PX * 2 else 2f
             livePath.reset()
@@ -676,6 +708,8 @@ class NotesCanvasView(
         const val ERASE_RADIUS_PX = 22f
         const val LISTEN_RADIUS_PX = 24f
         const val HIGHLIGHT_FACTOR = 3.3f
+        /** F21-FR2 [Recommendation]: a drag's preview redraws at most this often. */
+        const val PREVIEW_MS = 100L
         val MUTED = Color.rgb(170, 170, 170)
     }
 }

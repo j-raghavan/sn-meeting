@@ -27,7 +27,7 @@ pub fn selection_bounds(layer: &InkLayer, ids: &[StrokeId]) -> Option<BBox> {
 }
 
 /// Ray-casting point-in-polygon; a point exactly on an edge may go either way.
-fn point_in_polygon(px: f32, py: f32, poly: &[(f32, f32)]) -> bool {
+pub(crate) fn point_in_polygon(px: f32, py: f32, poly: &[(f32, f32)]) -> bool {
     let mut inside = false;
     let mut j = poly.len() - 1;
     for i in 0..poly.len() {

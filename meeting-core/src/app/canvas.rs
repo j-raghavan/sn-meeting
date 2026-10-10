@@ -3,15 +3,83 @@
 use super::App;
 use super::notes::rect_of;
 use crate::api::error_json;
-use crate::canvas::Scene;
 use crate::canvas::draw::{bbox_json, refs_json};
+use crate::canvas::{Ref, Scene};
 use crate::ink::BBox;
 use crate::notes::{self, Layer};
 use serde_json::{Value, json};
 
+/// Local wall time for an item's `createdAt` (display only; F21-FR1).
+pub(crate) fn now_local() -> String {
+    chrono::Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
+}
+
+/// A finite number field of an op.
+fn num(op: &Value, k: &str) -> Result<f64, String> {
+    op.get(k)
+        .and_then(Value::as_f64)
+        .filter(|v| v.is_finite())
+        .ok_or_else(|| format!("{k} must be a number"))
+}
+
+/// The op's `refs`, or the selection when it names none.
+fn refs_of(op: &Value, scene: &Scene) -> Vec<Ref> {
+    match op.get("refs").and_then(Value::as_array) {
+        Some(a) => a
+            .iter()
+            .filter_map(Value::as_str)
+            .filter_map(Ref::parse)
+            .collect(),
+        None => scene.selection.clone(),
+    }
+}
+
+/// `n` finite numbers from an op's array field.
+fn floats(op: &Value, k: &str) -> Option<Vec<f32>> {
+    #[allow(clippy::cast_possible_truncation)]
+    let v: Vec<f32> = op
+        .get(k)?
+        .as_array()?
+        .iter()
+        .map(|x| x.as_f64().filter(|f| f.is_finite()).map(|f| f as f32))
+        .collect::<Option<_>>()?;
+    Some(v)
+}
+
+/// F21-FR4: `select` (not an undo step): `{at: [x, y], r}` a pen tap (the topmost thing, or
+/// nothing on empty canvas), `{rect: [x0, y0, x1, y1]}` a selection rectangle, `{polygon:
+/// [x, y, …]}` the lasso, `{refs}` given refs; groups join whole.
+fn select(scene: &mut Scene, op: &Value) -> Result<(), String> {
+    let refs = if let Some(at) = floats(op, "at").filter(|a| a.len() == 2) {
+        let r = op.get("r").and_then(Value::as_f64).unwrap_or(8.0);
+        let p = crate::canvas::geom::Pt::new(f64::from(at[0]), f64::from(at[1]));
+        scene.top_at(p, r).into_iter().collect()
+    } else if let Some(b) = floats(op, "rect").filter(|a| a.len() == 4) {
+        let rect = BBox {
+            x0: b[0].min(b[2]),
+            y0: b[1].min(b[3]),
+            x1: b[0].max(b[2]),
+            y1: b[1].max(b[3]),
+        };
+        scene.in_rect(rect)
+    } else if let Some(p) = floats(op, "polygon").filter(|a| a.len() % 2 == 0) {
+        let poly: Vec<(f32, f32)> = p.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+        scene.lasso(&poly)
+    } else if op.get("refs").is_some() {
+        refs_of(op, scene)
+    } else if op.get("none").is_some() {
+        Vec::new()
+    } else {
+        return Err("select needs at, rect, polygon, refs or none".into());
+    };
+    scene.select(&refs);
+    Ok(())
+}
+
 /// What every canvas edit answers.
 fn edit_reply(scene: &Scene, dirty: Option<BBox>) -> Value {
     json!({"dirty": bbox_json(dirty), "selection": refs_json(&scene.selection),
+           "selectionBounds": bbox_json(scene.bounds_of(&scene.selection)),
            "canUndo": scene.can_undo(), "canRedo": scene.can_redo()})
 }
 
@@ -35,11 +103,32 @@ impl App {
         let Ok(op) = serde_json::from_str::<Value>(op) else {
             return error_json("an edit must be JSON");
         };
+        let name = op
+            .get("op")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
         let out = self.with_ink(id, Layer::Canvas, |o| -> Result<Value, String> {
+            if name == "select" {
+                select(&mut o.scene, &op)?;
+                return Ok(edit_reply(&o.scene, None));
+            }
             if !o.scene.items_ok() {
                 return Err("The canvas's shapes can't be read, so they can't be changed".into());
             }
-            let dirty = match op.get("op").and_then(Value::as_str).unwrap_or("") {
+            let refs = refs_of(&op, &o.scene);
+            let dirty = match name.as_str() {
+                // F21-FR4: the selection (or the refs given) moved, deleted or duplicated.
+                "move" => {
+                    let (dx, dy) = (num(&op, "dx")?, num(&op, "dy")?);
+                    let all = o.scene.with_groups(&refs);
+                    o.scene.move_refs(&all, dx, dy)
+                }
+                "delete" => {
+                    let all = o.scene.with_groups(&refs);
+                    o.scene.delete(&all).1
+                }
+                "duplicate" => o.scene.duplicate(&refs, &now_local()),
                 // F21-FR3: the backup goes first; without it, nothing is cleared (OQ34).
                 "clear" => {
                     if o.scene.is_empty() {
