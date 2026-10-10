@@ -547,6 +547,11 @@ pub fn tag_meetings(name: &str, range: &str) -> String {
     with_app(|app| app.tag_meetings_json(name, range))
 }
 
+/// `nativeTagOlder(dryRun)` (F20-FR10): count and price first, then one tags-only call per untagged meeting.
+pub fn tag_older(dry_run: bool) -> String {
+    with_app(|app| app.tag_older_json(dry_run))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

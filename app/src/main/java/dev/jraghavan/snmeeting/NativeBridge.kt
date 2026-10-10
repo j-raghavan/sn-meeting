@@ -182,6 +182,11 @@ object NativeBridge {
      *  [{id, title, startedAt, startedAtMs, durationMs, tags}]}` (`tags`: its other tags). */
     external fun nativeTagMeetings(name: String, range: String): String
 
+    /** F20-FR10 / OQ31: "Tag older meetings…". [dryRun]: `{meetings, estUsd|null, provider,
+     *  model}` to show first; else one tags-only call per untagged meeting, `{tagged, failed,
+     *  error}`. Blocking for minutes: call it on [LongJobs]' lane. */
+    external fun nativeTagOlder(dryRun: Boolean): String
+
     /** F17-FR5's deferred flush (on a 1.5 s timer after a change): `{saved}`. */
     external fun nativeInkSave(id: String): String
 

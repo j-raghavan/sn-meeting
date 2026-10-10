@@ -33,4 +33,16 @@ class TagsTest {
         assertEquals(listOf("local-ai", "gpu"), sc.tags)
         assertEquals(emptyList<String>(), Sidecar.from(JSONObject("""{"id":"m","status":"done"}"""))!!.tags)
     }
+
+    /** F20-FR10: the cost is asked about first; the run's result in one line. */
+    @Test
+    fun tag_older_asks_first() {
+        val t = TagOlder.from(JSONObject("""{"meetings":3,"estUsd":0.0021,"provider":"anthropic","model":"claude-x"}"""))
+        assertEquals("3 meetings without tags will each get one small call to Anthropic (claude-x) on its stored summary and transcript: about ${Spend.money(0.0021)}.", t.question())
+        val unpriced = TagOlder.from(JSONObject("""{"meetings":1,"estUsd":null,"provider":"openai","model":"gpt-x"}"""))
+        assertTrue(unpriced.question()!!.endsWith("a cost this model has no rate for yet."))
+        assertEquals(null, TagOlder.from(JSONObject("""{"meetings":0}""")).question())
+        assertEquals("Tagged 2 meetings", TagOlder.result(JSONObject("""{"tagged":2,"failed":0,"error":null}""")))
+        assertEquals("Tagged 0 meetings  ·  1 couldn't be tagged: Timed out", TagOlder.result(JSONObject("""{"tagged":0,"failed":1,"error":"Timed out"}""")))
+    }
 }

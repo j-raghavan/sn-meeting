@@ -2,9 +2,13 @@
 //! under the write lock, so the search index and the Tag Graph pick it up from the files.
 use super::App;
 use crate::api::error_json;
-use crate::library::LibError;
 use crate::library::MeetingSummary;
+use crate::library::{LibError, Source};
+use crate::providers::{self, JsonAsk};
+use crate::settings::Role;
 use crate::sidecar::{self, Tag};
+use crate::spend::{Kind, UsageEntry, UsageRecord};
+use crate::summarise;
 use crate::tags::graph::{self, Graph};
 use crate::tags::{self, edit};
 use chrono::NaiveDate;
@@ -35,6 +39,10 @@ impl Range {
 
 /// The rename in progress, in the app's private folder: `{from, to}` (F20-FR4, resumable).
 pub const RENAME_FILE: &str = "tag-rename.json";
+
+fn has_text(t: Option<&str>) -> bool {
+    t.is_some_and(|t| !t.trim().is_empty())
+}
 
 fn tags_reply(r: Result<Vec<Tag>, LibError>) -> String {
     match r {
@@ -188,6 +196,122 @@ impl App {
             })
             .collect();
         json!({"tag": tag, "count": rows.len(), "meetings": rows}).to_string()
+    }
+
+    /// F20-FR10 / OQ31: the meetings "Tag older meetings…" would tag: readable, with no tags
+    /// (nor any the user removed), and a summary or a transcript to read.
+    fn untagged(&self) -> Vec<crate::sidecar::Sidecar> {
+        self.library()
+            .all()
+            .into_iter()
+            .filter(|(m, sc)| {
+                m.source == Source::Sidecar
+                    && sc.tags.is_empty()
+                    && sc.tags_user_removed.is_empty()
+                    && (has_text(sc.summary.as_deref())
+                        || sc.segments.iter().any(|s| has_text(s.text.as_deref()))
+                        || sc.chunks.iter().any(|c| has_text(c.text.as_deref())))
+            })
+            .map(|(_, sc)| sc)
+            .collect()
+    }
+
+    /// `nativeTagOlder(dryRun)` (F20-FR10 / OQ31): only on request, never automatically. A dry
+    /// run counts the meetings and estimates the cost first (`{meetings, estUsd, provider,
+    /// model}`, `estUsd` null when the model has no rate); a run makes one tags-only call per
+    /// meeting on its stored summary and transcript and records each call's usage
+    /// (`{tagged, failed, error}`). Blocking: call it off the main thread.
+    pub fn tag_older_json(&self, dry_run: bool) -> String {
+        let (s, _) = self.settings();
+        let (key, model) = match self.pick(&s, Role::Summarise) {
+            Ok((k, m, _)) => (k, m),
+            Err(e) => return error_json(&e),
+        };
+        let list = self.untagged();
+        let vocabulary = tags::vocabulary(&self.library().sidecars());
+        let message = |sc: &crate::sidecar::Sidecar| {
+            summarise::tags_only_message(
+                sc.summary.as_deref(),
+                &crate::pipeline::joined(sc),
+                &vocabulary,
+            )
+        };
+        let rates = self.rates();
+        if dry_run {
+            let rate = rates.lookup(key.provider, &model, self.today());
+            let est = rate
+                .and_then(|r| Some((r.input?, r.output?)))
+                .map(|(i, o)| {
+                    let usd: f64 = list
+                        .iter()
+                        .map(|sc| {
+                            let chars = summarise::TAGS_ONLY_RULES.len() + message(sc).len();
+                            (chars as f64 / 4.0) * i / 1e6 + 80.0 * o / 1e6
+                        })
+                        .sum();
+                    crate::spend::round6(usd)
+                });
+            return json!({"meetings": list.len(), "estUsd": est,
+                          "provider": key.provider.id(), "model": model})
+            .to_string();
+        }
+        let http = match providers::http_client(crate::jobs::CONNECT_TIMEOUT, self.core.https_only)
+        {
+            Ok(h) => h,
+            Err(e) => return error_json(&crate::scrub::scrub(&e, &[key.expose()])),
+        };
+        let (mut tagged, mut failed, mut last) = (0usize, 0usize, None::<String>);
+        for sc in list {
+            let ask = JsonAsk {
+                system: summarise::TAGS_ONLY_RULES.into(),
+                user: message(&sc),
+                schema: summarise::tags_only_schema(),
+                max_tokens: summarise::TAGS_ONLY_MAX_TOKENS,
+                images: Vec::new(),
+            };
+            let fut = providers::complete_json(&http, &self.core.endpoints, &key, &model, &ask);
+            let r = match crate::runtime::block_on(fut) {
+                Ok(r) => r,
+                Err(e) => {
+                    (failed, last) = (failed + 1, Some(format!("runtime: {e}")));
+                    continue;
+                }
+            };
+            let at = crate::tz::local_at(self.tz.as_ref(), chrono::Utc::now().timestamp_millis())
+                .map(|t| crate::tz::rfc3339(&t))
+                .unwrap_or_default();
+            let spent = match &r {
+                Ok(x) => Some(x.measured.clone()),
+                Err(e) => e.spent.as_deref().cloned(),
+            };
+            let names = match &r {
+                Ok(x) => summarise::parse(&x.text)
+                    .map(|x| x.tags)
+                    .unwrap_or_default(),
+                Err(e) => {
+                    last = Some(e.detail.clone());
+                    Vec::new()
+                }
+            };
+            let _w = self.write_lock();
+            let wrote = self.library().update(&sc.id, |cur, _| {
+                if let Some(m) = &spent {
+                    let rec = UsageRecord::new(Kind::Summarise, m, at.clone(), &rates);
+                    cur.usage.push(UsageEntry::from(rec));
+                }
+                // Tagged meanwhile (by the user or a summary): left as it is.
+                let fresh = cur.tags.is_empty() && cur.tags_user_removed.is_empty();
+                if fresh {
+                    tags::apply_ai(cur, &names);
+                }
+                Ok(fresh && !names.is_empty())
+            });
+            match wrote {
+                Ok(true) => tagged += 1,
+                _ => failed += 1,
+            }
+        }
+        json!({"tagged": tagged, "failed": failed, "error": last}).to_string()
     }
 
     /// The rename over every meeting that has `from`; a meeting without it isn't rewritten.

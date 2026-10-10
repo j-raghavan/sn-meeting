@@ -1128,3 +1128,16 @@ pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTagMeetin
     })
     .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
 }
+
+/// Blocking, one provider call per meeting: call it on a background lane.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_dev_jraghavan_snmeeting_NativeBridge_nativeTagOlder<'local>(
+    mut env: EnvUnowned<'local>,
+    _class: JClass<'local>,
+    dry_run: jboolean,
+) -> JString<'local> {
+    env.with_env(|env| -> jni::errors::Result<JString<'local>> {
+        env.new_string(crate::api::tag_older(dry_run))
+    })
+    .resolve::<jni::errors::ThrowRuntimeExAndDefault>()
+}
