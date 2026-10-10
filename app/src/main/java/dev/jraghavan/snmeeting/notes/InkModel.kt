@@ -5,11 +5,34 @@ import dev.jraghavan.snmeeting.model.bool
 import dev.jraghavan.snmeeting.model.int
 import dev.jraghavan.snmeeting.model.long
 import dev.jraghavan.snmeeting.model.mapObj
+import dev.jraghavan.snmeeting.model.obj
+import dev.jraghavan.snmeeting.model.str
+import dev.jraghavan.snmeeting.model.strings
+import dev.jraghavan.snmeeting.notes.canvas.DrawItem
+import dev.jraghavan.snmeeting.notes.canvas.ShapeStyle
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** One stroke as the canvas draws it (`nativeInkStrokesForDraw`): world points `[x, y, …]`. */
-class DrawStroke(val id: Int, val tool: Int, val width: Float, val argb: Int, val atMs: Long?, val pts: FloatArray) {
+/**
+ * One stroke as the canvas draws it (`nativeInkStrokesForDraw`, `nativeCanvasForDraw`): world
+ * points `[x, y, …]`, and (F21) its style ids, group and link from `items.json`.
+ */
+class DrawStroke(
+    val id: Int,
+    val tool: Int,
+    val width: Float,
+    val argb: Int,
+    val atMs: Long?,
+    val pts: FloatArray,
+    val style: ShapeStyle? = null,
+    val groupId: String? = null,
+    /** F21-FR7: each point's pressure, for a styled pen stroke (null: one width). */
+    val pressure: FloatArray? = null,
+    /** F21-FR13: it links to another meeting (it shows a badge). */
+    val linked: Boolean = false,
+) {
+    val ref get() = "s:$id"
+
     val highlighter get() = tool == NoteTool.HIGHLIGHTER.core
 
     /** The stroke's world box, grown by half its width. */
@@ -42,22 +65,75 @@ class DrawStroke(val id: Int, val tool: Int, val width: Float, val argb: Int, va
                 argb = argb,
                 atMs = o.long("atMs"),
                 pts = FloatArray(pts.length()) { (pts.opt(it) as? Number)?.toFloat() ?: 0f },
+                style = o.obj("style")?.let(ShapeStyle::from),
+                groupId = o.str("groupId"),
+                pressure = o.arr("pressure")?.let { a -> FloatArray(a.length()) { (a.opt(it) as? Number)?.toFloat() ?: 1f } }
+                    ?.takeIf { it.size * 2 == pts.length() },
+                linked = o.obj("link") != null,
             )
         }
     }
 }
 
-/** `nativeInkStrokesForDraw`: the strokes in view, the ink's bounds and the history state. */
-data class InkView(val strokes: List<DrawStroke>, val bounds: WorldRect?, val canUndo: Boolean, val canRedo: Boolean) {
+/** F21-FR1: one paint-ordered thing on the canvas: a stroke or an item. */
+sealed interface DrawEntry {
+    val ref: String
+
+    data class Ink(val stroke: DrawStroke) : DrawEntry {
+        override val ref get() = stroke.ref
+    }
+
+    data class Thing(val item: DrawItem) : DrawEntry {
+        override val ref get() = item.ref
+    }
+}
+
+/**
+ * `nativeInkStrokesForDraw` / `nativeCanvasForDraw`: what is in view in paint order, the
+ * content's bounds, the history state and (F21) the selection and whether items can be edited.
+ */
+data class InkView(
+    val strokes: List<DrawStroke>,
+    val bounds: WorldRect?,
+    val canUndo: Boolean,
+    val canRedo: Boolean,
+    val entries: List<DrawEntry> = strokes.map { DrawEntry.Ink(it) },
+    val selection: List<String> = emptyList(),
+    val selectionBounds: WorldRect? = null,
+    val itemsOk: Boolean = true,
+    /** OQ34: a cleared canvas's backup can be restored. */
+    val canRestore: Boolean = false,
+    /** F21-FR6: the style new items and strokes take. */
+    val defaultStyle: ShapeStyle = ShapeStyle.DEFAULT,
+) {
+    val items: List<DrawItem> get() = entries.mapNotNull { (it as? DrawEntry.Thing)?.item }
+
     companion object {
         val EMPTY = InkView(emptyList(), null, canUndo = false, canRedo = false)
 
-        fun from(o: JSONObject): InkView = InkView(
-            strokes = o.arr("strokes").mapObj(DrawStroke::from),
-            bounds = rect(o.arr("bounds")),
-            canUndo = o.bool("canUndo") ?: false,
-            canRedo = o.bool("canRedo") ?: false,
-        )
+        fun from(o: JSONObject): InkView {
+            val entries = o.arr("entries")?.let { a ->
+                (0 until a.length()).mapNotNull { i ->
+                    val e = a.opt(i) as? JSONObject ?: return@mapNotNull null
+                    val ref = e.str("ref") ?: return@mapNotNull null
+                    e.obj("stroke")?.let(DrawStroke::from)?.let { DrawEntry.Ink(it) }
+                        ?: e.obj("item")?.let { DrawItem.from(ref, it) }?.let { DrawEntry.Thing(it) }
+                }
+            }
+            val strokes = entries?.mapNotNull { (it as? DrawEntry.Ink)?.stroke } ?: o.arr("strokes").mapObj(DrawStroke::from)
+            return InkView(
+                strokes = strokes,
+                bounds = rect(o.arr("bounds")),
+                canUndo = o.bool("canUndo") ?: false,
+                canRedo = o.bool("canRedo") ?: false,
+                entries = entries ?: strokes.map { DrawEntry.Ink(it) },
+                selection = o.arr("selection").strings(),
+                selectionBounds = rect(o.arr("selectionBounds")),
+                itemsOk = o.bool("itemsOk") ?: true,
+                canRestore = o.bool("canRestore") ?: false,
+                defaultStyle = ShapeStyle.from(o.obj("defaultStyle")),
+            )
+        }
 
         /** `[x0, y0, x1, y1]` from the core, or null. */
         fun rect(a: JSONArray?): WorldRect? =
@@ -94,4 +170,27 @@ object Emphasis {
 
     fun changed(strokes: List<DrawStroke>, before: Long?, after: Long?): Boolean =
         strokes.any { muted(it, before) != muted(it, after) }
+}
+
+/**
+ * F21-FR12: the rows of ⋮ → Canvases… from `nativeCanvasList`: "Canvas 2 · 12:41 · 34 strokes,
+ * 5 items", the one shown marked; an empty canvas that isn't the first or the one shown can be
+ * deleted.
+ */
+object CanvasRows {
+    data class Row(val n: Int, val label: String, val current: Boolean, val deletable: Boolean)
+
+    fun of(o: JSONObject): List<Row> {
+        val current = o.int("current") ?: 1
+        return o.arr("canvases").mapObj { c ->
+            val n = c.int("n") ?: return@mapObj null
+            val at = c.str("createdAt")?.takeIf { it.length >= 16 }?.substring(11, 16)
+            val strokes = c.int("strokes")
+            val items = c.int("items")
+            val counts = if (strokes == null || items == null) "can't be read" else
+                "$strokes stroke${if (strokes == 1) "" else "s"}, $items item${if (items == 1) "" else "s"}"
+            val label = listOfNotNull("Canvas $n", at, counts).joinToString(" · ") + if (n == current) "  ✓" else ""
+            Row(n, label, n == current, deletable = n != 1 && n != current && strokes == 0 && items == 0)
+        }
+    }
 }

@@ -78,11 +78,25 @@ class SupernoteInk(private val context: Context) {
         send(TX_WRITE_APP_INFO) { it.writeInt(0); it.writeInt(0) }
         val fullAuto = eink("enableFullUiAuto", true)
         sendAreas()
-        send(TX_PEN) { it.writeInt(PEN_NEEDLE); it.writeInt(SIZE_EMR); it.writeInt(COLOR_BLACK) }
+        sendPen()
         active = true
         writable = true
         Log.i(TAG, "SupernoteInk: setup ok ($reason): binder=${b.javaClass.simpleName} alive=${b.isBinderAlive}, fullAuto=$fullAuto")
         return true
+    }
+
+    /** F21-FR7: the live pen (nib, size, tone); sent now when claimed, and on every [setup]. */
+    var pen: dev.jraghavan.snmeeting.notes.canvas.FirmwarePen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.NEEDLE_BLACK
+        set(v) {
+            if (v == field) return
+            field = v
+            if (active) sendPen()
+        }
+
+    private fun sendPen() {
+        val p = pen
+        Log.i(TAG, "SupernoteInk: pen type=${p.type} size=${p.size} color=${p.color}")
+        send(TX_PEN) { it.writeInt(p.type); it.writeInt(p.size); it.writeInt(p.color) }
     }
 
     /** Wipe the overlay (the canvas then redraws its own rendering of every stroke). */
@@ -126,6 +140,8 @@ class SupernoteInk(private val context: Context) {
     /** Release the pen when the page goes, ink off (inkread #157: else it inks other apps). */
     fun teardown() {
         if (!active) return
+        // F21-FR7: the firmware pen is set back, as sn-canvas does when it closes.
+        pen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.NEEDLE_BLACK
         clearAll()
         setWritable(false)
         eink("enableFullUiAuto", false)
@@ -159,9 +175,6 @@ class SupernoteInk(private val context: Context) {
         const val TX_DISABLE_AREA = 1
         const val TX_PEN = 2
         const val TX_DRAW_BUFFER = 6
-        const val PEN_NEEDLE = 10
-        const val COLOR_BLACK = 0
-        const val SIZE_EMR = 1000
         const val WRITABLE_ON_EDGE = 18888
         const val WRITABLE_OFF_EDGE = 19999
     }

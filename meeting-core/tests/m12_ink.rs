@@ -45,10 +45,15 @@ fn stroke(f: &Fx, layer: &str, x: f32, y: f32, t: f32) -> Value {
 #[test]
 fn timed_strokes_are_kept_in_world_space_and_saved_on_flush() {
     let f = fixture();
-    let open = parse(&f.app.notes_open_json(&f.id));
+    let mut open = parse(&f.app.notes_open_json(&f.id));
+    let images = open.as_object_mut().unwrap().remove("imagesDir").unwrap();
+    assert!(
+        images.as_str().unwrap().ends_with(".notes/images"),
+        "{images}"
+    );
     assert_eq!(
         open,
-        json!({"view": null, "clock": "recording-ms", "bounds": null, "strokes": 0})
+        json!({"view": null, "clock": "recording-ms", "bounds": null, "strokes": 0, "items": 0})
     );
     let a = stroke(&f, "canvas", -12_000.0, 48_000.0, 450_000.0);
     assert_eq!(a["strokeId"], 0);
@@ -135,7 +140,7 @@ fn erase_lasso_move_delete_and_history() {
         &f.app
             .ink_erase_json(&f.id, "canvas", &[-900.0, -900.0], 6.0),
     );
-    assert_eq!(miss, json!({"erased": [], "bbox": null}));
+    assert_eq!(miss, json!({"erased": [], "refs": [], "bbox": null}));
     let u = parse(&f.app.ink_history_json(&f.id, "canvas", false));
     assert_eq!(
         (u["changed"].clone(), u["canRedo"].clone()),

@@ -63,7 +63,9 @@ object SearchModel {
     sealed class Open {
         /** The meeting, cued to [atMs] when given, scrolled to [focus] (summary, todos, transcript),
          *  or (F19-FR3) on its Notes tab with the line's world box [outline] centred and outlined. */
-        data class Meeting(val id: String, val atMs: Long?, val focus: String?, val outline: List<Double>? = null) : Open()
+        data class Meeting(val id: String, val atMs: Long?, val focus: String?, val outline: List<Double>? = null,
+            /** F21-FR15: the canvas the notes hit is on (null: the first). */
+            val canvas: Int? = null) : Open()
         /** An event with no meeting: its sheet (F18-FR8). */
         data class Event(val key: String, val title: String, val startMs: Long) : Open()
         /** F20-FR5: a tag hit opens the Tag Graph with that tag selected (F20-FR8). */
@@ -82,7 +84,7 @@ object SearchModel {
     fun open(g: SearchGroup, h: SearchHit): Open = when {
         g.kind == "event" -> Open.Event(g.id, title(g), g.startMs)
         h.kind == "tag" -> Open.Tag(h.unitId.removePrefix("tag:"))
-        h.kind == "notes" -> Open.Meeting(g.id, h.atMs?.let { (it - NOTES_LEAD_MS).coerceAtLeast(0) }, "notes", h.bbox)
+        h.kind == "notes" -> Open.Meeting(g.id, h.atMs?.let { (it - NOTES_LEAD_MS).coerceAtLeast(0) }, "notes", h.bbox, h.canvas)
         h.kind == "transcript" -> Open.Meeting(g.id, h.atMs, "transcript")
         h.kind == "todo" -> Open.Meeting(g.id, null, "todos")
         else -> Open.Meeting(g.id, null, "summary")
@@ -101,6 +103,8 @@ data class SearchHit(
     val snippet: List<Span>, val changed: Boolean,
     /** A notes hit's line as a world box `[x0, y0, x1, y1]` (F19-FR3's outline). */
     val bbox: List<Double>? = null,
+    /** F21-FR15: the canvas a notes hit is on, when not the first. */
+    val canvas: Int? = null,
 ) {
     companion object {
         fun from(o: JSONObject): SearchHit? { return SearchHit(
@@ -112,6 +116,7 @@ data class SearchHit(
             snippet = o.arr("snippet").mapObj { s -> s.str("text")?.let { Span(it, s.bool("bold") == true) } },
             changed = o.bool("changed") == true,
             bbox = o.arr("bbox")?.let { a -> (0 until a.length()).mapNotNull { (a.opt(it) as? Number)?.toDouble() } }?.takeIf { it.size == 4 },
+            canvas = o.int("canvas"),
         ) }
     }
 }

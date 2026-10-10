@@ -29,6 +29,9 @@ class InkBakeTest { // F17-FR4, as inkread keeps pen ink on the firmware overlay
 
     @Test fun onlyThePenWritesWithTheOverlay() {
         assertTrue(InkBake.overlayFor(NoteTool.PEN))
-        for (t in listOf(NoteTool.HIGHLIGHTER, NoteTool.ERASER, NoteTool.LASSO, NoteTool.LISTEN)) assertFalse("$t", InkBake.overlayFor(t))
+        for (t in NoteTool.entries - NoteTool.PEN) assertFalse("$t", InkBake.overlayFor(t))
+        // F21-FR2: closing a panel and an edit bake in F17-FR4's order.
+        assertEquals(listOf(Step.DRAW, Step.REFRESH_PANEL, Step.CLEAR_OVERLAY), InkBake.plan(Event.PANEL_CLOSED))
+        assertTrue(Event.EDIT in InkBake.INK_CHANGES)
     }
 }

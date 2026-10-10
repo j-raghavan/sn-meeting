@@ -69,3 +69,8 @@ class StrokeBuffer(private val times: StrokeTimes) {
 
     fun clear() { xs.clear(); ys.clear(); ps.clear(); ts.clear() }
 }
+
+/** F21-FR7 [Recommendation]: a committed stroke's width at a point: `width × (0.5 + 0.5 × pressure)`. */
+object PressureWidth {
+    fun of(width: Float, pressure: Float): Float = width * (0.5f + 0.5f * pressure.coerceIn(0f, 1f))
+}

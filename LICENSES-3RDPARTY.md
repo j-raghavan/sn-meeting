@@ -31,6 +31,7 @@ wordmark and footer tagline. © The Pinyon Script Project Authors; SIL OFL 1.1
 | `res/drawable/ic_tool_{pen,highlighter,eraser}.xml`, `ic_sel_{undo,redo}.xml` (notes tools, via inkread) | Material Design Icons (Google) | Apache License 2.0 |
 | `res/drawable/ic_tool_lasso.xml` (lasso, from inkread) | inkread (same author) | AGPL-3.0-only |
 | `res/drawable/ic_tool_listen.xml` (speaker, the Listen tool) | Material Design Icons (Google) | Apache License 2.0 |
+| `res/drawable-nodpi/ic_cv_*.png` (F21's tools, actions, fills and outlines) | sn-canvas `assets/icons/*.png` (same author) | MIT (notice below) |
 
 ## Adapted source code
 
@@ -45,7 +46,10 @@ Each adapted file names its origin in its header.
 | `app/.../notes/Viewport.kt` (pan, zoom, fit, minimap frame) | sn-canvas `CanvasCore.kt`, `ViewTransforms.kt`, `Minimap.kt` | MIT (notice below) |
 | `app/.../notes/SupernoteInk.kt` | inkread `eink/SupernoteInk.kt`, `eink/SupernoteEinkAdapter.kt` | AGPL-3.0-only |
 | `app/.../notes/Hints.kt` (hand-drawn arrow, caption placement) | sn-canvas `scripts/draw_hints.py`, `src/ui/HelpHints.tsx` | MIT (notice below) |
+| `scripts/draw_buttons.py` (the README's "what every button does" figure) | sn-canvas `scripts/draw_features.py`, `scripts/draw_hints.py` | MIT (notice below) |
 | `app/.../notes/DockedToolBar.kt` | inkread `ToolPalette.kt` (vertical docked palette, Define removed, docked collapse) | AGPL-3.0-only |
+| `meeting-core/src/canvas/{item,geom,hit,edits,table,image,pdf,scene,style}.rs` (the F21 scene: items, arrow bindings, hit-tests, handle edits, arranging, one history, styles) | sn-canvas `CanvasModel.kt`, `CanvasCore.kt`, `ShapeEdits.kt`, `CanvasActions.kt`, `ImageElements.kt`, `TableEdits.kt`, `ViewTransforms.kt`, `EditHistory.kt`, `CanvasStyle.kt`, ported to Rust with their rules, constants and test vectors | MIT (notice below) |
+| `app/.../notes/canvas/{CanvasStyle,ShapeOutline,ItemPainter,ImageCache,Handles,StylePanel,FirmwarePen,TextEditor,TableCells,Badges,PdfExport}.kt` (palette, hand-drawn outlines, item and text painters, image decoding) | sn-canvas `CanvasStyle.kt`, `StylePalette.kt`, `ShapeOutline.kt`, `ElementPainter.kt`, `TextPainter.kt`, `ShapeDrawing.kt`, `AndroidTextMeasurer.kt`, `ImageCache.kt`, `FirmwarePen.kt`, `TextEditRequest.kt`, `TableElements.kt`, `PdfExport.kt`, `PdfPages.kt`; the style panel re-implements `src/ui/StylePanel.tsx` | MIT (notice below) |
 
 ## Rust crates linked into `libmeeting.so`
 
@@ -235,7 +239,10 @@ a linked crate is missing here; the table is regenerated with `scripts/linked_cr
 
 ## License notices
 
-### MIT — sn-canvas (adapted Kotlin files listed under "Adapted source code")
+### MIT — sn-canvas (adapted Kotlin files and the Rust port listed under "Adapted source code")
+
+The 12 style colours (`canvas/style.rs`, `CanvasStyle.kt`) are tldraw's published default
+colour values, used as data. No tldraw code is used, and none is in sn-canvas.
 
 ```
 MIT License

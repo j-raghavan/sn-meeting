@@ -22,11 +22,13 @@ object InkDialog {
         d.findViewById<TextView>(android.R.id.message)?.apply { typeface = Typeface.SERIF; setLineSpacing(0f, 1.25f) }
     }
 
-    fun confirm(a: Activity, title: String, message: String, yes: String, onYes: () -> Unit) {
+    /** [onClose] runs however it closes (F21-FR3: the notes canvas re-claims the pen). */
+    fun confirm(a: Activity, title: String, message: String, yes: String, onClose: () -> Unit = {}, onYes: () -> Unit) {
         if (gone(a)) return
         builder(a).setTitle(title).setMessage(message)
             .setPositiveButton(yes.uppercase()) { _, _ -> onYes() }
             .setNegativeButton("CANCEL", null)
+            .setOnDismissListener { onClose() }
             .showSerif()
     }
 

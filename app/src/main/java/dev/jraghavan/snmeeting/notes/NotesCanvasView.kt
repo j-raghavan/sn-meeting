@@ -13,6 +13,11 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewTreeObserver
+import dev.jraghavan.snmeeting.notes.canvas.Badges
+import dev.jraghavan.snmeeting.notes.canvas.Handles
+import dev.jraghavan.snmeeting.notes.canvas.ImageSource
+import dev.jraghavan.snmeeting.notes.canvas.ItemPainter
+import dev.jraghavan.snmeeting.notes.canvas.StylePalette
 import kotlin.math.hypot
 
 /**
@@ -50,17 +55,45 @@ class NotesCanvasView(
         fun erase(xy: FloatArray, radiusWorld: Float)
         fun lasso(xy: FloatArray)
         fun moveSelection(dx: Float, dy: Float)
+        /** F21-FR4: the Select tool's pen tap (the topmost thing, or nothing: deselect). */
+        fun selectAt(x: Float, y: Float, radiusWorld: Float) {}
+        /** F21-FR4: a pen drag on empty canvas with Select: everything the rectangle touches. */
+        fun selectRect(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR13: a pen or finger tap on a link badge. */
+        fun openLink(ref: String) {}
+        /** F21-FR10: a pen drag with Table, from ([x0], [y0]) to ([x1], [y1]). */
+        fun createTable(x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR10: a pen tap with Table at a world point (a cell to type into). */
+        fun tableTap(x: Float, y: Float) {}
+        /** F21-FR10: a selected table's row edge dragged to a world point. */
+        fun rowDragged(ref: String, row: Int, x: Float, y: Float) {}
+        /** F21-FR9: a pen tap with Text or Sticky note at a world point. */
+        fun place(tool: NoteTool, x: Float, y: Float) {}
+        /** F21-FR8: a pen drag with a shape tool, from ([x0], [y0]) to ([x1], [y1]) in world units. */
+        fun createShape(tool: NoteTool, x0: Float, y0: Float, x1: Float, y1: Float) {}
+        /** F21-FR5: a handle of the one selected thing ([ref]) dragged to a world point. */
+        fun handleDragged(ref: String, h: Handles.Handle, x: Float, y: Float) {}
         /** A Listen tap at a world point (F17-FR7). */
         fun listen(x: Float, y: Float, radiusWorld: Float)
         /** The viewport moved: the visible strokes are fetched again. */
         fun viewportChanged(v: Viewport)
         val penWidthPx: Float
-        /** F17-FR13: every stroke within [bounds], for the minimap's thumbnail. */
-        fun allStrokes(bounds: WorldRect, done: (List<DrawStroke>) -> Unit) = done(emptyList())
+        /** F17-FR13: everything within [bounds], for the minimap's thumbnail (F21: items too). */
+        fun allEntries(bounds: WorldRect, done: (List<DrawEntry>) -> Unit) = done(emptyList())
     }
 
     var viewport = Viewport(0.0, 0.0, 1.0)
         private set
+
+    /** F21-FR9: the text (item id, table cell) the keyboard editor shows in place, left blank. */
+    var editing: Pair<String, Int?>? = null
+        set(v) { field = v; invalidate() }
+
+    /** F21-FR11: where image items' pixels come from (the page's [canvas.ImageCache]). */
+    var images: ImageSource = ImageSource.NONE
+        set(v) { field = v; painter = ItemPainter(v) }
+    /** F21: draws items in their style, each colour its own e-ink grey (F21-FR6). */
+    private var painter = ItemPainter(images)
     private var ink: InkView = InkView.EMPTY
     /** Playback position for the emphasis (F17-FR7), or null when not playing. */
     var positionMs: Long? = null
@@ -68,9 +101,22 @@ class NotesCanvasView(
     /** A search hit's line, outlined with a 2 px dashed box (F19-FR3). */
     var outline: WorldRect? = null
         set(v) { field = v; invalidate() }
-    /** The lasso selection's box, while there is one. */
-    var selection: WorldRect? = null
-        set(v) { field = v; invalidate() }
+    /** The selection's box (F21-FR4, from the core), while there is one. */
+    val selection: WorldRect? get() = ink.selectionBounds
+    /** F21-FR4: a drag's preview is redrawn at most every [PREVIEW_MS] (F21-FR2). */
+    private var lastPreview = 0L
+    /** F21-FR5: the handle a Select drag took, if it took one. */
+    private var dragging: Handles.Handle? = null
+    /** F21-FR10: the row edge of the selected table a Select drag took. */
+    private var rowDrag: Int? = null
+    /** F21-FR10: the target cell's box, marked with corner brackets (world, unrotated). */
+    var targetCell: WorldRect? = null
+        set(v) { if (v != field) { field = v; invalidate() } }
+
+    /** F21-FR5: the one selected thing, which shows handles. */
+    private fun soleSelected(): DrawEntry? = ink.selection.singleOrNull()?.let { r -> ink.entries.firstOrNull { it.ref == r } }
+
+    private fun handles(): List<Handles.Handle> = soleSelected()?.let { Handles.of(it, viewport.zoom) }.orEmpty()
     /** F17-FR3: ◆ beside the stroke written before each mark. */
     var markGlyphs: List<Pair<Double, Double>> = emptyList()
         set(v) { field = v; invalidate() }
@@ -177,8 +223,10 @@ class NotesCanvasView(
     fun show(next: InkView, event: InkBake.Event? = InkBake.Event.VIEWPORT_SETTLED) {
         // F17-FR13: the thumbnail is rebuilt only when the ink itself changed.
         if (next.bounds != ink.bounds || (event != null && event in InkBake.INK_CHANGES)) { thumbStrokes = null; thumbKey = null }
+        val selectionMoved = next.selectionBounds != ink.selectionBounds
         ink = next
-        event?.let(::bake)
+        if (next.defaultStyle != penStyle) penStyle = next.defaultStyle
+        if (event != null) bake(event) else if (selectionMoved) invalidate() // F21-FR4: one redraw
     }
 
     /** F17-FR4: run InkBake's plan for [e]: draw, then (after that frame) refresh the panel,
@@ -226,6 +274,13 @@ class NotesCanvasView(
 
     /** Firmware ink on for the Pen only (inkread's applyToolInkState); the other tools draw
      *  their own band or loop, and a change to one bakes the page. */
+    /** F21-FR7: the live pen follows the default style (pressure nib, size, nearest tone). */
+    var penStyle: dev.jraghavan.snmeeting.notes.canvas.ShapeStyle? = null
+        set(v) {
+            field = v
+            if (v != null) firmware.pen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.forStyle(v)
+        }
+
     fun toolChanged(t: NoteTool) {
         if (!firmwareOn) firmwareOn = firmware.setup()
         firmware.setWritable(InkBake.overlayFor(t))
@@ -242,6 +297,26 @@ class NotesCanvasView(
     }
 
     fun releasePen() { firmware.teardown(); firmware.systemGestures(true); firmwareOn = false }
+
+    /**
+     * F21-FR2: a panel opened beside the bar ([v]) or closed (null). While one is open firmware
+     * ink is off over the whole window, so a pen tap on it never inks, and the panel is a
+     * disabled area too; closing it turns the tool's ink back on and bakes once.
+     */
+    fun panelOpen(v: View?) = overlayOff(v != null)
+
+    /** F21-FR2/FR9: firmware ink off over the window while a panel or the keyboard editor is
+     *  open; back on (the tool's own) and one bake when it closes. */
+    fun overlayOff(off: Boolean) {
+        if (!firmwareOn) firmwareOn = firmware.setup("panel")
+        updateInkAreas()
+        if (off) {
+            firmware.setWritable(false)
+        } else {
+            firmware.setWritable(InkBake.overlayFor(host.tool))
+            bake(InkBake.Event.PANEL_CLOSED)
+        }
+    }
 
     fun fullRefresh() = bake(InkBake.Event.USER_REFRESH)
 
@@ -305,6 +380,51 @@ class NotesCanvasView(
         return mapFrame != null || mapSwallow
     }
 
+    /** F21-FR13: a link badge taken by the touch going down, until it lifts. */
+    private var badgeRef: String? = null
+    private var badgeDown = 0f to 0f
+
+    /** F21-FR13: a pen (any tool) or finger tap on a link badge opens the meeting it links to. */
+    private fun badgeTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                if (palmNear() && e.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) return false
+                val wx = viewport.worldX(e.x.toDouble()); val wy = viewport.worldY(e.y.toDouble())
+                val r = Badges.RADIUS_DP * density / viewport.zoom
+                badgeRef = Badges.at(ink.entries, wx, wy, viewport.zoom, r)?.ref ?: return false
+                badgeDown = e.x to e.y
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val ref = badgeRef ?: return false
+                badgeRef = null
+                if (hypot(e.x - badgeDown.first, e.y - badgeDown.second) <= TAP_SLOP_PX) host.openLink(ref)
+                return true
+            }
+            MotionEvent.ACTION_CANCEL -> { val had = badgeRef != null; badgeRef = null; return had }
+        }
+        return badgeRef != null
+    }
+
+    private val badgeFill = Paint().apply { style = Paint.Style.FILL; color = Color.WHITE; isAntiAlias = true }
+    private val badgeIcon: Bitmap? by lazy {
+        android.graphics.BitmapFactory.decodeResource(resources, dev.jraghavan.snmeeting.R.drawable.ic_cv_action_link)
+    }
+
+    /** F21-FR13: each linked thing's chain badge, drawn with the canvas (never on its own). */
+    private fun drawBadges(canvas: Canvas) {
+        val v = viewport
+        val r = (Badges.RADIUS_DP * density).toFloat()
+        for (e in ink.entries) {
+            if (!Badges.linked(e)) continue
+            val p = Badges.point(e, v.zoom)
+            val x = v.screenX(p.x).toFloat(); val y = v.screenY(p.y).toFloat()
+            canvas.drawCircle(x, y, r * 0.75f, badgeFill)
+            canvas.drawCircle(x, y, r * 0.75f, handleStroke)
+            badgeIcon?.let { b -> canvas.drawBitmap(b, null, android.graphics.RectF(x - r / 2, y - r / 2, x + r / 2, y + r / 2), null) }
+        }
+    }
+
     private fun palmNear(): Boolean = PalmRule.isPalm(penHovering, arbiter.isPenActive,
         SystemClock.uptimeMillis() - lastPenAt, 0f, height)
 
@@ -328,6 +448,7 @@ class NotesCanvasView(
         val pen = e.getToolType(e.actionIndex).let { it == MotionEvent.TOOL_TYPE_STYLUS || it == MotionEvent.TOOL_TYPE_ERASER }
         if (pen && e.actionMasked == MotionEvent.ACTION_DOWN && minimapOpen) minimapOpen = false // the pen closes it
         if (!fixed && !pen && e.pointerCount == 1 && minimapTouch(e)) return true
+        if (!fixed && e.pointerCount == 1 && badgeTouch(e)) return true
         if (fixed && e.actionMasked == MotionEvent.ACTION_DOWN && !pen) return false // the page scrolls
         if (e.actionMasked == MotionEvent.ACTION_DOWN) host.touched()
         if (fixed) parent?.requestDisallowInterceptTouchEvent(true)
@@ -379,11 +500,14 @@ class NotesCanvasView(
             gesture = InputRules.forPen(host.tool, c.isEraser, host.recording)
             when (gesture) {
                 Gesture.DRAW -> buffer = StrokeBuffer(host.strokeTimes()).also { it.add(c.x, c.y, c.pressure, at) }
-                Gesture.ERASE, Gesture.LASSO -> {
+                Gesture.ERASE, Gesture.LASSO, Gesture.SELECT -> {
                     if (c.isEraser && firmwareOn) firmware.setWritable(false)
+                    val wxd = viewport.worldX(c.x.toDouble()); val wyd = viewport.worldY(c.y.toDouble())
+                    dragging = if (gesture == Gesture.SELECT) Handles.at(handles(), wxd, wyd, viewport.zoom) else null
+                    rowDrag = (soleSelected() as? DrawEntry.Thing)?.item?.takeIf { gesture == Gesture.SELECT && dragging == null }
+                        ?.let { dev.jraghavan.snmeeting.notes.canvas.TableCells.rowEdge(it, wxd, wyd, ROW_EDGE_PX / viewport.zoom) }
                     val sel = selection
-                    movingSelection = gesture == Gesture.LASSO && sel != null &&
-                        sel.contains(viewport.worldX(c.x.toDouble()), viewport.worldY(c.y.toDouble()))
+                    movingSelection = dragging == null && rowDrag == null && gesture != Gesture.ERASE && sel != null && sel.contains(wxd, wyd)
                     path += c.x; path += c.y
                 }
                 else -> Unit
@@ -403,7 +527,9 @@ class NotesCanvasView(
             Gesture.ERASE, Gesture.LASSO -> {
                 path += m.x; path += m.y
                 if (!movingSelection) invalidate() // the band or loop is drawn by the canvas itself
+                else preview()
             }
+            Gesture.SELECT, Gesture.SHAPE, Gesture.TABLE -> preview() // an outline following the pen
             Gesture.PAN -> if (moved && !palmNear()) {
                 setViewport(viewport.panBy((m.x - lastX).toDouble(), (m.y - lastY).toDouble()), notify = false)
             }
@@ -436,9 +562,28 @@ class NotesCanvasView(
                 path += x; path += y
                 host.lasso(world(path))
             } else {
-                selection = null
+                host.selectAt(Float.NaN, Float.NaN, 0f) // a tap off the selection lets it go
             }
             Gesture.LISTEN -> host.listen(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
+            Gesture.SELECT -> when {
+                rowDrag != null -> if (moved) soleSelected()?.let { host.rowDragged(it.ref, rowDrag!!, wx(x), wy(y)) }
+                dragging != null -> if (moved) {
+                    soleSelected()?.let { host.handleDragged(it.ref, dragging!!, wx(x), wy(y)) }
+                }
+                !moved -> host.selectAt(wx(x), wy(y), (LISTEN_RADIUS_PX / viewport.zoom).toFloat())
+                movingSelection -> host.moveSelection(wx(x) - wx(downX), wy(y) - wy(downY))
+                else -> host.selectRect(wx(downX), wy(downY), wx(x), wy(y))
+            }
+            // F21-FR8: a drag shorter than 8 px on screen makes nothing.
+            Gesture.SHAPE -> if (hypot(x - downX, y - downY) >= MIN_SHAPE_PX) {
+                host.createShape(penTool, wx(downX), wy(downY), wx(x), wy(y))
+            }
+            Gesture.PLACE -> host.place(penTool, wx(x), wy(y))
+            Gesture.TABLE -> if (hypot(x - downX, y - downY) >= MIN_SHAPE_PX) {
+                host.createTable(wx(downX), wy(downY), wx(x), wy(y))
+            } else {
+                host.tableTap(wx(x), wy(y))
+            }
             Gesture.PAN -> if (moved) {
                 host.viewportChanged(viewport) // the strokes now in view, once the drag ends
             } else {
@@ -448,18 +593,26 @@ class NotesCanvasView(
             }
             Gesture.NONE -> Unit
         }
-        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
+        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null; rowDrag = null
         host.pen(false)
         // A pen stroke the firmware inked is not repainted (inkread); anything else drew a band
         // or loop of its own, which the next draw removes.
         if (was != Gesture.DRAW || !overlayInks(was)) invalidate()
     }
 
+    /** F21-FR2: a drag's outline or handles, redrawn at most every [PREVIEW_MS]. */
+    private fun preview() {
+        val now = SystemClock.uptimeMillis()
+        if (now - lastPreview < PREVIEW_MS) return
+        lastPreview = now
+        invalidate()
+    }
+
     /** Whether the stroke being written is the firmware's (the Pen, with the overlay claimed). */
     private fun overlayInks(g: Gesture = gesture): Boolean = firmwareOn && g == Gesture.DRAW && penTool == NoteTool.PEN
 
     private fun abandon() {
-        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
+        buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false; dragging = null; rowDrag = null
         host.pen(false)
         invalidate()
     }
@@ -472,27 +625,12 @@ class NotesCanvasView(
         canvas.drawColor(Color.WHITE)
         val v = viewport
         val z = v.zoom.toFloat()
-        for (s in ink.strokes) {
-            val muted = Emphasis.muted(s, positionMs)
-            val color = when {
-                muted -> MUTED
-                s.highlighter -> Color.argb(96, 0, 0, 0)
-                else -> s.argb or 0xFF000000.toInt()
+        val ctx = ItemPainter.Context(v, StylePalette.EINK, editing)
+        for (e in ink.entries) {
+            when (e) {
+                is DrawEntry.Ink -> drawStroke(canvas, e.stroke, z, v)
+                is DrawEntry.Thing -> painter.draw(canvas, e.item, ctx)
             }
-            inkPaint.color = color; dotPaint.color = color
-            inkPaint.strokeWidth = (s.width * z).coerceAtLeast(1f)
-            if (s.pts.size == 2) {
-                canvas.drawCircle(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat(),
-                    inkPaint.strokeWidth / 2, dotPaint)
-                continue
-            }
-            drawPath.reset()
-            drawPath.moveTo(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat())
-            var i = 2
-            while (i + 1 < s.pts.size) {
-                drawPath.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2
-            }
-            canvas.drawPath(drawPath, inkPaint)
         }
         val live = buffer
         if (gesture == Gesture.DRAW && !overlayInks() && live != null && live.size > 1) {
@@ -504,9 +642,42 @@ class NotesCanvasView(
             inkPaint.color = Color.BLACK; inkPaint.strokeWidth = host.penWidthPx
             canvas.drawPath(livePath, inkPaint)
         }
+        drawBadges(canvas)
+        drawBadges(canvas)
         markGlyphs.forEach { (x, y) -> canvas.drawText("◆", v.screenX(x).toFloat(), v.screenY(y).toFloat(), glyphPaint) }
         outline?.let { box(canvas, it, dashPaint) }
-        selection?.let { box(canvas, it, dashPaint) }
+        val sel = selection
+        if (sel != null) {
+            val (dx, dy) = if (movingSelection && (gesture == Gesture.SELECT || gesture == Gesture.LASSO)) {
+                (lastX - downX) to (lastY - downY)
+            } else 0f to 0f
+            canvas.save(); canvas.translate(dx, dy)
+            box(canvas, sel, dashPaint)
+            canvas.restore()
+        }
+        targetCell?.let { brackets(canvas, it) }
+        if (gesture == Gesture.TABLE && moved) {
+            canvas.drawRect(minOf(downX, lastX), minOf(downY, lastY), maxOf(downX, lastX), maxOf(downY, lastY), dashPaint)
+        }
+        if (gesture == Gesture.SELECT && rowDrag != null && moved) canvas.drawLine(0f, lastY, width.toFloat(), lastY, dashPaint)
+        if (gesture == Gesture.SHAPE && moved) {
+            // F21-FR8: the shape's outline while the pen drags (firmware ink is off).
+            val l = minOf(downX, lastX); val t = minOf(downY, lastY); val r = maxOf(downX, lastX); val b = maxOf(downY, lastY)
+            when (penTool) {
+                NoteTool.ELLIPSE -> canvas.drawOval(l, t, r, b, dashPaint)
+                NoteTool.LINE, NoteTool.ARROW -> canvas.drawLine(downX, downY, lastX, lastY, dashPaint)
+                else -> canvas.drawRect(l, t, r, b, dashPaint)
+            }
+        }
+        val drag = dragging
+        if (gesture == Gesture.SELECT && drag != null && moved) {
+            // F21-FR5: where the handle goes, from where it was.
+            canvas.drawLine(v.screenX(drag.x).toFloat(), v.screenY(drag.y).toFloat(), lastX, lastY, dashPaint)
+            canvas.drawCircle(lastX, lastY, HANDLE_PX, handleStroke)
+        } else if (gesture == Gesture.SELECT && !movingSelection && moved) {
+            canvas.drawRect(minOf(downX, lastX), minOf(downY, lastY), maxOf(downX, lastX), maxOf(downY, lastY), dashPaint)
+        }
+        if (gesture != Gesture.SELECT || (!movingSelection && drag == null)) drawHandles(canvas)
         if ((gesture == Gesture.ERASE || gesture == Gesture.LASSO) && !movingSelection && path.size >= 4) {
             livePaint.strokeWidth = if (gesture == Gesture.ERASE) ERASE_RADIUS_PX * 2 else 2f
             livePath.reset()
@@ -521,6 +692,83 @@ class NotesCanvasView(
             val rest = afterDraw
             afterDraw = emptyList()
             post { rest.forEach(::step) }
+        }
+    }
+
+    /** A stroke at its width, muted during playback after the position (F17-FR7); a stroke
+     *  with style ids in its own e-ink grey (F21-FR6). */
+    private fun drawStroke(canvas: Canvas, s: DrawStroke, z: Float, v: Viewport) {
+        val muted = Emphasis.muted(s, positionMs)
+        val color = when {
+            muted -> MUTED
+            s.highlighter -> Color.argb(96, 0, 0, 0)
+            s.style != null -> StylePalette.EINK.stroke(s.style.color)
+            else -> s.argb or 0xFF000000.toInt()
+        }
+        inkPaint.color = color; dotPaint.color = color
+        inkPaint.strokeWidth = (s.width * z).coerceAtLeast(1f)
+        val pr = s.pressure
+        if (s.pts.size == 2) {
+            val w = if (pr != null) PressureWidth.of(s.width, pr[0]) * z else inkPaint.strokeWidth
+            canvas.drawCircle(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat(),
+                maxOf(w, 1f) / 2, dotPaint)
+            return
+        }
+        if (pr != null) {
+            // F21-FR7: each segment as wide as the pen pressed there.
+            var k = 0
+            while (k + 3 < s.pts.size) {
+                inkPaint.strokeWidth = (PressureWidth.of(s.width, (pr[k / 2] + pr[k / 2 + 1]) / 2) * z).coerceAtLeast(1f)
+                canvas.drawLine(v.screenX(s.pts[k].toDouble()).toFloat(), v.screenY(s.pts[k + 1].toDouble()).toFloat(),
+                    v.screenX(s.pts[k + 2].toDouble()).toFloat(), v.screenY(s.pts[k + 3].toDouble()).toFloat(), inkPaint)
+                k += 2
+            }
+            return
+        }
+        drawPath.reset()
+        drawPath.moveTo(v.screenX(s.pts[0].toDouble()).toFloat(), v.screenY(s.pts[1].toDouble()).toFloat())
+        var i = 2
+        while (i + 1 < s.pts.size) {
+            drawPath.lineTo(v.screenX(s.pts[i].toDouble()).toFloat(), v.screenY(s.pts[i + 1].toDouble()).toFloat()); i += 2
+        }
+        canvas.drawPath(drawPath, inkPaint)
+    }
+
+    private val handleFill = Paint().apply { style = Paint.Style.FILL; color = Color.WHITE; isAntiAlias = true }
+    private val handleStroke = Paint().apply { style = Paint.Style.STROKE; color = Color.BLACK; strokeWidth = 2f; isAntiAlias = true }
+
+    /** F21-FR5: the one selected thing's handles: squares at the corners (or a line's ends)
+     *  and a circle for rotating, joined to the top edge. */
+    private fun drawHandles(canvas: Canvas) {
+        val hs = handles()
+        if (hs.isEmpty()) return
+        val v = viewport
+        val r = hs.firstOrNull { it.kind == Handles.Kind.ROTATE }
+        if (r != null) {
+            val tl = hs[0]; val tr = hs[1]
+            canvas.drawLine(v.screenX((tl.x + tr.x) / 2).toFloat(), v.screenY((tl.y + tr.y) / 2).toFloat(),
+                v.screenX(r.x).toFloat(), v.screenY(r.y).toFloat(), handleStroke)
+        }
+        for (h in hs) {
+            val x = v.screenX(h.x).toFloat(); val y = v.screenY(h.y).toFloat()
+            if (h.kind == Handles.Kind.ROTATE) {
+                canvas.drawCircle(x, y, HANDLE_PX, handleFill); canvas.drawCircle(x, y, HANDLE_PX, handleStroke)
+            } else {
+                canvas.drawRect(x - HANDLE_PX, y - HANDLE_PX, x + HANDLE_PX, y + HANDLE_PX, handleFill)
+                canvas.drawRect(x - HANDLE_PX, y - HANDLE_PX, x + HANDLE_PX, y + HANDLE_PX, handleStroke)
+            }
+        }
+    }
+
+    /** F21-FR10: corner brackets round the target cell. */
+    private fun brackets(canvas: Canvas, r: WorldRect) {
+        val v = viewport
+        val l = v.screenX(r.left).toFloat(); val t = v.screenY(r.top).toFloat()
+        val rr = v.screenX(r.right).toFloat(); val b = v.screenY(r.bottom).toFloat()
+        val k = minOf(BRACKET_PX, (rr - l) / 3, (b - t) / 3)
+        for ((x, y, dx, dy) in listOf(listOf(l, t, 1f, 1f), listOf(rr, t, -1f, 1f), listOf(l, b, 1f, -1f), listOf(rr, b, -1f, -1f))) {
+            canvas.drawLine(x, y, x + dx * k, y, handleStroke)
+            canvas.drawLine(x, y, x, y + dy * k, handleStroke)
         }
     }
 
@@ -540,8 +788,8 @@ class NotesCanvasView(
     private val thumbInk = Paint().apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; isAntiAlias = true }
     private val thumbDot = Paint().apply { style = Paint.Style.FILL; isAntiAlias = true }
 
-    /** Every stroke, fetched for the thumbnail; null until fetched or once the ink changes. */
-    private var thumbStrokes: List<DrawStroke>? = null
+    /** Everything, fetched for the thumbnail; null until fetched or once the ink changes. */
+    private var thumbStrokes: List<DrawEntry>? = null
     private var thumbFetching = false
     private var thumb: Bitmap? = null
     /** What [thumb] was drawn for: its size and fit (the bar's side moves it, not its fit). */
@@ -557,7 +805,7 @@ class NotesCanvasView(
             } else {
                 if (!thumbFetching) {
                     thumbFetching = true
-                    host.allStrokes(b) { all -> thumbFetching = false; thumbStrokes = all; thumbKey = null; if (minimapShown()) invalidate() }
+                    host.allEntries(b) { all -> thumbFetching = false; thumbStrokes = all; thumbKey = null; if (minimapShown()) invalidate() }
                 }
                 return thumb
             }
@@ -570,15 +818,22 @@ class NotesCanvasView(
         return thumb
     }
 
-    /** The strokes themselves, scaled into the thumbnail; highlighter as a light grey band. */
-    private fun renderThumb(f: MinimapFrame, strokes: List<DrawStroke>): Bitmap {
+    /** The strokes themselves, scaled into the thumbnail; highlighter as a light grey band;
+     *  items as the painter draws them (F21). */
+    private fun renderThumb(f: MinimapFrame, entries: List<DrawEntry>): Bitmap {
         val bmp = Bitmap.createBitmap(f.width.toInt().coerceAtLeast(1), f.height.toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
         c.drawColor(Color.WHITE)
         val v = f.fit
         val z = v.zoom.toFloat()
         val path = Path()
-        for (s in strokes) {
+        val thumbPainter = ItemPainter(images)
+        val ctx = ItemPainter.Context(v, StylePalette.EINK)
+        for (e in entries) {
+            val s = when (e) {
+                is DrawEntry.Ink -> e.stroke
+                is DrawEntry.Thing -> { thumbPainter.draw(c, e.item, ctx); continue }
+            }
             if (s.pts.size < 2) continue
             val color = if (s.highlighter) Color.rgb(205, 205, 205) else s.argb or 0xFF000000.toInt()
             thumbInk.color = color; thumbDot.color = color
@@ -632,6 +887,15 @@ class NotesCanvasView(
         const val ERASE_RADIUS_PX = 22f
         const val LISTEN_RADIUS_PX = 24f
         const val HIGHLIGHT_FACTOR = 3.3f
+        /** F21-FR2 [Recommendation]: a drag's preview redraws at most this often. */
+        const val PREVIEW_MS = 100L
+        /** F21-FR8: a shorter drag makes no shape. */
+        const val MIN_SHAPE_PX = 8f
+        /** Half a handle's side on screen. */
+        const val HANDLE_PX = 9f
+        /** F21-FR10: how near a row edge the pen must land to drag it. */
+        const val ROW_EDGE_PX = 10.0
+        const val BRACKET_PX = 16f
         val MUTED = Color.rgb(170, 170, 170)
     }
 }

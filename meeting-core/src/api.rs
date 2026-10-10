@@ -343,6 +343,11 @@ pub fn ink_stroke(id: &str, layer: &str, tool: i32, width: f32, xypt: &[f32]) ->
     with_app(|app| app.ink_stroke_json(id, layer, tool, width, xypt))
 }
 
+/// `nativeInkStrokeStyled(id, tool, styleJson, xypt)` (F21-FR7): a canvas stroke with a style.
+pub fn ink_stroke_styled(id: &str, tool: i32, style: &str, xypt: &[f32]) -> String {
+    with_app(|app| app.ink_stroke_styled_json(id, tool, style, xypt))
+}
+
 /// `nativeInkErase(id, layer, xy, r)`: an eraser sweep, one undo step.
 pub fn ink_erase(id: &str, layer: &str, xy: &[f32], r: f32) -> String {
     with_app(|app| app.ink_erase_json(id, layer, xy, r))
@@ -371,6 +376,52 @@ pub fn ink_delete(id: &str, layer: &str, ids: &str) -> String {
 /// `nativeInkStrokesForDraw(id, layer, x0, y0, x1, y1)`: the strokes in a world rectangle.
 pub fn ink_strokes(id: &str, layer: &str, rect: [f32; 4]) -> String {
     with_app(|app| app.ink_strokes_json(id, layer, rect))
+}
+
+/// `nativeCanvasForDraw(id, x0, y0, x1, y1)` (F21-FR1): the canvas's strokes and items in a
+/// world rectangle, in paint order.
+pub fn canvas_for_draw(id: &str, rect: [f32; 4]) -> String {
+    with_app(|app| app.canvas_for_draw_json(id, rect))
+}
+
+/// `nativeCanvasEdit(id, opJson)` (F21): one gesture on the canvas, one undo step.
+pub fn canvas_edit(id: &str, op: &str) -> String {
+    with_app(|app| app.canvas_edit_json(id, op))
+}
+
+/// `nativeCanvasHit(id, x, y, r)` (F21-FR10, FR15): the topmost stroke or item at a point.
+pub fn canvas_hit(id: &str, x: f32, y: f32, r: f32) -> String {
+    with_app(|app| app.canvas_hit_json(id, x, y, r))
+}
+
+/// `nativeCanvasImportImage(id, srcPath, pxW, pxH, viewJson)` (F21-FR11): check, copy, place.
+pub fn canvas_import_image(id: &str, src: &str, w: i32, h: i32, view: &str) -> String {
+    with_app(|app| app.canvas_import_image_json(id, src, w, h, view))
+}
+
+/// `nativeCanvasList(id)` (F21-FR12): the meeting's canvases.
+pub fn canvas_list(id: &str) -> String {
+    with_app(|app| app.canvas_list_json(id))
+}
+
+/// `nativeCanvasNew(id)` (F21-FR12): a new empty canvas, shown.
+pub fn canvas_new(id: &str) -> String {
+    with_app(|app| app.canvas_new_json(id))
+}
+
+/// `nativeCanvasShow(id, n)` (F21-FR12): show canvas `n`.
+pub fn canvas_show(id: &str, n: i32) -> String {
+    with_app(|app| app.canvas_show_json(id, n))
+}
+
+/// `nativeCanvasLinkTarget(id, ref)` (F21-FR13): where a link badge goes.
+pub fn canvas_link_target(id: &str, r: &str) -> String {
+    with_app(|app| app.canvas_link_target_json(id, r))
+}
+
+/// `nativeCanvasPdfPlan(id)` (F21-FR14): the notes PDF's path and pages.
+pub fn canvas_pdf_plan(id: &str) -> String {
+    with_app(|app| app.canvas_pdf_plan_json(id))
 }
 
 /// `nativeInkHit(id, layer, x, y, r)` (F17-FR7): Listen's tap on ink.

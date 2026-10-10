@@ -122,13 +122,18 @@ object NativeBridge {
     // Short calls: run them on CoreJobs.
 
     /** Opens [id]'s canvas: `{view: {cx, cy, zoom}|null, clock: "recording-ms", bounds:
-     *  [x0, y0, x1, y1]|null, strokes}`. A damaged canvas file is an `{error}`, never saved over. */
+     *  [x0, y0, x1, y1]|null, strokes, items}`. A damaged canvas file is an `{error}`, never saved over. */
     external fun nativeNotesOpen(id: String): String
 
     /** F17-FR4: one whole stroke, `[x, y, pressure, t]` per point, `t` recording-clock ms or -1
      *  (untimed); [tool] 0 pen, 1 highlighter. The first stroke names the notes in the sidecar.
      *  `{strokeId, bbox, atMs}`. Kept in memory until [nativeInkSave]. */
     external fun nativeInkStroke(id: String, layer: String, tool: Int, width: Float, pointsXypt: FloatArray): String
+
+    /** F21-FR7: a canvas stroke with a style (`{color, opacity, size, …}`): the Pen's true colour
+     *  goes in `.inkbin`, its width is the size's, its style ids go in `items.json`; [tool] 0
+     *  pen, 1 highlighter (unchanged). `{strokeId, bbox, atMs}`. */
+    external fun nativeInkStrokeStyled(id: String, tool: Int, styleJson: String, pointsXypt: FloatArray): String
 
     /** An eraser sweep through `[x, y, …]` with radius [r], one undo step. `{erased: [id], bbox}`. */
     external fun nativeInkErase(id: String, layer: String, pointsXy: FloatArray, r: Float): String
@@ -151,6 +156,48 @@ object NativeBridge {
     /** The strokes meeting a world rectangle, in paint order: `{strokes: [{id, tool, width,
      *  color: [r, g, b, a], atMs, pts: [x, y, …]}], bounds, canUndo, canRedo}`. */
     external fun nativeInkStrokesForDraw(id: String, layer: String, x0: Float, y0: Float, x1: Float, y1: Float): String
+
+    // Notes tools as sn-canvas (F21, ADR D21). The canvas is a scene: strokes and items with
+    // one undo history, owned by the core; `ref` is "s:<strokeId>" or "i:<itemId>".
+
+    /** F21-FR1: the canvas's strokes and items meeting a world rectangle, in paint order, bound
+     *  arrow ends resolved: `{entries: [{ref, stroke: {…}} | {ref, item: {…}}], bounds,
+     *  canUndo, canRedo, selection: [ref], selectionBounds, itemsOk}`. */
+    external fun nativeCanvasForDraw(id: String, x0: Float, y0: Float, x1: Float, y1: Float): String
+
+    /** F21: one gesture on the canvas (`{op, …}`: `clear`, `restoreCleared`, …), one undo step:
+     *  `{dirty: [x0, y0, x1, y1]|null, selection: [ref], canUndo, canRedo}` or `{error}`. */
+    external fun nativeCanvasEdit(id: String, opJson: String): String
+
+    /** F21-FR10/FR15: the topmost stroke or item within [r] of a world point: `{ref|null, cell:
+     *  {row, col}|null, atMs|null}`, and for a timed one where Listen starts (`seekMs`, `segIndex`,
+     *  `segOffsetMs`, `lineN`). */
+    external fun nativeCanvasHit(id: String, x: Float, y: Float, r: Float): String
+
+    /** F21-FR11: insert the image at [srcPath] ([pxW] × [pxH] from its header): the core checks
+     *  it (extension against first bytes, ≤ 20 MB, ≤ 50 MP, no links), copies it into the notes
+     *  folder's `images/` and places it in the view (`{rect: [x0, y0, x1, y1], recMs}`), one undo
+     *  step. `{itemId, dirty, selection, canUndo, canRedo}` or `{error}`. */
+    external fun nativeCanvasImportImage(id: String, srcPath: String, pxW: Int, pxH: Int, viewJson: String): String
+
+    /** F21-FR12: the meeting's canvases: `{current, canvases: [{n, createdAt, strokes, items}]}`. */
+    external fun nativeCanvasList(id: String): String
+
+    /** F21-FR12: saves the canvas shown and shows a new, empty one (not an undo step): `{n}`. */
+    external fun nativeCanvasNew(id: String): String
+
+    /** F21-FR12: saves the canvas shown and shows canvas [n]; later ink and edit calls act on it.
+     *  As [nativeNotesOpen], with `n` and `defaultStyle`. */
+    external fun nativeCanvasShow(id: String, n: Int): String
+
+    /** F21-FR13: where a link badge on [ref] goes: `{meetingId, exists, missing}`, or `{kind,
+     *  followed: false}` for a link this build doesn't follow, or `{meetingId: null}`. */
+    external fun nativeCanvasLinkTarget(id: String, ref: String): String
+
+    /** F21-FR14: the notes PDF's plan: `{path, tmpPath, imagesDir, pages: [{n, widthPt, heightPt,
+     *  viewport: [x, y, scale], content: [entries as nativeCanvasForDraw's]}]}`, one page per
+     *  canvas. The shell draws it off the UI thread, writes tmpPath, fsyncs and renames. */
+    external fun nativeCanvasPdfPlan(id: String): String
 
     /** F17-FR7 (Listen): the topmost stroke within [r] of a world point. Timed: `{strokeId, atMs,
      *  seekMs, segIndex, segOffsetMs, lineN}` (seekMs = max(0, t − 2 s)); untimed `{strokeId,

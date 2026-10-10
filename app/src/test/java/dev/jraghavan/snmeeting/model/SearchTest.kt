@@ -74,6 +74,9 @@ class SearchTest {
         assertEquals(SearchModel.Open.Meeting(id, 759_000, "notes", box), SearchModel.open(m, hit("notes", 761_000)))
         assertEquals(SearchModel.Open.Meeting(id, 0, "notes", box), SearchModel.open(m, hit("notes", 500)))
         assertEquals(SearchModel.Open.Meeting(id, null, "notes", box), SearchModel.open(m, hit("notes", null)))
+        // F21-FR15: a notes hit on canvas 2 opens canvas 2.
+        assertEquals(SearchModel.Open.Meeting(id, null, "notes", box, canvas = 2),
+            SearchModel.open(m, hit("notes", null).copy(canvas = 2)))
         assertEquals(SearchModel.Open.Meeting(id, 761_000, "transcript"), SearchModel.open(m, hit("transcript", 761_000)))
         assertEquals(SearchModel.Open.Meeting(id, null, "summary"), SearchModel.open(m, hit("minutes", null)))
         assertEquals(SearchModel.Open.Meeting(id, null, "todos"), SearchModel.open(m, hit("todo", null)))

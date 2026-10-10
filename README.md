@@ -74,17 +74,26 @@ I wanted to write while I listen, and later tap a line of my handwriting to hear
 - **Notes | Minutes.** The meeting page has two tabs. A meeting I'm recording opens on **Notes**; an earlier one opens on **Minutes**. While recording, the top right shows the timer.
 - **The canvas has no edges.** I write with the pen. A finger never draws: I drag with one finger to move around and pinch to zoom from 5% to 2000%. The pill at the top left has **Fit**, **100%**, **50%** and **25%**, and **MAP** opens the minimap, which shows all my ink and where I am; I tap it, or drag its rectangle, to go there. A resting palm leaves no mark.
 - **The tool bar** sits on the right edge (or the left, in Settings → Notes) and never covers the page:
-  - **Pen** writes, with Supernote's own pen engine, so it keeps up like native notes. Turning the pen over erases, whatever tool is chosen.
-  - **Highlighter** draws a light band, **Eraser** removes whole strokes it touches, and **Lasso** circles ink so I can drag it somewhere else.
-  - **Undo** and **Redo** step back and forward; an eraser sweep or a lasso move is one step.
-  - **Listen** (the speaker) is for afterwards: with it chosen, tapping my ink, with the pen or a finger, plays the recording from two seconds before I wrote it, and the transcript strip shows the line being said. It is off while recording.
-  - **· · ·** has Focus (hides the strip), Fit and a full refresh of the screen. **?** shows the hints again.
+
+  ![Notes: what every button does](docs/images/notes-buttons.png)
+
+  - **Select** taps a stroke or a shape to select it (its group comes with it), drags a box on empty page to select everything it touches, and drags the selection to move it. One thing selected shows handles to resize and rotate it (a line or arrow shows its two ends).
+  - **Pen** writes with Supernote's own pen engine, so it keeps up like native notes, in the colour and size of the current style, as wide as I press. Turning the pen over erases, whatever tool is chosen.
+  - **Highlighter** draws a light band. **Eraser** removes whole strokes and shapes it touches; tapping **Eraser** again offers **Clear canvas**, which asks first, and **Undo** brings everything back. **Lasso** circles ink (and shapes inside the loop) so I can drag it somewhere else.
+  - **Shapes ▸** opens rectangle, ellipse, line and arrow beside the bar; I drag with the pen to draw one. An arrow drawn from or to a shape stays attached and follows it.
+  - **Insert ▸** opens text box, sticky note, table and image. A pen tap places a text box or note and opens the keyboard; a drag outlines a table (up to 12 × 8), and a tap on a cell types into it. **Image** lists the PNG, JPG and WebP files in Pictures, Download, INBOX, SCREENSHOT and EXPORT; the picture is copied beside the meeting.
+  - **Style ●** opens the colours (twelve, each its own grey on the screen, true colour in the PDF), opacity, fill, outline and size. A pick restyles what is selected and becomes the default.
+  - With something selected, the middle of the bar shows its actions instead: **Delete**, **Duplicate**, **Group** or **Ungroup**, **Front**, **Back**, **Link** (to another meeting: a chain badge appears, and tapping it opens that meeting), **Style**, **Table** (add or remove the row or column I am in) and **Done**.
+  - **Undo** and **Redo** step back and forward through strokes and shapes alike; each gesture is one step.
+  - **Listen** (the speaker) is for afterwards: with it chosen, tapping my ink, a shape or a text box, with the pen or a finger, plays the recording from two seconds before I wrote it, and the transcript strip shows the line being said. It is off while recording.
+  - **⋮** has front and back, zoom to fit or 100 %, **Clear canvas** (and **Restore cleared canvas**, even after a restart), **New canvas** (a fresh page in the same meeting), **Canvases…**, **Export to PDF** (`<meeting>.notes.pdf`, one page per canvas, in colour), Focus (hides the strip) and a full refresh of the screen. **?** shows the hints again.
   - **› ‹** folds the bar into a thin strip that keeps the timer, **Mark** and **Stop**; the choice sticks for every meeting.
   - **Mark** stamps the moment and puts a small ◆ beside my last stroke; marks show in the transcript and go with the minutes. **Stop** ends the recording.
+- Panels open beside the bar, one at a time, and the pen never inks on them. A finger only ever pans and zooms.
 - **The strip** along the bottom shows the last three lines of the transcript as they arrive, about twice a minute. Tapping it opens the whole transcript over the lower half; tapping again closes it.
-- **The Minutes tab** fills in once, when I stop: the summary, the decisions and the to-dos, from the transcript, my marks and (if I agree the first time) images of my notes. I can tap the summary, a decision or a section to correct it, and my corrections survive **Summarise again**. At the end there is space to write on the minutes themselves.
+- **The Minutes tab** fills in once, when I stop: the summary, the decisions and the to-dos, from the transcript, my marks and (if I agree the first time) images of my handwriting and the text I typed on the canvas. Pictures I insert are never sent. I can tap the summary, a decision or a section to correct it, and my corrections survive **Summarise again**. At the end there is space to write on the minutes themselves.
 - An empty page opens with hand-drawn hints pointing at each control; touching the page or choosing a tool puts them away.
-- My ink is saved beside the meeting in `<meeting>.notes/`, so Partner syncs it with everything else. Nothing the AI returns ever changes it.
+- My ink is saved beside the meeting in `<meeting>.notes/` (shapes, text and the paint order in `items.json`, extra canvases in `canvas-2/` and on), so Partner syncs it with everything else. Nothing the AI returns ever changes it. Typed text is searchable straight away, at the moment I typed it.
 
 ### Transcripts, summaries and to-dos
 - **Transcribe** picks a transcription model your account can use, and stores each segment's text as it arrives. A cancelled or interrupted job resumes where it stopped.

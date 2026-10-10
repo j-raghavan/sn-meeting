@@ -27,14 +27,20 @@ object Hints {
     /** One hint: its caption lines, its control's id, and where the caption goes. */
     data class Spec(val id: String, val lines: List<String>, val side: Side, val reach: Double = 56.0)
 
-    /** The hints, one per control (F17-FR14's list), in the order they are drawn. */
+    /** The hints, one per control (F17-FR14's list, with F21-FR16's Select, Shapes ▸,
+     *  Insert ▸, Style ●, ⋮ and "tap Eraser again to clear"), in the order they are drawn. */
     val ALL = listOf(
+        Spec("select", listOf("Select, move", "and resize"), Side.LEFT),
         Spec("pen", listOf("Write with", "the pen"), Side.LEFT),
         Spec("highlighter", listOf("Highlight"), Side.LEFT),
-        Spec("eraser", listOf("Erase (or flip", "the pen over)"), Side.LEFT),
+        Spec("eraser", listOf("Erase (or flip the pen);", "tap again to clear"), Side.LEFT),
         Spec("lasso", listOf("Circle ink", "to move it"), Side.LEFT),
+        Spec("shapes", listOf("Shapes and arrows", "that stay attached"), Side.LEFT),
+        Spec("insert", listOf("Text, sticky notes,", "tables, images"), Side.LEFT),
+        Spec("style", listOf("Colour, fill", "and size"), Side.LEFT),
         Spec("undo", listOf("Undo & redo"), Side.LEFT),
         Spec("listen", listOf("Tap your ink", "to hear it"), Side.LEFT),
+        Spec("more", listOf("Canvases, PDF,", "clear, zoom"), Side.LEFT),
         Spec("mark", listOf("Mark this", "moment"), Side.LEFT),
         Spec("stop", listOf("Stop recording"), Side.LEFT),
         Spec("handle", listOf("Fold the tools", "away"), Side.LEFT),

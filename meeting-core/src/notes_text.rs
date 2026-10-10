@@ -23,6 +23,9 @@ pub struct Region {
     pub rect: Rect,
     #[serde(default)]
     pub lines: Vec<Line>,
+    /// F21-FR15: the canvas the region was cut from (1, the first, is left out of the file).
+    #[serde(default = "first_canvas", skip_serializing_if = "is_first_canvas")]
+    pub canvas: u32,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -43,6 +46,15 @@ pub struct Line {
     pub at_ms: Option<u64>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+fn first_canvas() -> u32 {
+    1
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if takes a reference
+fn is_first_canvas(n: &u32) -> bool {
+    *n == 1
 }
 
 /// The notes folder of meeting `id` (Data Model: `meeting-YYYYMMDD-HHMMSS.notes`).
@@ -83,6 +95,8 @@ pub const MAX_LINES: usize = 200;
 pub struct RegionImage {
     pub rect: Rect,
     pub png: Vec<u8>,
+    /// F21-FR15: the canvas it was cut from.
+    pub canvas: u32,
 }
 
 /// A stroke's world bounding box and recording-clock time (`None` = untimed, F17-FR4).
@@ -93,6 +107,8 @@ pub struct StrokeBox {
     pub at_ms: Option<u64>,
     /// Written since the last recognition (`notesRecognisedAt`): "unrecognised" (F19-FR7).
     pub new: bool,
+    /// F21-FR15: the canvas the stroke is on (stroke ids are per canvas).
+    pub canvas: u32,
 }
 
 /// What the Stop call sends of the notes: the regions, and the strokes to map lines back to.
@@ -100,6 +116,9 @@ pub struct StrokeBox {
 pub struct NotesInput {
     pub regions: Vec<RegionImage>,
     pub strokes: Vec<StrokeBox>,
+    /// F21-FR15: the typed text (text boxes, sticky notes, table cells) in reading order; it
+    /// goes as text in the same call, never recognised.
+    pub typed: Vec<String>,
 }
 
 /// The function behind a [`NotesSource`].
@@ -130,9 +149,9 @@ impl NotesSource {
         NotesSource(std::sync::Arc::new(|_, _| None))
     }
 
-    /// The notes to send for the meeting in `dir`, if any.
+    /// The notes to send for the meeting in `dir`, if any (regions or typed text).
     pub fn get(&self, dir: &Path, sc: &crate::sidecar::Sidecar) -> Option<NotesInput> {
-        (self.0)(dir, sc).filter(|n| !n.regions.is_empty())
+        (self.0)(dir, sc).filter(|n| !n.regions.is_empty() || !n.typed.is_empty())
     }
 }
 
@@ -248,6 +267,7 @@ pub fn covered(stroke: Rect, line: Rect) -> f64 {
 /// stroke is kept, untimed.
 pub fn map_region(
     region: u32,
+    canvas: u32,
     rect: Rect,
     lines: &[(String, Rect)],
     strokes: &[StrokeBox],
@@ -258,7 +278,7 @@ pub fn map_region(
             let bbox = to_world(rect, *b);
             let mine: Vec<&StrokeBox> = strokes
                 .iter()
-                .filter(|s| covered(s.bbox, bbox) >= STROKE_IN_LINE)
+                .filter(|s| s.canvas == canvas && covered(s.bbox, bbox) >= STROKE_IN_LINE)
                 .collect();
             Line {
                 text: text.clone(),
@@ -273,6 +293,7 @@ pub fn map_region(
         region,
         rect,
         lines,
+        canvas,
         extra: Map::new(),
     }
 }
@@ -292,15 +313,16 @@ fn contains(r: Rect, p: (f64, f64)) -> bool {
     p.0 >= r[0] && p.0 <= r[2] && p.1 >= r[1] && p.1 <= r[3]
 }
 
-/// F19-FR7: the rectangles among `rects` that hold a stroke written since recognition.
-pub fn with_new_strokes(rects: &[Rect], strokes: &[StrokeBox]) -> Vec<usize> {
+/// F19-FR7: the rectangles among `rects` (each on its canvas) that hold a stroke written
+/// since recognition.
+pub fn with_new_strokes(rects: &[(u32, Rect)], strokes: &[StrokeBox]) -> Vec<usize> {
     rects
         .iter()
         .enumerate()
-        .filter(|(_, r)| {
+        .filter(|(_, (c, r))| {
             strokes
                 .iter()
-                .any(|s| s.new && contains(**r, centre(s.bbox)))
+                .any(|s| s.new && s.canvas == *c && contains(*r, centre(s.bbox)))
         })
         .map(|(i, _)| i)
         .collect()
@@ -309,7 +331,7 @@ pub fn with_new_strokes(rects: &[Rect], strokes: &[StrokeBox]) -> Vec<usize> {
 /// F19-FR7: the stored regions written on since they were recognised; their hits say "(notes
 /// changed since recognised)".
 pub fn changed_regions(stored: &[Region], strokes: &[StrokeBox]) -> Vec<u32> {
-    let rects: Vec<Rect> = stored.iter().map(|r| r.rect).collect();
+    let rects: Vec<(u32, Rect)> = stored.iter().map(|r| (r.canvas, r.rect)).collect();
     with_new_strokes(&rects, strokes)
         .into_iter()
         .map(|i| stored[i].region)
@@ -411,12 +433,14 @@ mod tests {
         );
         let strokes = [
             StrokeBox {
+                canvas: 1,
                 id: 1,
                 bbox: [4.0, 0.0, 14.0, 10.0],
                 at_ms: Some(9),
                 new: false,
             }, // 60 % in
             StrokeBox {
+                canvas: 1,
                 id: 2,
                 bbox: [6.0, 0.0, 16.0, 10.0],
                 at_ms: Some(1),
@@ -425,6 +449,7 @@ mod tests {
         ];
         let r = map_region(
             3,
+            1,
             [0.0, 0.0, 10.0, 10.0],
             &[("a".into(), [0.0, 0.0, 1.0, 1.0])],
             &strokes,
@@ -457,6 +482,7 @@ mod tests {
     #[test]
     fn new_strokes_mark_their_regions() {
         let r = |n: u32, x: f64| Region {
+            canvas: 1,
             region: n,
             rect: [x, 0.0, x + 10.0, 10.0],
             lines: vec![],
@@ -464,6 +490,7 @@ mod tests {
         };
         let stored = [r(0, 0.0), r(3, 20.0)];
         let s = |x: f64, new: bool| StrokeBox {
+            canvas: 1,
             id: 1,
             bbox: [x, 4.0, x + 2.0, 6.0],
             at_ms: None,

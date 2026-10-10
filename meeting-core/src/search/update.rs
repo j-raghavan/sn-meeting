@@ -79,13 +79,25 @@ fn stamp_of(path: &Path) -> String {
     format!("{ns}:{}", m.len())
 }
 
-/// A meeting's stamp: its sidecar's, its notes text's and its canvas's (new strokes mark
-/// regions "changed since recognised", F19-FR7).
+/// A meeting's stamp: its sidecar's, its notes text's and its canvases' (new strokes mark
+/// regions "changed since recognised", F19-FR7; F21-FR15: typed text is in `items.json`, and
+/// `canvases.json` lists the canvases).
 fn meeting_stamp(dir: &Path, id: &str) -> String {
     let sc = stamp_of(&dir.join(sidecar::sidecar_file_name(id)));
     let notes = stamp_of(&notes_text::path(dir, id));
-    let canvas = stamp_of(&crate::notes::path(dir, id, crate::notes::Layer::Canvas));
-    format!("{sc}|{notes}|{canvas}")
+    let mut out = format!("{sc}|{notes}");
+    out.push('|');
+    out.push_str(&stamp_of(
+        &crate::notes::folder(dir, id).join(crate::notes::CANVASES),
+    ));
+    for (n, _) in crate::notes::read_canvases(dir, id).list {
+        let at = crate::notes::canvas_dir(dir, id, n);
+        out.push('|');
+        out.push_str(&stamp_of(&at.join(crate::notes::CANVAS)));
+        out.push(':');
+        out.push_str(&stamp_of(&at.join(crate::notes::ITEMS)));
+    }
+    out
 }
 
 /// The file of one calendar link's events: `{"events": [EventDoc]}`. M13 writes it.
@@ -326,9 +338,15 @@ impl Searcher {
                 };
                 let notes = notes_text::read(&notes_text::path(&dir, &id)).unwrap_or_default();
                 // F19-FR7: the stored regions holding strokes written since recognition.
-                let strokes = crate::notes::load(&dir, &id, crate::notes::Layer::Canvas)
-                    .map(|l| crate::notes::regions::boxes(&l, crate::notes::recognised_at_ms(&sc)))
-                    .unwrap_or_default();
+                let at = crate::notes::recognised_at_ms(&sc);
+                let mut strokes = Vec::new();
+                let mut typed = Vec::new();
+                for (n, _) in crate::notes::read_canvases(&dir, &id).list {
+                    if let Ok((scene, _)) = crate::notes::load_scene(&dir, &id, n) {
+                        strokes.extend(crate::notes::regions::boxes_on(scene.ink(), at, n));
+                        typed.extend(crate::canvas::text::typed(&scene, n));
+                    }
+                }
                 let changed = notes_text::changed_regions(&notes, &strokes);
                 let start_ms = ms_of(&sc.started_at).unwrap_or_default();
                 let g = Group {
@@ -338,7 +356,8 @@ impl Searcher {
                     start: sc.started_at.clone(),
                     start_ms,
                 };
-                let u = units::meeting_units(&sc, &notes, &changed);
+                let mut u = units::meeting_units(&sc, &notes, &changed);
+                u.extend(units::typed_units(&typed));
                 usize::from(self.with(|ix| ix.put(&g, stamp, &u)).is_ok())
             }
             // The link's old events are already out: they weren't live.

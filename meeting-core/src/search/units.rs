@@ -90,6 +90,35 @@ impl Unit {
     }
 }
 
+/// F21-FR15: typed text (text boxes, sticky notes, table cells) as `Notes` units, indexed
+/// directly with no provider call: `t:<canvas>:<itemId>[:<row>:<col>]`, timed by `recMs`, with
+/// its world box.
+pub fn typed_units(typed: &[crate::canvas::text::Typed]) -> Vec<Unit> {
+    typed
+        .iter()
+        .map(|t| {
+            let mut u = Unit::new(Kind::Notes, t.unit_id.clone(), t.text.clone());
+            u.at_ms = t.at_ms;
+            u.bbox = Some(t.bbox);
+            u
+        })
+        .collect()
+}
+
+/// F21-FR15: the canvas a `Notes` unit is on, from its id (`t:<canvas>:…`, `n:…:c<canvas>`);
+/// `None` for the first canvas or another kind.
+pub fn canvas_of(kind: Kind, unit_id: &str) -> Option<u32> {
+    if kind != Kind::Notes {
+        return None;
+    }
+    let n = if let Some(rest) = unit_id.strip_prefix("t:") {
+        rest.split(':').next()?.parse().ok()?
+    } else {
+        unit_id.rsplit_once(":c")?.1.parse().ok()?
+    };
+    (n != 1).then_some(n)
+}
+
 /// Control characters (the snippet markers among them) never reach the index.
 fn clean(s: &str) -> String {
     s.chars()
@@ -182,7 +211,13 @@ pub fn meeting_units(sc: &Sidecar, notes: &[Region], changed: &[u32]) -> Vec<Uni
     }
     for r in notes {
         for (li, l) in r.lines.iter().enumerate() {
-            let mut u = Unit::new(Kind::Notes, format!("n:{}:{li}", r.region), l.text.clone());
+            // F21-FR15: a line on another canvas than the first names it.
+            let id = if r.canvas == 1 {
+                format!("n:{}:{li}", r.region)
+            } else {
+                format!("n:{}:{li}:c{}", r.region, r.canvas)
+            };
+            let mut u = Unit::new(Kind::Notes, id, l.text.clone());
             u.at_ms = l.at_ms;
             u.region = Some(r.region);
             u.bbox = Some(l.bbox);
@@ -289,6 +324,36 @@ pub fn event_units(e: &EventDoc) -> Vec<Unit> {
 
 #[cfg(test)]
 mod tests {
+    /// F21-FR15: a Notes unit names its canvas when it isn't the first.
+    #[test]
+    fn notes_units_name_their_canvas() {
+        assert_eq!(canvas_of(Kind::Notes, "t:2:abc"), Some(2));
+        assert_eq!(canvas_of(Kind::Notes, "t:1:abc"), None);
+        assert_eq!(canvas_of(Kind::Notes, "n:4:0:c3"), Some(3));
+        assert_eq!(canvas_of(Kind::Notes, "n:4:0"), None);
+        assert_eq!(canvas_of(Kind::Transcript, "t:2:0"), None);
+        assert_eq!(canvas_of(Kind::Notes, "t:x:1"), None);
+        let r = Region {
+            region: 4,
+            rect: [0.0; 4],
+            lines: vec![crate::notes_text::Line {
+                text: "on two".into(),
+                bbox: [0.0; 4],
+                stroke_ids: vec![],
+                at_ms: None,
+                extra: serde_json::Map::new(),
+            }],
+            canvas: 2,
+            extra: serde_json::Map::new(),
+        };
+        let sc: Sidecar = serde_json::from_value(serde_json::json!({"schema": 1,
+            "id": "meeting-20261009-100000", "startedAt": "2026-10-09T10:00:00-07:00",
+            "status": "done"}))
+        .unwrap();
+        let u = meeting_units(&sc, &[r], &[]);
+        assert_eq!(u[0].unit_id, "n:4:0:c2");
+    }
+
     use super::*;
 
     #[test]

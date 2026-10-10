@@ -63,6 +63,7 @@ fn sample() -> Sidecar {
 
 fn notes() -> Vec<Region> {
     vec![Region {
+        canvas: 1,
         region: 1,
         rect: [0.0, 0.0, 10.0, 10.0],
         lines: vec![
