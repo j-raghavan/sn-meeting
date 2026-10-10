@@ -9,7 +9,10 @@ import kotlin.math.hypot
 class HintsTest { // F17-FR14, ported from sn-canvas draw_hints.py
     @Test fun everyControlHasAHint() {
         val ids = Hints.ALL.map { it.id }
-        assertEquals(listOf("pen", "highlighter", "eraser", "lasso", "undo", "listen", "mark", "stop", "handle", "help", "zoom", "map", "strip"), ids)
+        assertEquals(listOf("select", "pen", "highlighter", "eraser", "lasso", "shapes", "insert", "style", "undo", "listen", "more",
+            "mark", "stop", "handle", "help", "zoom", "map", "strip"), ids)
+        // F21-FR16: each new control's hint points at a control the bar names.
+        assertTrue(Hints.ALL.first { it.id == "eraser" }.lines.joinToString(" ").contains("tap again to clear"))
     }
 
     @Test fun theArrowStartsAtTheCaptionAndEndsOnTheControl() {
