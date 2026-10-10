@@ -78,9 +78,6 @@ class MeetingActivity : Activity() {
     // views change, and only when a reply differs (new lines, a new status, the cost).
     private var live: LiveTranscript? = null
     private var liveJson: String? = null
-    private var liveAll = false
-    private var liveLines: LinearLayout? = null
-    private var liveStatus: TextView? = null
     /** F16-FR5: "≈ $0.08 so far" above Mark, redrawn only when a chunk's cost changes it. */
     private var liveCost: TextView? = null
     private var unLive: (() -> Unit)? = null
@@ -219,6 +216,8 @@ class MeetingActivity : Activity() {
                 override fun stop() { if (RecordingService.hub.state is RecState.Recording) RecordingService.stop(this@MeetingActivity) }
             }).also {
                 notesHost.addView(it.view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+                it.liveAvailable = view?.meeting?.nearLive == true
+                live?.let(it::showLive)
                 it.open()
             }
         }
@@ -310,6 +309,8 @@ class MeetingActivity : Activity() {
                     if (LongJobs.lane.isRunning(id)) handler.postDelayed(poll, 1000)
                     handler.removeCallbacks(livePoll)
                     if (recordingLive(r.value)) handler.post(livePoll)
+                    else if (r.value.meeting.nearLive) fetchLive() // a past meeting's lines, for the strip
+                    notes?.liveAvailable = r.value.meeting.nearLive
                 }
                 is CoreResult.Err -> showGone(r.message)
             }
@@ -559,10 +560,6 @@ class MeetingActivity : Activity() {
                 addView(ui.spacer(ui.dim(24)))
                 addView(markRow(), ui.fullWidth())
             }
-            if (recordingLive(v)) {
-                addView(ui.spacer(ui.dim(28)))
-                addView(liveCard())
-            }
             if (m.marks.isNotEmpty() && m.status != Status.RECORDING) {
                 addView(ui.spacer(ui.dim(36)))
                 addView(ui.eyebrowItalic("Marks"))
@@ -708,25 +705,6 @@ class MeetingActivity : Activity() {
 
     private fun recordingLive(v: MeetingView) = v.meeting.status == Status.RECORDING && v.meeting.nearLive
 
-    /**
-     * F15-FR6 / F17-FR6 on today's meeting screen (layout B's strip is M12): the newest three
-     * lines, whole lines only, with "Offline · 4 waiting" or "Transcribing…" at the right.
-     * Tapping it shows every line so far; tapping again, the newest three.
-     */
-    private fun liveCard(): View = ui.card().apply {
-        addView(LinearLayout(this@MeetingActivity).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            addView(ui.eyebrow("Live transcript"), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(ui.eyebrow("", ui.inkSoft).also { liveStatus = it })
-        })
-        addView(LinearLayout(this@MeetingActivity).apply { orientation = LinearLayout.VERTICAL }.also { liveLines = it },
-            ui.fullWidth().apply { topMargin = ui.dim(10) })
-        isClickable = true
-        setOnClickListener { liveAll = !liveAll; showLive() }
-        showLive()
-    }
-
     /** One read of the live transcript; the strip redraws only if it changed. */
     private fun fetchLive() {
         scope.core({ NativeBridge.nativeLiveTranscript(id, 0) }) { json ->
@@ -734,23 +712,14 @@ class MeetingActivity : Activity() {
             liveJson = json
             live = CoreJson.obj(json, LiveTranscript::from).getOrNull() ?: return@core
             showLive()
+            live?.let { notes?.showLive(it) } // F17-FR6: the Notes tab's strip
         }
     }
 
+    /** F16-FR5: the cost line, redrawn only when its text changes (the strip is the Notes tab's). */
     private fun showLive() {
-        val t = live
-        t?.soFar?.uppercase()?.let { cost -> if (liveCost?.text?.toString() != cost) liveCost?.text = cost }
-        val box = liveLines ?: return
-        liveStatus?.text = t?.status.orEmpty().uppercase()
-        box.removeAllViews()
-        val lines = t?.shown(liveAll).orEmpty()
-        if (lines.isEmpty()) {
-            box.addView(ui.note(LiveTranscript.EMPTY, 15f, ui.textMuted))
-            return
-        }
-        lines.forEach { l ->
-            box.addView(ui.body(l.text, 17f).apply { setLineSpacing(0f, 1.3f) }, ui.fullWidth().apply { topMargin = ui.dim(6) })
-        }
+        live?.soFar?.uppercase()?.let { cost -> if (liveCost?.text?.toString() != cost) liveCost?.text = cost }
+        if (view?.meeting?.nearLive == true) live?.soFar?.let { notes?.bar?.showCost(it) }
     }
 
     /** F7-FR5: an empty title returns the meeting to untitled; the next summary may name it. */

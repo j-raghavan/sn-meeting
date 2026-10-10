@@ -113,10 +113,31 @@ class NotesPage(
             Gravity.TOP or Gravity.START).apply { topMargin = ui.dim(12); marginStart = ui.dim(12) })
     }
 
-    /** The canvas column (the strip joins it in F17-FR6). */
+    /** F17-FR6: the 3-line transcript strip; tapping it opens every line over the lower half. */
+    val strip: TranscriptStrip = TranscriptStrip(a, ui) { showStrip(strip.state.toggled()) }
+
+    /** The canvas column: the canvas over the strip. */
     val column = LinearLayout(a).apply {
         orientation = LinearLayout.VERTICAL
         addView(canvasFrame, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        addView(strip.view, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+    }
+
+    /** A meeting with near-live lines has a strip; a Standard one's transcript is on Minutes. */
+    var liveAvailable = false
+        set(v) { field = v; showStrip(strip.state) }
+
+    /** New lines or a new status from the core (about twice a minute): the strip redraws only if they change it. */
+    fun showLive(t: dev.jraghavan.snmeeting.model.LiveTranscript) = showStrip(strip.state.copy(transcript = t))
+
+    /** Draw [next]; opened, the strip takes the lower half of the column, its ink above still shown. */
+    fun showStrip(next: StripModel) {
+        val wasOpen = strip.state.open
+        strip.show(next.copy(focus = prefs.focus || !liveAvailable))
+        if (next.open != wasOpen) {
+            val h = if (next.open) column.height / 2 else LinearLayout.LayoutParams.WRAP_CONTENT
+            strip.view.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, h)
+        }
     }
 
     /** F17-FR2: the docked bar, on the canvas's right (or left) edge, never over it. */
@@ -174,7 +195,12 @@ class NotesPage(
         android.app.AlertDialog.Builder(a, dev.jraghavan.snmeeting.R.style.InkDialog).setTitle("Notes")
             .setItems(items) { _, i ->
                 when (i) {
-                    0 -> { prefs = prefs.copy(focus = !prefs.focus); host.savePrefs(NotesPatch.focus(prefs.focus)); refreshBar() }
+                    0 -> {
+                        prefs = prefs.copy(focus = !prefs.focus)
+                        host.savePrefs(NotesPatch.focus(prefs.focus))
+                        showStrip(strip.state) // F17-AC8: hidden, or back with the newest lines
+                        refreshBar()
+                    }
                     1 -> canvas.fit()
                     else -> canvas.fullRefresh()
                 }

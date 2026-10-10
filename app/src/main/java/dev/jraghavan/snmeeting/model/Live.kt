@@ -14,8 +14,9 @@ data class Mark(val id: String, val atMs: Long, val label: String?) {
     }
 }
 
-/** One whole line of the live transcript, at its estimated recording-clock time (F15-FR6). */
-data class LiveLine(val n: Int, val atMs: Long, val text: String)
+/** One whole line of the live transcript, at its estimated recording-clock time (F15-FR6);
+ *  [markId] is set on a mark's own line (F15-FR11, F17-FR6). */
+data class LiveLine(val n: Int, val atMs: Long, val text: String, val markId: String? = null)
 
 /**
  * `nativeLiveTranscript` (F15-FR6 / FR7, F17-FR6): the lines so far and where the lane is.
@@ -51,7 +52,7 @@ data class LiveTranscript(
         const val EMPTY = "The transcript fills in about twice a minute."
 
         fun from(o: JSONObject): LiveTranscript = LiveTranscript(
-            lines = o.arr("lines").mapObj { LiveLine(it.int("n") ?: return@mapObj null, it.long("atMs") ?: 0, it.strOr("text", "")) },
+            lines = o.arr("lines").mapObj { LiveLine(it.int("n") ?: return@mapObj null, it.long("atMs") ?: 0, it.strOr("text", ""), it.str("mark")) },
             waiting = o.int("waiting") ?: 0,
             state = o.strOr("state", OFF),
             reason = o.str("reason"),
