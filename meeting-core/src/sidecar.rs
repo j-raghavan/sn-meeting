@@ -71,8 +71,82 @@ pub struct Sidecar {
     /// F15-FR5: the near-live transcription fixed at Record; absent for the Standard recorder.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live: Option<Live>,
+    /// F20-FR3: the meeting's tags, normalised (F20-FR2), each the AI's or the user's.
+    /// Optional (schema 1): absent means none; an entry that isn't a tag is dropped on read.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "lenient_tags"
+    )]
+    pub tags: Vec<Tag>,
+    /// F20-FR3: tags the user removed, so "Summarise again" doesn't bring them back.
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "lenient_names"
+    )]
+    pub tags_user_removed: Vec<String>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+/// F20-FR3: one tag on a meeting.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tag {
+    pub name: String,
+    pub source: TagSource,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+impl Tag {
+    pub fn new(name: &str, source: TagSource) -> Tag {
+        Tag {
+            name: name.to_owned(),
+            source,
+            extra: Extra::new(),
+        }
+    }
+}
+
+/// Who put a tag on: the summarise call, or the user (kept through "Summarise again").
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TagSource {
+    Ai,
+    User,
+}
+
+/// The readable tags, normalised on the way in; a hand-edited entry that isn't a tag, or a
+/// repeat, is dropped rather than making the whole sidecar unreadable.
+fn lenient_tags<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Tag>, D::Error> {
+    let Value::Array(items) = Value::deserialize(d)? else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<Tag> = Vec::new();
+    for v in items {
+        let Ok(mut t) = serde_json::from_value::<Tag>(v) else {
+            continue;
+        };
+        let Some(name) = crate::tags::normalise(&t.name) else {
+            continue;
+        };
+        if out.iter().all(|o| o.name != name) {
+            t.name = name;
+            out.push(t);
+        }
+    }
+    Ok(out)
+}
+
+/// The readable names in a list of names, normalised, without repeats.
+fn lenient_names<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let Value::Array(items) = Value::deserialize(d)? else {
+        return Ok(Vec::new());
+    };
+    Ok(crate::tags::normalise_all(
+        items.iter().filter_map(Value::as_str),
+    ))
 }
 
 /// F15: one ~30 s stretch of the recording (spec Data Model, `chunks`). Times are
@@ -338,6 +412,8 @@ pub fn blank(id: &str) -> Sidecar {
         usage: Vec::new(),
         chunks: Vec::new(),
         live: None,
+        tags: Vec::new(),
+        tags_user_removed: Vec::new(),
         extra: Extra::new(),
     }
 }
