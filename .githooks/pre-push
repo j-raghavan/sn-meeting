@@ -1,0 +1,5 @@
+#!/bin/bash
+# Runs the fast check before every push (owner, 2026-10-10), so CI confirms rather than discovers.
+# Enable once per clone or worktree:  git config core.hooksPath .githooks
+# Skip only in an emergency:          git push --no-verify
+exec "$(git rev-parse --show-toplevel)/scripts/quick-check.sh" --hook
