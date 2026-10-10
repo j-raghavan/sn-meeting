@@ -131,10 +131,13 @@ The core builds and tests on a laptop, and its provider calls are tested against
 You need Rust 1.95.0 (pinned in `rust-toolchain.toml`), `cargo-ndk`, the Android NDK, and JDK 21.
 
 ```bash
+./scripts/quick-check.sh              # before a push: fmt, clippy, the tests that matter, commit messages
 ./scripts/gates.sh                    # fmt, clippy, tests, coverage ≥ 97 %, lint, JVM tests, script checks
 ./buildApk.sh                         # gates, then the Rust core for arm64, then the APK
 ./buildApk.sh --install --device 10.0.0.22:5555
 ```
+
+I run `quick-check.sh` before every push; `git config core.hooksPath .githooks` makes `git push` run it for me. It compiles every test and runs the core's unit tests, the contract and leak tests, the tests that use what I changed, the Kotlin tests when the app changed, and the same commit-message rules as the pull-request check. CI then runs the whole suite with coverage and lint on every push.
 
 `buildApk.sh --help` explains adb over Wi-Fi. The install step refuses to run while a recording is in progress.
 
