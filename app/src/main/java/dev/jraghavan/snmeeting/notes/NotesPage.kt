@@ -80,11 +80,13 @@ class NotesPage(
             return StrokeTimes.recording(SystemClock.uptimeMillis(), SystemClock.elapsedRealtime(), since) { LiveClock.current }
         }
 
-        override fun commitStroke(tool: NoteTool, widthWorld: Float, xypt: FloatArray) = changed {
+        override fun commitStroke(tool: NoteTool, widthWorld: Float, xypt: FloatArray) = changed(
+            if (tool == NoteTool.PEN) InkBake.Event.PEN_STROKE else InkBake.Event.HIGHLIGHTER_STROKE,
+        ) {
             NativeBridge.nativeInkStroke(id, LAYER, tool.core, widthWorld, xypt)
         }
 
-        override fun erase(xy: FloatArray, radiusWorld: Float) = changed(redraw = true) { NativeBridge.nativeInkErase(id, LAYER, xy, radiusWorld) }
+        override fun erase(xy: FloatArray, radiusWorld: Float) = changed(InkBake.Event.ERASE) { NativeBridge.nativeInkErase(id, LAYER, xy, radiusWorld) }
         override fun lasso(xy: FloatArray) = scope.core({ NativeBridge.nativeInkLasso(id, LAYER, xy) }) { json ->
             val o = CoreJson.obj(json) { it }.getOrNull() ?: return@core
             selected = o.optJSONArray("ids")?.toString() ?: "[]"
@@ -96,7 +98,7 @@ class NotesPage(
             scope.core({ NativeBridge.nativeInkMove(id, LAYER, ids, dx, dy) }) { json ->
                 if (reportError(json, "Couldn't move that")) return@core
                 canvas.selection = canvas.selection?.let { WorldRect(it.left + dx, it.top + dy, it.right + dx, it.bottom + dy) }
-                fetch(redraw = true)
+                fetch(InkBake.Event.LASSO_MOVE)
                 scheduleSave()
             }
         }
@@ -106,7 +108,7 @@ class NotesPage(
             hit.lineN?.let { n -> showStrip(strip.state.copy(highlight = n)) }
             host.listenAt(seek, hit.lineN)
         }
-        override fun viewportChanged(v: Viewport) = fetch(redraw = true)
+        override fun viewportChanged(v: Viewport) = fetch(InkBake.Event.VIEWPORT_SETTLED)
     })
 
     private val zoomPill = LinearLayout(a).apply {
@@ -174,8 +176,8 @@ class NotesPage(
     /** F17-FR2: the docked bar, on the canvas's right (or left) edge, never over it. */
     val bar = DockedToolBar(a, ui, object : DockedToolBar.Host {
         override fun onTool(t: NoteTool) { tool = t; canvas.selection = null; canvas.toolChanged(t); refreshBar() }
-        override fun onUndo() = changed(redraw = true) { NativeBridge.nativeInkUndo(id, LAYER) }
-        override fun onRedo() = changed(redraw = true) { NativeBridge.nativeInkRedo(id, LAYER) }
+        override fun onUndo() = changed(InkBake.Event.UNDO_REDO) { NativeBridge.nativeInkUndo(id, LAYER) }
+        override fun onRedo() = changed(InkBake.Event.UNDO_REDO) { NativeBridge.nativeInkRedo(id, LAYER) }
         override fun onCollapse(collapsed: Boolean) {
             host.savePrefs(NotesPatch.collapsed(collapsed))
             prefs = prefs.copy(collapsed = collapsed)
@@ -255,7 +257,7 @@ class NotesPage(
                             Viewport.fitInk(InkView.rect(o.optJSONArray("bounds")), w, h, NotesCanvasView.FIT_PAD)
                         }
                         canvas.setViewport(next)
-                        if (front) canvas.claimPen()
+                        if (front) canvas.claimPen("open")
                     }
                 }
                 is CoreResult.Err -> InkDialog.error(a, "The notes can't be opened", r.message)
@@ -263,12 +265,19 @@ class NotesPage(
         }
     }
 
+    /** inkread's applyToolInkState: re-claim the pen on every resume and focus gain (the
+     *  firmware drops the claim when another window takes focus), while this tab is in front. */
+    fun claim(reason: String) { if (opened && front) canvas.claimPen(reason) }
+
+    /** inkread's onPause: the claim is given back (else the pen inks other apps, #157). */
+    fun pause() = canvas.releasePen()
+
     /** The tab came to the front or went behind the Minutes tab. */
     fun shown(visible: Boolean) {
         if (visible == front) return
         front = visible
         if (!opened) return
-        if (visible) canvas.claimPen() else canvas.releasePen()
+        if (visible) canvas.claimPen("tab") else { canvas.bake(InkBake.Event.PAGE_LEAVING); canvas.releasePen() }
     }
 
     /** The page goes: the pen is let go, the ink saved and the viewport kept. */
@@ -294,11 +303,11 @@ class NotesPage(
         InkDialog.notice(a, NotesNotice.TITLE, text, "OK") { host.savePrefs(NotesPatch.noticeShown(p)) }
     }
 
-    private fun changed(redraw: Boolean = false, call: () -> String) {
+    private fun changed(event: InkBake.Event, call: () -> String) {
         scope.core(call) { json ->
             if (!reportError(json, "Couldn't keep that")) {
                 noticeOnce()
-                fetch(redraw)
+                fetch(event)
                 scheduleSave()
             }
         }
@@ -310,7 +319,7 @@ class NotesPage(
     }
 
     /** The strokes in view (plus a margin, so a small pan needs no fetch). */
-    fun fetch(redraw: Boolean) {
+    fun fetch(event: InkBake.Event?) {
         val v = canvas.viewport
         val r = v.visible(canvas.width.toDouble(), canvas.height.toDouble())
         val m = maxOf(r.width, r.height) / 2
@@ -320,7 +329,7 @@ class NotesPage(
         }) { json ->
             CoreJson.obj(json, InkView::from).getOrNull()?.let {
                 val history = it.canUndo != canvas.inkView.canUndo || it.canRedo != canvas.inkView.canRedo
-                canvas.show(it, redraw)
+                canvas.show(it, event)
                 placeMarks()
                 if (history) refreshBar() // Undo and Redo light up or grey out
             }

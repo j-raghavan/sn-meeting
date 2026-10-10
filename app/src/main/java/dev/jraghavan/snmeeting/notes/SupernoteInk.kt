@@ -47,23 +47,35 @@ class SupernoteInk(private val context: Context) {
         }
     }
 
-    private fun eink(method: String, enable: Boolean) {
-        try {
-            val e = context.getSystemService("eink") ?: return
+    /** One EinkManager call by reflection; whether it went through. */
+    private fun eink(method: String, enable: Boolean): Boolean {
+        return try {
+            val e = context.getSystemService("eink") ?: return false
             e.javaClass.getMethod(method, Boolean::class.javaPrimitiveType).invoke(e, enable)
+            true
         } catch (t: Throwable) {
-            Log.w(TAG, "$method($enable) failed: ${t.javaClass.simpleName}")
+            Log.w(TAG, "$method($enable) failed: ${t.javaClass.simpleName}: ${t.message}")
+            false
         }
     }
 
-    /** Claim the pen for this window, inking everywhere; safe to repeat on every focus gain. */
-    fun setup(): Boolean {
-        if (binder() == null) return false
+    /**
+     * Claim the pen for this window, inking everywhere; safe to repeat on every resume and
+     * focus gain ([reason] is logged). inkread `SupernoteInk.setup`, call for call: app info,
+     * enableFullUiAuto(true), no disabled areas, the needle pen.
+     */
+    fun setup(reason: String = ""): Boolean {
+        val b = binder()
+        if (b == null) {
+            Log.i(TAG, "SupernoteInk: setup failed ($reason): binder=null")
+            return false
+        }
         send(TX_WRITE_APP_INFO) { it.writeInt(0); it.writeInt(0) }
-        eink("enableFullUiAuto", true)
+        val fullAuto = eink("enableFullUiAuto", true)
         send(TX_DISABLE_AREA) { it.writeInt(0) }
         send(TX_PEN) { it.writeInt(PEN_NEEDLE); it.writeInt(SIZE_EMR); it.writeInt(COLOR_BLACK) }
         active = true
+        Log.i(TAG, "SupernoteInk: setup ok ($reason): binder=${b.javaClass.simpleName} alive=${b.isBinderAlive}, fullAuto=$fullAuto")
         return true
     }
 
@@ -75,6 +87,7 @@ class SupernoteInk(private val context: Context) {
     /** Firmware ink on or off over the whole window (off for Eraser, Lasso and Listen). */
     fun setWritable(enable: Boolean) {
         if (!active) return
+        Log.i(TAG, "SupernoteInk: writable=$enable")
         val edge = if (enable) WRITABLE_ON_EDGE else WRITABLE_OFF_EDGE
         send(TX_DISABLE_AREA) { it.writeInt(1); it.writeInt(0); it.writeInt(0); it.writeInt(edge); it.writeInt(edge); it.writeInt(0) }
     }

@@ -105,7 +105,8 @@ class NotesCanvasView(
 
     private val drawPath = Path()
     private val livePath = Path()
-    private val settle = Runnable { invalidate() }
+    /** InkBake's steps still to run once the canvas's redraw is on the panel. */
+    private var afterDraw: List<InkBake.Step> = emptyList()
     private val hideMinimap = Runnable { invalidate() }
 
     private val scale = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -118,18 +119,40 @@ class NotesCanvasView(
         override fun onScaleEnd(d: ScaleGestureDetector) = host.viewportChanged(viewport)
     })
 
-    /** The strokes in view and the history state, from the core: one redraw, or none while
-     *  the firmware's ink shows the stroke just written (it comes when the pen rests). */
-    fun show(next: InkView, redraw: Boolean = true) {
+    /** The strokes in view and the history state, from the core. [event] says whether the
+     *  canvas bakes now (InkBake): a pen stroke never does, its ink stays on the overlay. */
+    fun show(next: InkView, event: InkBake.Event? = InkBake.Event.VIEWPORT_SETTLED) {
         ink = next
-        if (redraw) { clearFirmwareInk(); invalidate() }
+        event?.let(::bake)
+    }
+
+    /** F17-FR4: run InkBake's plan for [e]: draw, then (after that frame) refresh the panel,
+     *  then clear the overlay. Never clear first. */
+    fun bake(e: InkBake.Event) {
+        val steps = InkBake.plan(e, InkBake.overlayFor(host.tool))
+        if (steps.isEmpty()) return
+        if (InkBake.Step.DRAW in steps) {
+            afterDraw = steps - InkBake.Step.DRAW
+            invalidate()
+        } else {
+            steps.forEach(::step)
+        }
+    }
+
+    private fun step(s: InkBake.Step) {
+        when (s) {
+            InkBake.Step.DRAW -> invalidate()
+            InkBake.Step.REFRESH_PANEL -> if (firmwareOn) firmware.fullRefresh()
+            InkBake.Step.CLEAR_OVERLAY -> if (firmwareOn) firmware.clearAll()
+        }
     }
 
     val inkView: InkView get() = ink
 
+    /** The canvas moves under the finger; the overlay is cleared only once the move settles and
+     *  the canvas's redraw is on the panel (the host's fetch bakes with VIEWPORT_SETTLED). */
     fun setViewport(v: Viewport, notify: Boolean = true) {
         viewport = v
-        clearFirmwareInk()
         showMinimap()
         invalidate()
         if (notify) host.viewportChanged(v)
@@ -146,23 +169,25 @@ class NotesCanvasView(
 
     fun zoomPercent(p: Int) = setViewport(viewport.zoomToPercent(p, width.toDouble(), height.toDouble()))
 
-    /** Firmware ink on for the ink tools, off for the others (they draw their own band). */
+    /** Firmware ink on for the Pen only (inkread's applyToolInkState); the other tools draw
+     *  their own band or loop, and a change to one bakes the page. */
     fun toolChanged(t: NoteTool) {
         if (!firmwareOn) firmwareOn = firmware.setup()
-        firmware.setWritable(t.inks)
-        clearFirmwareInk()
+        firmware.setWritable(InkBake.overlayFor(t))
+        bake(InkBake.Event.TOOL_CHANGED)
     }
 
-    fun claimPen() { firmwareOn = firmware.setup(); firmware.systemGestures(false); toolChanged(host.tool) }
+    /** inkread's applyToolInkState: claim the pen on every resume and focus gain (the firmware
+     *  drops the claim when another window takes focus), writable for the Pen. Clears nothing. */
+    fun claimPen(reason: String) {
+        firmwareOn = firmware.setup(reason)
+        firmware.systemGestures(false)
+        firmware.setWritable(InkBake.overlayFor(host.tool))
+    }
 
     fun releasePen() { firmware.teardown(); firmware.systemGestures(true); firmwareOn = false }
 
-    fun fullRefresh() { clearFirmwareInk(); firmware.fullRefresh() }
-
-    private fun clearFirmwareInk() {
-        if (firmwareOn) firmware.clearAll()
-        removeCallbacks(settle)
-    }
+    fun fullRefresh() = bake(InkBake.Event.USER_REFRESH)
 
     private fun showMinimap() {
         minimapUntil = SystemClock.uptimeMillis() + MinimapFrame.LINGER_MS
@@ -237,7 +262,6 @@ class NotesCanvasView(
         if (c.isPen) {
             host.pen(true)
             lastPenAt = SystemClock.uptimeMillis()
-            removeCallbacks(settle)
             penTool = NoteTool.forPen(host.tool, c.isEraser)
             gesture = InputRules.forPen(host.tool, c.isEraser, host.recording)
             when (gesture) {
@@ -261,7 +285,7 @@ class NotesCanvasView(
         when (gesture) {
             Gesture.DRAW -> {
                 buffer?.add(m.x, m.y, m.pressure, at)
-                if (!firmwareOn) invalidate() // no firmware ink here: the canvas draws the live stroke
+                if (!overlayInks()) invalidate() // no firmware ink here: the canvas draws the live stroke
             }
             Gesture.ERASE, Gesture.LASSO -> {
                 path += m.x; path += m.y
@@ -285,14 +309,13 @@ class NotesCanvasView(
                 val width = (host.penWidthPx / viewport.zoom).toFloat()
                 host.commitStroke(penTool, if (penTool == NoteTool.HIGHLIGHTER) width * HIGHLIGHT_FACTOR else width,
                     b.pack { vx, vy -> wx(vx) to wy(vy) })
-                // The firmware's ink already shows it; redraw only once the pen has rested.
-                postDelayed(settle, SETTLE_MS)
+                // A pen stroke stays on the firmware overlay: nothing is redrawn or cleared now
+                // (inkread). The highlighter's stroke bakes when the core has it.
             }
             Gesture.ERASE -> {
                 path += x; path += y
                 host.erase(world(path), (ERASE_RADIUS_PX / viewport.zoom).toFloat())
-                if (firmwareOn) firmware.setWritable(host.tool.inks)
-                clearFirmwareInk()
+                if (firmwareOn) firmware.setWritable(InkBake.overlayFor(host.tool))
             }
             Gesture.LASSO -> if (movingSelection) {
                 host.moveSelection(wx(x) - wx(downX), wy(y) - wy(downY))
@@ -314,9 +337,13 @@ class NotesCanvasView(
         }
         buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
         host.pen(false)
-        // A pen stroke the firmware inked is not repainted now: that waits for the pen to rest.
-        if (!firmwareOn || was != Gesture.DRAW) invalidate()
+        // A pen stroke the firmware inked is not repainted (inkread); anything else drew a band
+        // or loop of its own, which the next draw removes.
+        if (was != Gesture.DRAW || !overlayInks(was)) invalidate()
     }
+
+    /** Whether the stroke being written is the firmware's (the Pen, with the overlay claimed). */
+    private fun overlayInks(g: Gesture = gesture): Boolean = firmwareOn && g == Gesture.DRAW && penTool == NoteTool.PEN
 
     private fun abandon() {
         buffer = null; path.clear(); gesture = Gesture.NONE; movingSelection = false
@@ -355,7 +382,7 @@ class NotesCanvasView(
             canvas.drawPath(drawPath, inkPaint)
         }
         val live = buffer
-        if (gesture == Gesture.DRAW && !firmwareOn && live != null && live.size > 1) {
+        if (gesture == Gesture.DRAW && !overlayInks() && live != null && live.size > 1) {
             val xy = live.xy()
             livePath.reset()
             livePath.moveTo(xy[0], xy[1])
@@ -376,6 +403,12 @@ class NotesCanvasView(
             canvas.drawPath(livePath, if (gesture == Gesture.LASSO) dashPaint else livePaint)
         }
         if (SystemClock.uptimeMillis() < minimapUntil) minimap(canvas)
+        // F17-FR4: the panel shows this frame; only now refresh and clear the overlay.
+        if (afterDraw.isNotEmpty()) {
+            val rest = afterDraw
+            afterDraw = emptyList()
+            post { rest.forEach(::step) }
+        }
     }
 
     private fun box(canvas: Canvas, r: WorldRect, paint: Paint) {
@@ -404,7 +437,7 @@ class NotesCanvasView(
     }
 
     override fun onDetachedFromWindow() {
-        removeCallbacks(settle); removeCallbacks(hideMinimap)
+        removeCallbacks(hideMinimap)
         super.onDetachedFromWindow()
     }
 
@@ -413,8 +446,6 @@ class NotesCanvasView(
         const val TAP_SLOP_PX = 18f
         const val ERASE_RADIUS_PX = 22f
         const val LISTEN_RADIUS_PX = 24f
-        /** inkread: the pen rests this long before the canvas redraws under the firmware ink. */
-        const val SETTLE_MS = 2000L
         const val HIGHLIGHT_FACTOR = 3.3f
         val MUTED = Color.rgb(170, 170, 170)
     }

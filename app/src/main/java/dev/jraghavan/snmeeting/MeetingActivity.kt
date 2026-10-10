@@ -297,6 +297,18 @@ class MeetingActivity : Activity() {
             CoreJson.list(json, TemplateRow::from).getOrNull()?.let { templates = it }
         }
         load()
+        notes?.claim("resume") // Supernote focus events are flaky: resume claims too (inkread)
+    }
+
+    /** F17-FR4: as inkread, the pen is claimed again whenever the window regains focus. */
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) notes?.claim("focus")
+    }
+
+    override fun onPause() {
+        notes?.pause() // the firmware pen goes back; inkread's onPause teardown
+        super.onPause()
     }
 
     override fun onStart() {
