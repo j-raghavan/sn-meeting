@@ -15,7 +15,7 @@ interface StyleOption {
 /** The option with [id], or [fallback] for an unknown or missing id. */
 fun <E : StyleOption> List<E>.byId(id: String?, fallback: E): E = firstOrNull { it.id == id } ?: fallback
 
-/** tldraw's 12 colours with their true RGB; the live view draws each as a grey of its own ([StylePalette.EINK]). */
+/** tldraw's 12 colours with their true RGB; the live view draws each as a grey of its own ([StylePalette.EINK]), or in colour on a colour panel ([StylePalette.screen]). */
 enum class StyleColor(override val id: String, val rgb: Int, val label: String) : StyleOption {
     BLACK("black", 0x1D1D1D, "Black"),
     GREY("grey", 0x9FA8B2, "Grey"),
@@ -134,6 +134,10 @@ enum class StylePalette {
     }
 
     companion object {
+        /** F23-FR5: the palette the live view draws with on this device ([EINK] unless the
+         *  panel shows colour; set once when the notes page opens, from ScreenColor). */
+        @Volatile var screen: StylePalette = EINK
+
         private const val OPAQUE = 0xFF shl 24
         private const val NO_ALPHA = 0x00FFFFFF
         private const val DARKEST_GRAY = 0x00

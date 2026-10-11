@@ -56,7 +56,7 @@ class StylePanel(private val a: Activity, private val ui: Inkwell) {
         val grid = GridLayout(a).apply { columnCount = 4 }
         for (c in StyleColor.entries) {
             grid.addView(Dot(c, c == style.color).apply { setOnClickListener { onPick("color", c.id) } },
-                GridLayout.LayoutParams().apply { width = ui.dp(48); height = ui.dp(48) })
+                GridLayout.LayoutParams().apply { width = ui.dp(ROW_DP / 4); height = ui.dp(ROW_DP / 4) })
         }
         addView(grid)
         addView(ui.note(style.color.label, 13f).apply { gravity = Gravity.CENTER })
@@ -73,11 +73,11 @@ class StylePanel(private val a: Activity, private val ui: Inkwell) {
                 // One pick when the pen lifts, not one per step (no live redraw on e-ink).
                 override fun onStopTrackingTouch(s: SeekBar) = onPick("opacity", ((s.progress + 1) / 10.0).toString())
             })
-        }, LinearLayout.LayoutParams(ui.dp(4 * 48), ui.dp(40)))
+        }, LinearLayout.LayoutParams(ui.dp(ROW_DP), ui.dp(40)))
         addView(label("FILL"))
-        addView(icons(FillStyle.entries.map { Triple(fillIcon(it), it.id, it == style.fill) }, kinds, "fill", onPick))
+        addView(icons(FillStyle.entries.map { Triple(fillIcon(it), it.id, it == style.fill) }, kinds, "fill", onPick), rowParams())
         addView(label("OUTLINE"))
-        addView(icons(DashStyle.entries.map { Triple(dashIcon(it), it.id, it == style.dash) }, kinds, "dash", onPick))
+        addView(icons(DashStyle.entries.map { Triple(dashIcon(it), it.id, it == style.dash) }, kinds, "dash", onPick), rowParams())
         addView(label("SIZE"))
         addView(LinearLayout(a).apply {
             SizeStyle.entries.forEach { sz ->
@@ -87,10 +87,17 @@ class StylePanel(private val a: Activity, private val ui: Inkwell) {
                     alpha = if (on) 1f else DIM
                     isEnabled = on
                     if (on) setOnClickListener { onPick("size", sz.id) }
-                }, LinearLayout.LayoutParams(ui.dp(44), ui.dp(44)).apply { marginEnd = ui.dp(4) })
+                }, cell(SizeStyle.entries.size, ui.dp(44)))
             }
-        })
+        }, rowParams())
     }
+
+    /** Every row is as wide as the colour grid, so the panel never grows past it. */
+    private fun rowParams() = LinearLayout.LayoutParams(ui.dp(ROW_DP), LinearLayout.LayoutParams.WRAP_CONTENT)
+
+    /** One of [n] equal cells sharing the row (any number of options fits), at most [max] tall. */
+    private fun cell(n: Int, max: Int) = LinearLayout.LayoutParams(0, minOf(max, (ui.dp(ROW_DP) - ui.dp(GAP_DP) * (n - 1)) / n), 1f)
+        .apply { marginEnd = ui.dp(GAP_DP) }
 
     private fun label(t: String) = ui.eyebrow(t).apply { setPadding(0, ui.dp(8), 0, ui.dp(4)) }
 
@@ -108,7 +115,7 @@ class StylePanel(private val a: Activity, private val ui: Inkwell) {
                     isEnabled = on
                     contentDescription = "$property $id"
                     if (on) setOnClickListener { onPick(property, id) }
-                }, LinearLayout.LayoutParams(ui.dp(40), ui.dp(40)).apply { marginEnd = ui.dp(4) })
+                }, cell(entries.size, ui.dp(40)))
             }
         }
 
@@ -130,7 +137,7 @@ class StylePanel(private val a: Activity, private val ui: Inkwell) {
 
     /** One swatch: the colour as its e-ink grey; the picked one ringed twice. */
     private inner class Dot(private val c: StyleColor, private val picked: Boolean) : View(a) {
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = StylePalette.EINK.stroke(c) }
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = StylePalette.screen.stroke(c) }
         private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = Color.BLACK }
 
         init { contentDescription = c.label }
@@ -145,5 +152,8 @@ class StylePanel(private val a: Activity, private val ui: Inkwell) {
 
     private companion object {
         const val DIM = 0.3f
+        /** The panel's content width: the colour grid's four 48 dp columns. */
+        const val ROW_DP = 4 * 48
+        const val GAP_DP = 4
     }
 }

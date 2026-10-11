@@ -24,7 +24,7 @@ class HintsOverlay(
     private val inkAt: (Float, Float, Float, Float) -> Boolean,
     private val barOnLeft: () -> Boolean,
 ) : View(context) {
-    private val dp = context.resources.displayMetrics.density
+    private val dp = dev.jraghavan.snmeeting.DeviceScale.density(context.resources)
     private val font: Typeface = try {
         Typeface.createFromAsset(context.assets, "fonts/virgil.ttf")
     } catch (e: RuntimeException) {

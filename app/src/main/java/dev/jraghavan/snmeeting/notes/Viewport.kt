@@ -82,7 +82,8 @@ data class Viewport(val x: Double, val y: Double, val zoom: Double) {
 
 /**
  * F17-FR13's minimap card, after inkread's `MinimapController` (AGPL-3.0, same owner): a
- * rounded white card at the canvas's top corner away from the tool bar, holding a thumbnail of
+ * rounded white card at the canvas's top corner beside the tool bar, so the top-left corner
+ * where writing starts stays clear (owner, 2026-10-10: "only the minimap on the top right"); it holds a thumbnail of
  * all the ink with the part in view marked, and −/+ buttons under it. This one geometry is what
  * both the drawing and the touch handling read, so they cannot disagree (inkread's pattern).
  * All values are canvas px; [fit] maps world to thumbnail px.
@@ -152,8 +153,10 @@ data class MinimapFrame(
         view.zoomAbout(if (zoomIn) ZOOM_STEP else 1 / ZOOM_STEP, w / 2, h / 2)
 
     companion object {
-        /** About a quarter of the canvas wide, never under 200 dp. */
-        const val MIN_WIDTH_DP = 200.0
+        /** About a fifth of the canvas wide, never under 160 dp (owner, 2026-10-10: a quarter
+         *  was oversized). */
+        const val MIN_WIDTH_DP = 160.0
+        const val WIDTH_FRACTION = 5.0
         const val MARGIN_DP = 12.0
         const val PAD_DP = 6.0
         const val INSET_DP = 8.0
@@ -171,9 +174,9 @@ data class MinimapFrame(
             if (w <= 0 || h <= 0) return null
             val margin = MARGIN_DP * density
             val pad = PAD_DP * density
-            val tw = maxOf(w / 4, MIN_WIDTH_DP * density).coerceAtMost(w - 2 * margin - 2 * pad).coerceAtLeast(1.0)
+            val tw = maxOf(w / WIDTH_FRACTION, MIN_WIDTH_DP * density).coerceAtMost(w - 2 * margin - 2 * pad).coerceAtLeast(1.0)
             val th = tw * h / w
-            val left = if (barOnLeft) w - margin - pad - tw else margin + pad
+            val left = if (barOnLeft) margin + pad else w - margin - pad - tw
             val world = ink ?: view.visible(w, h)
             val fit = Viewport.fit(world, tw, th, INSET_DP * density, 0.0..Double.MAX_VALUE)
             val t = top + pad

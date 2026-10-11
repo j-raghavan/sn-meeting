@@ -59,7 +59,7 @@ class TagGraphActivity : Activity() {
     }
 
     private fun buildView(): View {
-        graphView = TagGraphView(this, resources.displayMetrics.density, interactive = true) { i -> select(i) }
+        graphView = TagGraphView(this, DeviceScale.density(resources), interactive = true) { i -> select(i) }
         empty = ui.note(EMPTY, 17f, ui.textMuted).apply {
             gravity = Gravity.CENTER; typeface = ui.serifItalic; visibility = View.GONE
         }

@@ -146,7 +146,7 @@ class SidePanels(
             val on = enabled(i)
             addView(TextView(a).apply {
                 text = label
-                textSize = 17f
+                textSize = 17f * dev.jraghavan.snmeeting.DeviceScale.factor(a.resources.displayMetrics.densityDpi)
                 typeface = ui.serif
                 setTextColor(if (on) ui.ink else ui.textMuted)
                 isEnabled = on
@@ -157,5 +157,11 @@ class SidePanels(
             })
             if (i < labels.size - 1) addView(ui.hairline())
         }
+        // As wide as the longest row: a full-width hairline would otherwise stretch the panel
+        // across the whole canvas.
+        val widest = (0 until childCount).map { getChildAt(it) }.filterIsInstance<TextView>().maxOfOrNull {
+            it.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED); it.measuredWidth
+        } ?: 0
+        (0 until childCount).forEach { k -> getChildAt(k).layoutParams = LinearLayout.LayoutParams(widest, getChildAt(k).layoutParams?.height ?: LinearLayout.LayoutParams.WRAP_CONTENT) }
     }
 }

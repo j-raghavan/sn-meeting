@@ -7,6 +7,7 @@ import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
+import dev.jraghavan.snmeeting.notes.canvas.StylePalette
 import android.widget.LinearLayout
 import dev.jraghavan.snmeeting.Inkwell
 import dev.jraghavan.snmeeting.InkDialog
@@ -791,11 +792,13 @@ class NotesPage(
     }
 
     init {
+        StylePalette.screen = ScreenColor.palette() // F23-FR5: colour on a colour panel
         canvas.images = images
         // F17-FR4 / F21-FR2: the pen never inks over the pill or an open panel.
         canvas.inkHoles = { listOfNotNull(zoomPill, panels.view) }
-        // F17-FR13: the minimap card sits under the zoom pill when the bar leaves it that corner.
-        canvas.minimapTop = { if (canvas.barOnLeft) 0 else zoomPill.bottom }
+        // F17-FR13: the minimap card sits beside the bar (top right when docked right); under the
+        // zoom pill only when the bar is on the left and they share that corner.
+        canvas.minimapTop = { if (canvas.barOnLeft) zoomPill.bottom else 0 }
         layout()
     }
 
