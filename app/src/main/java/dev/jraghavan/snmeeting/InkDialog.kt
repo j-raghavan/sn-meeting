@@ -52,6 +52,15 @@ object InkDialog {
             .showSerif()
     }
 
+    /** One of [items], or nothing on Cancel (F24: which key file to import). */
+    fun pick(a: Activity, title: String, items: List<String>, onPick: (Int) -> Unit) {
+        if (gone(a)) return
+        builder(a).setTitle(title)
+            .setItems(items.toTypedArray()) { _, i -> onPick(i) }
+            .setNegativeButton("CANCEL", null)
+            .show()
+    }
+
     /** A message with only OK (an event's details from Search, until its sheet exists). */
     fun info(a: Activity, title: String, message: String) = error(a, title, message)
 

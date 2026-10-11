@@ -18,6 +18,7 @@ import dev.jraghavan.snmeeting.model.CalendarPrefs
 import dev.jraghavan.snmeeting.model.CoreJson
 import dev.jraghavan.snmeeting.model.CoreResult
 import dev.jraghavan.snmeeting.model.IndexStatus
+import dev.jraghavan.snmeeting.model.KeyImport
 import dev.jraghavan.snmeeting.model.SearchModel
 import dev.jraghavan.snmeeting.model.ProviderRows
 import dev.jraghavan.snmeeting.model.SaveFolders
@@ -574,6 +575,8 @@ class SettingsActivity : Activity() {
 
         saveSection(column)
 
+        keysSection(column)
+
         providerSection(column, "Transcription", SettingsView.TRANSCRIBE,
             "Anthropic can't transcribe audio, so it is offered for summaries only.")
         providerSection(column, "Summary & to-dos", SettingsView.SUMMARISE, null)
@@ -593,7 +596,7 @@ class SettingsActivity : Activity() {
                     setOnLongClickListener { showSegmentLength = true; render(); true }
                 })
                 addView(ui.note("Core v${coreVersion()}", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
-                addView(ui.note("Keys are read from MyStyle/SnCopilot (shared with SN-Copilot).", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
+                addView(ui.note("Keys are read from MyStyle/Meetings/keys, then MyStyle/SnCopilot (shared with SN-Copilot).", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
             updates(this)
@@ -730,6 +733,66 @@ class SettingsActivity : Activity() {
      * the model that will run and an optional override (empty = the key file's or the
      * default), and Test connection (F10-FR5).
      */
+    /**
+     * F24: "Import key file…": the key files the core finds in Download, Documents, … ; the
+     * core checks and copies the one picked into MyStyle/Meetings/keys (asking before it
+     * replaces a key), then offers to delete the copy. Only paths cross JNI, never the key.
+     */
+    private fun keysSection(column: LinearLayout) {
+        ui.section(column, "Keys").apply {
+            addView(LinearLayout(this@SettingsActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(0, ui.dim(12), 0, ui.dim(12))
+                addView(ui.pill("Import key file…", size = 15f) { pickKeyFile() }, ui.wrap())
+                addView(ui.note(KeyImport.NOTE, 13f), ui.wrap().apply { topMargin = ui.dim(8) })
+            })
+        }
+    }
+
+    private fun pickKeyFile() {
+        scope.core({ NativeBridge.nativeKeyFiles() }) { json ->
+            when (val r = CoreJson.obj(json, KeyImport::files)) {
+                is CoreResult.Err -> InkDialog.error(this, "Can't look for key files", r.message)
+                is CoreResult.Ok -> if (r.value.isEmpty()) InkDialog.error(this, "No key files", KeyImport.NONE)
+                    else InkDialog.pick(this, "Import a key file", r.value.map { it.label }) { i -> importKey(r.value[i], replace = false) }
+            }
+        }
+    }
+
+    private fun importKey(file: KeyImport.KeyFile, replace: Boolean) {
+        scope.core({ NativeBridge.nativeImportKey(file.path, replace) }) { json ->
+            when (val r = CoreJson.obj(json, KeyImport::reply)) {
+                is CoreResult.Err -> InkDialog.error(this, "Can't import ${file.name}", r.message)
+                is CoreResult.Ok -> when (val reply = r.value) {
+                    is KeyImport.Reply.Exists ->
+                        InkDialog.confirm(this, "Replace the key?", KeyImport.replaceQuestion(reply.provider), "Replace") { importKey(file, replace = true) }
+                    is KeyImport.Reply.Imported -> {
+                        afterImport(reply.provider)
+                        InkDialog.confirm(this, "Key imported", KeyImport.deleteQuestion(reply, file), "Delete") { deleteKeySource(file) }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun deleteKeySource(file: KeyImport.KeyFile) {
+        scope.core({ NativeBridge.nativeDeleteKeySource(file.path) }) { json ->
+            (CoreJson.ok(json) as? CoreResult.Err)?.let { InkDialog.error(this, "Kept ${file.name}", it.message) }
+        }
+    }
+
+    /** The provider rows and models change: reload, redraw, and test each role now using [provider]. */
+    private fun afterImport(provider: String) {
+        scope.core({ NativeBridge.nativeGetSettings() }) { json ->
+            if (isDestroyed) return@core
+            applySettings(json)
+            val s = settings ?: return@core
+            for (role in listOf(SettingsView.TRANSCRIBE, SettingsView.SUMMARISE)) {
+                if (s.effective(role).provider == provider) testConnection(role, provider)
+            }
+        }
+    }
+
     private fun providerSection(column: LinearLayout, title: String, role: String, footnote: String?) {
         val s = settings ?: return
         ui.section(column, title).apply {
