@@ -207,6 +207,10 @@ class NotesCanvasView(
     private val livePath = Path()
     /** InkBake's steps still to run once the canvas's redraw is on the panel. */
     private var afterDraw: List<InkBake.Step> = emptyList()
+    /** When the last pen stroke began, and until when strokes reaching the canvas are drawn by it
+     *  because a clear of the fast ink may have wiped them (uptime ms). */
+    private var strokeStartedAt = -CLEAR_WINDOW_MS
+    private var redrawStrokesUntil = 0L
     private val hideMinimap = Runnable { invalidate() }
 
     private val scale = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -233,6 +237,9 @@ class NotesCanvasView(
     /** F17-FR4: run InkBake's plan for [e]: draw, then (after that frame) refresh the panel,
      *  then clear the overlay. Never clear first. */
     fun bake(e: InkBake.Event) {
+        // A stroke written around a clear of the fast ink was wiped from it: the canvas draws it
+        // as soon as it has it (owner, 2026-10-10: "I typed CON and C is missing" after a pan).
+        if (e == InkBake.Event.PEN_STROKE && SystemClock.uptimeMillis() <= redrawStrokesUntil) invalidate()
         val steps = InkBake.plan(e, InkBake.overlayFor(host.tool))
         if (steps.isEmpty()) return
         if (InkBake.Step.DRAW in steps) {
@@ -247,7 +254,16 @@ class NotesCanvasView(
         when (s) {
             InkBake.Step.DRAW -> invalidate()
             InkBake.Step.REFRESH_PANEL -> if (firmwareOn) firmware.fullRefresh()
-            InkBake.Step.CLEAR_OVERLAY -> if (firmwareOn) firmware.clearAll()
+            InkBake.Step.CLEAR_OVERLAY -> if (firmwareOn) {
+                firmware.clearAll()
+                val now = SystemClock.uptimeMillis()
+                // The pen was busy around this clear (a letter written while a pan settled): its
+                // strokes are drawn by the canvas now, and as each reaches it over the next while.
+                if (gesture == Gesture.DRAW || now - strokeStartedAt < CLEAR_WINDOW_MS) {
+                    invalidate()
+                    redrawStrokesUntil = now + CLEAR_WINDOW_MS
+                }
+            }
         }
     }
 
@@ -291,11 +307,18 @@ class NotesCanvasView(
     /** inkread's applyToolInkState: claim the pen on every resume and focus gain (the firmware
      *  drops the claim when another window takes focus), writable for the Pen. Clears nothing. */
     fun claimPen(reason: String) {
+        // Once each time the page opens, on every device: a full-panel refresh clears the
+        // ghosting the page before left (owner, 2026-10-10). It runs first and the pen is
+        // claimed once the panel has settled: on the Manta, a refresh straight after the claim
+        // left the firmware ink off.
+        if (!panelRefreshed) {
+            panelRefreshed = true
+            firmware.fullRefresh()
+            postDelayed({ if (isAttachedToWindow) claimPen(reason) }, REFRESH_SETTLE_MS)
+            return
+        }
         updateInkAreas()
         firmwareOn = firmware.setup(reason)
-        // Once each time the page opens, on every device: a full-panel refresh clears the
-        // ghosting the page before left (owner, 2026-10-10). Each device's own call ([PenInk]).
-        if (!panelRefreshed) { panelRefreshed = true; firmware.fullRefresh() }
         firmware.systemGestures(false)
         firmware.setWritable(InkBake.overlayFor(host.tool))
     }
@@ -506,7 +529,10 @@ class NotesCanvasView(
             penTool = NoteTool.forPen(host.tool, c.isEraser)
             gesture = InputRules.forPen(host.tool, c.isEraser, host.recording)
             when (gesture) {
-                Gesture.DRAW -> buffer = StrokeBuffer(host.strokeTimes()).also { it.add(c.x, c.y, c.pressure, at) }
+                Gesture.DRAW -> {
+                    strokeStartedAt = SystemClock.uptimeMillis()
+                    buffer = StrokeBuffer(host.strokeTimes()).also { it.add(c.x, c.y, c.pressure, at) }
+                }
                 Gesture.ERASE, Gesture.LASSO, Gesture.SELECT -> {
                     if (c.isEraser && firmwareOn) firmware.setWritable(false)
                     val wxd = viewport.worldX(c.x.toDouble()); val wyd = viewport.worldY(c.y.toDouble())
@@ -889,6 +915,10 @@ class NotesCanvasView(
     }
 
     companion object {
+        /** How long the page's opening refresh takes on the panel before the pen is claimed. */
+        const val REFRESH_SETTLE_MS = 700L
+        /** Strokes this close to a clear of the fast ink are drawn by the canvas too. */
+        const val CLEAR_WINDOW_MS = 3_000L
         const val FIT_PAD = 48.0
         const val TAP_SLOP_PX = 18f
         const val ERASE_RADIUS_PX = 22f
