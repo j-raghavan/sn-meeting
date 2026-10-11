@@ -317,7 +317,10 @@ class NotesPage(
 
     /** F21-FR6: after a pick the panel shows the new style (one redraw of the panel). */
     private fun refreshStylePanel() {
-        val anchor = styleAnchor ?: return
+        // The bar rebuilds when the style changes: anchor on its Style button now, not the one
+        // the panel opened from (a removed view measures at the top of the window).
+        val anchor = bar.anchors["style"]?.takeIf { it.isAttachedToWindow }
+            ?: styleAnchor?.takeIf { it.isAttachedToWindow } ?: return
         if (panels.open == ToolBarModel.Panel.STYLE) panels.show(ToolBarModel.Panel.STYLE, anchor, stylePanel())
     }
 

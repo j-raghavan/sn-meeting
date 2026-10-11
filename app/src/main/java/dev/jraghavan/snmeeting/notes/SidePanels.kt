@@ -82,6 +82,16 @@ class SidePanels(
 
     /** Show [content] as [panel] beside the bar, level with [anchor] (kept on screen). */
     fun show(panel: ToolBarModel.Panel, anchor: View, content: View) {
+        // A button the bar has just rebuilt isn't laid out yet: place the panel once it is.
+        if (anchor.isAttachedToWindow && !anchor.isLaidOut) {
+            anchor.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    anchor.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    show(panel, anchor, content)
+                }
+            })
+            return
+        }
         removeView()
         val frame = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
