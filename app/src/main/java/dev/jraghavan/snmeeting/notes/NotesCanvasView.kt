@@ -146,7 +146,8 @@ class NotesCanvasView(
     private var mapGrab = false
     private var mapDown = 0.0 to 0.0
 
-    private val firmware = SupernoteInk(context)
+    /** F23-FR4: this device's fast pen ink (Supernote's on the Manta, unchanged). */
+    private val firmware: PenInk = PenInk.forDevice(this).also { it.onReady = { if (isAttachedToWindow) claimPen("ink ready") } }
     private var firmwareOn = false
 
     /** F17-FR4: the controls drawn over the canvas (the zoom pill) where the pen must not ink. */
@@ -292,11 +293,17 @@ class NotesCanvasView(
     fun claimPen(reason: String) {
         updateInkAreas()
         firmwareOn = firmware.setup(reason)
+        // Once each time the page opens, on every device: a full-panel refresh clears the
+        // ghosting the page before left (owner, 2026-10-10). Each device's own call ([PenInk]).
+        if (!panelRefreshed) { panelRefreshed = true; firmware.fullRefresh() }
         firmware.systemGestures(false)
         firmware.setWritable(InkBake.overlayFor(host.tool))
     }
 
-    fun releasePen() { firmware.teardown(); firmware.systemGestures(true); firmwareOn = false }
+    fun releasePen() { firmware.teardown(); firmware.systemGestures(true); firmwareOn = false; panelRefreshed = false }
+
+    /** The page's one full refresh on opening has been done ([claimPen]). */
+    private var panelRefreshed = false
 
     /**
      * F21-FR2: a panel opened beside the bar ([v]) or closed (null). While one is open firmware
@@ -328,7 +335,7 @@ class NotesCanvasView(
 
     private fun minimapShown() = minimapOpen || SystemClock.uptimeMillis() < minimapUntil
 
-    private val density get() = resources.displayMetrics.density.toDouble()
+    private val density get() = dev.jraghavan.snmeeting.DeviceScale.density(resources).toDouble()
 
     /** F17-FR13: the minimap card's top (canvas px), below the zoom pill when they share a corner. */
     var minimapTop: () -> Int = { 0 }
@@ -625,7 +632,7 @@ class NotesCanvasView(
         canvas.drawColor(Color.WHITE)
         val v = viewport
         val z = v.zoom.toFloat()
-        val ctx = ItemPainter.Context(v, StylePalette.EINK, editing)
+        val ctx = ItemPainter.Context(v, StylePalette.screen, editing)
         for (e in ink.entries) {
             when (e) {
                 is DrawEntry.Ink -> drawStroke(canvas, e.stroke, z, v)
@@ -702,7 +709,7 @@ class NotesCanvasView(
         val color = when {
             muted -> MUTED
             s.highlighter -> Color.argb(96, 0, 0, 0)
-            s.style != null -> StylePalette.EINK.stroke(s.style.color)
+            s.style != null -> StylePalette.screen.stroke(s.style.color)
             else -> s.argb or 0xFF000000.toInt()
         }
         inkPaint.color = color; dotPaint.color = color
@@ -828,7 +835,7 @@ class NotesCanvasView(
         val z = v.zoom.toFloat()
         val path = Path()
         val thumbPainter = ItemPainter(images)
-        val ctx = ItemPainter.Context(v, StylePalette.EINK)
+        val ctx = ItemPainter.Context(v, StylePalette.screen)
         for (e in entries) {
             val s = when (e) {
                 is DrawEntry.Ink -> e.stroke
