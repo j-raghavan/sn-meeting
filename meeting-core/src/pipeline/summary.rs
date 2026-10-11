@@ -251,6 +251,7 @@ pub fn context(sc: &Sidecar, tpl: &Template, started: &DateTime<FixedOffset>) ->
         let kind = match m.kind {
             MicKind::Usb => "USB",
             MicKind::Bluetooth => "Bluetooth",
+            MicKind::Builtin => "Built-in",
         };
         format!("{kind} — {}", m.name)
     });

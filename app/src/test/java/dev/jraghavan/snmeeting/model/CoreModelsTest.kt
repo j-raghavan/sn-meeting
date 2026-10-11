@@ -123,6 +123,8 @@ class CoreModelsTest {
         assertEquals("override", s.effective("summarise").modelSource)
         assertEquals("""{"summarise":{"model":null}}""", SettingsPatch.model("summarise", " "))
         assertEquals("""{"mic":"usb:USB \"Audio\""}""", SettingsPatch.mic(MicChoice.Usb("USB \"Audio\"")))
+        assertEquals("""{"mic":"builtin:Built-in mic"}""", SettingsPatch.mic(MicChoice.BuiltIn("Built-in mic"))) // F22-FR1
+        assertEquals(MicChoice.BuiltIn("Built-in mic"), MicChoice.of("builtin:Built-in mic"))
         assertEquals("""{"noticeShown":{"openai":true,"anthropic":true}}""", SettingsPatch.noticeShown(listOf("openai", "anthropic")))
         assertEquals("""{"debug":{"segmentMs":60000}}""", SettingsPatch.segmentMs(60_000))
         assertEquals("""{"debug":{"segmentMs":null}}""", SettingsPatch.segmentMs(null))

@@ -41,6 +41,29 @@ fun usbInputs(am: AudioManager): List<UsbInput> = am.getDevices(AudioManager.GET
     .filter { it.type == AudioDeviceInfo.TYPE_USB_DEVICE || it.type == AudioDeviceInfo.TYPE_USB_HEADSET }
     .map { UsbInput(it.id, it.productName?.toString().orEmpty().ifBlank { "USB microphone" }) }
 
+/**
+ * F22-FR1: the device's own mic, as one input. A tablet with two (bottom and back) lists both as
+ * TYPE_BUILTIN_MIC; the first is the main one, and the recording is pinned to it.
+ */
+fun builtInInputs(am: AudioManager): List<UsbInput> = am.getDevices(AudioManager.GET_DEVICES_INPUTS)
+    .firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_MIC }
+    ?.let { listOf(UsbInput(it.id, BUILT_IN_NAME)) }.orEmpty()
+
+const val BUILT_IN_NAME = "Built-in mic"
+
+/** F22-FR3: whether the platform records UNPROCESSED audio on this device. */
+fun unprocessedSupported(am: AudioManager): Boolean =
+    am.getProperty(AudioManager.PROPERTY_SUPPORT_AUDIO_SOURCE_UNPROCESSED)?.toBoolean() == true
+
+/** The platform's audio source for each [InputSource]. */
+@Suppress("DEPRECATION")
+fun InputSource.platform(): Int = when (this) {
+    InputSource.MIC -> MediaRecorder.AudioSource.MIC
+    InputSource.VOICE_COMMUNICATION -> MediaRecorder.AudioSource.VOICE_COMMUNICATION
+    InputSource.VOICE_RECOGNITION -> MediaRecorder.AudioSource.VOICE_RECOGNITION
+    InputSource.UNPROCESSED -> MediaRecorder.AudioSource.UNPROCESSED
+}
+
 fun inputById(am: AudioManager, id: Int): AudioDeviceInfo? =
     am.getDevices(AudioManager.GET_DEVICES_INPUTS).firstOrNull { it.id == id }
 
@@ -57,7 +80,7 @@ class MediaRecorderAdapter(private val ctx: Context, private val handler: Handle
     private fun configured(spec: AudioSpec, source: InputSource, deviceId: Int, out: String): MediaRecorder {
         val m = MediaRecorder()
         try {
-            m.setAudioSource(if (source == InputSource.MIC) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+            m.setAudioSource(source.platform())
             m.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             m.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             m.setAudioChannels(1)

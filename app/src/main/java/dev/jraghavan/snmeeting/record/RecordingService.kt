@@ -110,6 +110,8 @@ class RecordingService : Service() {
     private val env = object : RecordingSession.Env {
         override val timer: TimerPort by lazy { HandlerTimer(h, safely) }
         override fun usbInputs() = usbInputs(am)
+        override fun builtInInputs() = builtInInputs(am)
+        override val unprocessedSupported get() = unprocessedSupported(am)
         override fun openBluetooth(onChange: () -> Unit): BtPort =
             BluetoothState(this@RecordingService, h) { safely.run("bluetooth", onChange) }.also { it.open() }
         override fun newRecorder(listener: SegmentedRecorder.Listener) =

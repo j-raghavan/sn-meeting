@@ -21,6 +21,10 @@ class RecordingSession(private val env: Env, private val btWaitMs: Long = BT_WAI
     interface Env {
         val timer: TimerPort
         fun usbInputs(): List<UsbInput>
+        /** F22-FR1: the device's own mic, if it has one. */
+        fun builtInInputs(): List<UsbInput> = emptyList()
+        /** F22-FR3: the platform records UNPROCESSED audio here. */
+        val unprocessedSupported: Boolean get() = false
         /** Opens Bluetooth; [onChange] runs on the recording thread when a proxy or state changes. */
         fun openBluetooth(onChange: () -> Unit): BtPort
         fun newRecorder(listener: SegmentedRecorder.Listener): SegmentedRecorder
@@ -66,7 +70,7 @@ class RecordingSession(private val env: Env, private val btWaitMs: Long = BT_WAI
     private fun go(choice: MicChoice) {
         if (phase != Phase.PICKING) return
         btWait?.cancel(); btWait = null
-        val pick = MicSelector.pick(env.usbInputs(), bt?.snapshot() ?: BtSnapshot.NONE, choice)
+        val pick = MicSelector.pick(env.usbInputs(), bt?.snapshot() ?: BtSnapshot.NONE, choice, env.builtInInputs())
         val mic = pick.chosen ?: return end(RecState.Idle(pick.reason, null))
         env.publish(RecState.Starting(mic.label))
         val wake = WakeLease(env.wake()).also { it.begin(guard) } // F2-FR6: the screen may sleep
@@ -86,6 +90,14 @@ class RecordingSession(private val env: Env, private val btWaitMs: Long = BT_WAI
             pinnedId = id
             phase = Phase.RECORDER
             rec.start(mic, id, InputSource.MIC, listOf(AudioSpec.USB))
+            return
+        }
+        if (mic.kind == MicKind.BUILT_IN) {
+            // F22-FR2: pinned like USB (INV1); F22-FR3: the best source the recorder accepts.
+            val id = mic.deviceId ?: return end(RecState.Idle(MicSelector.NONE, null))
+            pinnedId = id
+            phase = Phase.RECORDER
+            rec.start(mic, id, builtInSources(env.unprocessedSupported), AudioSpec.BUILT_IN)
             return
         }
         // F2-FR9: Bluetooth records only once SCO is up; nativeBeginMeeting waits for onReady.

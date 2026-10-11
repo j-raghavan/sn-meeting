@@ -226,3 +226,19 @@ fn an_unwritable_folder_is_a_storage_error() {
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
     assert_eq!(r, json!({"error": "storage: permission denied"}));
 }
+
+#[test]
+fn a_built_in_mic_is_recorded_as_such() {
+    // F22-FR1: the sidecar names the device's own mic, and an older reader's kinds are unchanged.
+    let e = Env::new();
+    let app = e.app();
+    let mic = json!({"kind": "builtin", "name": "Built-In Mic"});
+    parse(&app.begin_json(T0, &mic.to_string(), &audio_json().to_string()));
+    let sc = read_sidecar(&e.export(), ID0);
+    assert_eq!(sc.mic.as_ref().unwrap().kind, MicKind::Builtin);
+    assert_eq!(serde_json::to_value(MicKind::Usb).unwrap(), json!("usb"));
+    assert_eq!(
+        serde_json::to_value(MicKind::Bluetooth).unwrap(),
+        json!("bluetooth")
+    );
+}

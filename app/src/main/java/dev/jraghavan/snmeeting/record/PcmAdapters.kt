@@ -10,7 +10,6 @@ import android.media.AudioRouting
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
-import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Process
 import android.os.SystemClock
@@ -79,10 +78,6 @@ class PcmRecorderAdapter(private val ctx: Context, private val handler: Handler)
     private var base = PcmPipeline.Base()
     private var events: RecorderEvents? = null
 
-    @Suppress("DEPRECATION")
-    private fun audioSource(s: InputSource) =
-        if (s == InputSource.MIC) MediaRecorder.AudioSource.MIC else MediaRecorder.AudioSource.VOICE_COMMUNICATION
-
     private fun minBuffer(spec: AudioSpec) =
         AudioRecord.getMinBufferSize(spec.sampleRateHz, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
 
@@ -107,7 +102,7 @@ class PcmRecorderAdapter(private val ctx: Context, private val handler: Handler)
             throw SecurityException("RECORD_AUDIO is not granted")
         }
         val ar = AudioRecord.Builder()
-            .setAudioSource(audioSource(source))
+            .setAudioSource(source.platform())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(spec.sampleRateHz)
                 .setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
             .setBufferSizeInBytes(bufBytes)

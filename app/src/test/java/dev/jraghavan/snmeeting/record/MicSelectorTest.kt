@@ -84,4 +84,32 @@ class MicSelectorTest {
         assertEquals(listOf(false, false, true), gone.map { it.selected })
         assertEquals(3, MicSelector.settingsRows(options, MicChoice.Usb("USB-Audio - USB Audio")).size)
     }
+
+    private val builtIn = listOf(UsbInput(3, "Built-in mic"))
+
+    @Test fun theBuiltInMicComesLastAndRecordsAlone() { // F22-FR1, F22-AC1, F22-AC2
+        val all = MicSelector.pick(usb, jabra, MicChoice.Auto, builtIn)
+        assertEquals(listOf(MicKind.USB, MicKind.BLUETOOTH, MicKind.BUILT_IN), all.options.map { it.kind })
+        assertEquals(MicKind.USB, all.chosen!!.kind)
+        val alone = MicSelector.pick(emptyList(), BtSnapshot.NONE, MicChoice.Auto, builtIn)
+        assertEquals("Built-in — Built-in mic", alone.chosen!!.label)
+        assertEquals(3, alone.chosen!!.deviceId)
+        assertEquals("""{"kind":"builtin","name":"Built-in mic"}""", alone.chosen!!.json())
+        assertNull(alone.reason)
+        // A saved choice of the built-in mic wins over USB while it is there.
+        assertEquals(MicKind.BUILT_IN, MicSelector.pick(usb, jabra, MicChoice.BuiltIn("Built-in mic"), builtIn).chosen!!.kind)
+        assertEquals(MicChoice.BuiltIn("Built-in mic"), MicSelector.pick(usb, BtSnapshot.NONE, MicChoice.Auto, builtIn).toggled())
+    }
+
+    @Test fun settingsNameTheBuiltInMic() {
+        val rows = MicSelector.settingsRows(MicSelector.pick(emptyList(), BtSnapshot.NONE, MicChoice.Auto, builtIn).options, MicChoice.Auto)
+        assertEquals(listOf("Automatic", "Built-in — Built-in mic"), rows.map { it.label })
+        assertEquals("USB first, then Bluetooth, then built-in", rows.first().hint)
+        assertEquals("Built-in — Built-in mic", MicSelector.settingsRows(emptyList(), MicChoice.BuiltIn("Built-in mic")).last().label)
+    }
+
+    @Test fun theBuiltInSourcesInOrder() { // F22-FR3
+        assertEquals(listOf(InputSource.UNPROCESSED, InputSource.VOICE_RECOGNITION, InputSource.MIC), builtInSources(true))
+        assertEquals(listOf(InputSource.VOICE_RECOGNITION, InputSource.MIC), builtInSources(false))
+    }
 }

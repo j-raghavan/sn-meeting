@@ -241,6 +241,8 @@ pub struct Section {
 pub enum MicKind {
     Usb,
     Bluetooth,
+    /// F22-FR1: the device's own mic (`"builtin"`).
+    Builtin,
 }
 
 /// `micJson` of `nativeBeginMeeting` (F2-FR4).

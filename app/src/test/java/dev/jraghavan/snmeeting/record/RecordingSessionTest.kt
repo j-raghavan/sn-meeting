@@ -25,6 +25,10 @@ class RecordingSessionTest {
     private lateinit var link: ScoLink
     private lateinit var events: RecorderEvents
     private var stopThrows = false
+    private var builtIn = emptyList<UsbInput>()
+    private var unprocessed = false
+    /** Sources the recorder refuses (F22-FR3). */
+    private val refused = mutableSetOf<InputSource>()
 
     private val core = object : RecorderCore {
         override fun begin(startedAtMs: Long, micJson: String, audioJson: String, done: (CoreResult<Begun>) -> Unit) {
@@ -38,9 +42,10 @@ class RecordingSessionTest {
         }
     }
     private val rec = object : RecorderPort {
-        override fun accepts(spec: AudioSpec, source: InputSource, deviceId: Int) = true
+        override fun accepts(spec: AudioSpec, source: InputSource, deviceId: Int) = source !in refused
         override fun start(spec: AudioSpec, source: InputSource, deviceId: Int, path: String, maxFileBytes: Long, maxDurationMs: Int, events: RecorderEvents) {
             log += "mediarecorder start dev=$deviceId"
+            if (source != InputSource.MIC && source != InputSource.VOICE_COMMUNICATION) log += "source $source"
             this@RecordingSessionTest.events = events
         }
         override fun setNext(path: String) = true
@@ -66,6 +71,8 @@ class RecordingSessionTest {
     private val env = object : RecordingSession.Env {
         override val timer = this@RecordingSessionTest.timer
         override fun usbInputs() = usb
+        override fun builtInInputs() = builtIn
+        override val unprocessedSupported get() = unprocessed
         override fun openBluetooth(onChange: () -> Unit): BtPort {
             log += "bt open"; onBtChange = onChange
             return object : BtPort {
@@ -228,4 +235,48 @@ class RecordingSessionTest {
         assertEquals(1, published.count { it is RecState.Idle })
     }
 
+
+    // F22: the built-in mic.
+
+    @Test fun withNothingElseTheBuiltInMicRecordsPinned() {
+        btReady = true; usb = emptyList(); builtIn = listOf(UsbInput(3, "Built-in mic"))
+        session.begin(MicChoice.Auto)
+        assertEquals(RecState.Recording("m", "Built-in — Built-in mic", 0), published.last())
+        assertEquals(3, session.pinnedId)
+        assertTrue(log.containsAll(listOf("mediarecorder start dev=3", "source VOICE_RECOGNITION")))
+        // F22-AC3: a USB mic plugged in mid-recording changes nothing; the built-in one going away is mic loss.
+        usb = listOf(UsbInput(7, "USB-Audio")); session.onDevicesAdded()
+        assertEquals(RecordingSession.Phase.RECORDER, session.phase)
+        assertEquals(3, session.pinnedId)
+        session.onDevicesRemoved(listOf(3))
+        assertEquals(EndReason.MIC_LOST.message, ended!!.message)
+    }
+
+    @Test fun usbStillWinsOverTheBuiltInMic() {
+        btReady = true; builtIn = listOf(UsbInput(3, "Built-in mic"))
+        session.begin(MicChoice.Auto)
+        assertEquals(RecState.Recording("m", "USB — USB-Audio", 0), published.last())
+        assertEquals(7, session.pinnedId)
+    }
+
+    @Test fun theBuiltInSourceFallsBackInOrder() {
+        btReady = true; usb = emptyList(); builtIn = listOf(UsbInput(3, "Built-in mic")); unprocessed = true
+        refused += InputSource.UNPROCESSED
+        session.begin(MicChoice.Auto)
+        assertTrue(log.contains("source VOICE_RECOGNITION"))
+    }
+
+    @Test fun theBuiltInMicUsesUnprocessedWhereSupported() {
+        btReady = true; usb = emptyList(); builtIn = listOf(UsbInput(3, "Built-in mic")); unprocessed = true
+        session.begin(MicChoice.Auto)
+        assertTrue(log.contains("source UNPROCESSED"))
+    }
+
+    @Test fun aBuiltInMicThatRefusesEverySourceCantStart() {
+        btReady = true; usb = emptyList(); builtIn = listOf(UsbInput(3, "Built-in mic"))
+        refused += InputSource.entries
+        session.begin(MicChoice.Auto)
+        assertEquals(SegmentedRecorder.CANT_START, ended!!.message)
+        assertTrue(log.none { it.startsWith("mediarecorder start") })
+    }
 }

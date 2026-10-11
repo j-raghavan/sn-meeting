@@ -2,19 +2,23 @@ package dev.jraghavan.snmeeting.model
 
 import org.json.JSONObject
 
-/** settings.mic over JNI: "auto", "usb:<name>" or "bt:<name>" (F2-FR8, F10-FR2). */
+/** settings.mic over JNI: "auto", "usb:<name>", "bt:<name>" or "builtin:<name>" (F2-FR8, F10-FR2, F22-FR1). */
 sealed class MicChoice {
     object Auto : MicChoice()
     data class Usb(val name: String) : MicChoice()
     data class Bluetooth(val name: String) : MicChoice()
+    data class BuiltIn(val name: String) : MicChoice()
 
-    val wire: String get() = when (this) { Auto -> "auto"; is Usb -> "usb:$name"; is Bluetooth -> "bt:$name" }
+    val wire: String get() = when (this) {
+        Auto -> "auto"; is Usb -> "usb:$name"; is Bluetooth -> "bt:$name"; is BuiltIn -> "builtin:$name"
+    }
 
     companion object {
         fun of(s: String?): MicChoice = when {
             s == null -> Auto
             s.startsWith("usb:") -> Usb(s.removePrefix("usb:"))
             s.startsWith("bt:") -> Bluetooth(s.removePrefix("bt:"))
+            s.startsWith("builtin:") -> BuiltIn(s.removePrefix("builtin:"))
             else -> Auto
         }
     }

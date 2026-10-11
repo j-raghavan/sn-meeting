@@ -486,6 +486,12 @@ fn a_bluetooth_mic_is_named_in_the_layout() {
     let started = chrono::DateTime::parse_from_rfc3339(&sc.started_at).unwrap();
     let ctx = meeting::pipeline::context(&sc, tpl, &started);
     assert_eq!(ctx.mic, "Bluetooth — Jabra Evolve2");
+    sc.mic =
+        Some(serde_json::from_value(json!({"kind": "builtin", "name": "Built-In Mic"})).unwrap());
+    assert_eq!(
+        meeting::pipeline::context(&sc, tpl, &started).mic,
+        "Built-in — Built-In Mic"
+    ); // F22-FR1
     sc.mic = None; // legacy audio
     assert_eq!(meeting::pipeline::context(&sc, tpl, &started).mic, "");
 }
