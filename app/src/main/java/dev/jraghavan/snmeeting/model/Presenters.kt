@@ -96,7 +96,9 @@ data class MeetingHeader(
     companion object {
         fun of(m: Sidecar, cost: String = "—"): MeetingHeader {
             val n = m.segments.size
-            val mic = m.mic?.let { (if (it.kind == "bluetooth") "Bluetooth" else "USB") + " — " + it.name }
+            val mic = m.mic?.let { mic ->
+                (dev.jraghavan.snmeeting.record.MicKind.entries.firstOrNull { it.wire == mic.kind }?.label ?: "USB") + " — " + mic.name
+            }
             return MeetingHeader(
                 title = m.title?.takeIf { it.isNotBlank() } ?: Format.UNTITLED,
                 untitled = m.title.isNullOrBlank(),

@@ -82,6 +82,8 @@ class PresentersTest {
         assertEquals("Bluetooth — Jabra", b.mic)
         assertEquals(null, b.note)
         assertEquals(null, MeetingHeader.of(sc(mic = null)).mic) // legacy audio
+        // F22-FR1: a built-in recording says so, not "USB".
+        assertEquals("Built-in — Built-in mic", MeetingHeader.of(sc(mic = MicRef("builtin", "Built-in mic"))).mic)
     }
 
     private val found = KeyStatus.Found("copilot-key-openai.txt", "gpt-4o-mini", null)
