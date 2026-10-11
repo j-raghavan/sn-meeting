@@ -151,7 +151,7 @@ fn init_then_the_app_exports() {
         (r["status"].clone(), r["detail"].clone()),
         (
             json!("no_key"),
-            json!("Import copilot-key-openai.txt in Settings, or add it to MyStyle/SnCopilot")
+            json!("Add copilot-key-openai.txt to MyStyle/SnCopilot")
         )
     );
     assert_eq!(

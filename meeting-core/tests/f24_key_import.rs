@@ -401,11 +401,11 @@ fn load_first_prefers_a_good_key_and_reports_the_first_real_error() {
 }
 
 #[test]
-fn a_missing_key_points_to_the_import() {
+fn the_missing_key_hint_is_unchanged() {
     let e = Env::new();
     let s = reply(e.app().get_settings_json());
     assert_eq!(
         s["keys"]["gemini"]["detail"],
-        "Import copilot-key-gemini.txt in Settings, or add it to MyStyle/SnCopilot"
+        "Add copilot-key-gemini.txt to MyStyle/SnCopilot"
     );
 }

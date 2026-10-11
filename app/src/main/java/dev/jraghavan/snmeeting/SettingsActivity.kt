@@ -575,7 +575,9 @@ class SettingsActivity : Activity() {
 
         saveSection(column)
 
-        keysSection(column)
+        // F24: only off a Supernote, where SN-Copilot's folder isn't there to share; the
+        // Manta's Settings stay exactly as they were.
+        if (!onSupernote) keysSection(column)
 
         providerSection(column, "Transcription", SettingsView.TRANSCRIBE,
             "Anthropic can't transcribe audio, so it is offered for summaries only.")
@@ -596,7 +598,7 @@ class SettingsActivity : Activity() {
                     setOnLongClickListener { showSegmentLength = true; render(); true }
                 })
                 addView(ui.note("Core v${coreVersion()}", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
-                addView(ui.note("Keys are read from MyStyle/Meetings/keys, then MyStyle/SnCopilot (shared with SN-Copilot).", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
+                addView(ui.note(if (onSupernote) "Keys are read from MyStyle/SnCopilot (shared with SN-Copilot)." else "Keys are read from MyStyle/Meetings/keys, then MyStyle/SnCopilot.", 13f), ui.wrap().apply { topMargin = ui.dim(4) })
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
             updates(this)
@@ -733,6 +735,9 @@ class SettingsActivity : Activity() {
      * the model that will run and an optional override (empty = the key file's or the
      * default), and Test connection (F10-FR5).
      */
+    /** A Supernote: its pen service answers (the same test as the notes pen, never the model). */
+    private val onSupernote by lazy { dev.jraghavan.snmeeting.notes.SupernoteInk(this).present() }
+
     /**
      * F24: "Import key file…": the key files the core finds in Download, Documents, … ; the
      * core checks and copies the one picked into MyStyle/Meetings/keys (asking before it

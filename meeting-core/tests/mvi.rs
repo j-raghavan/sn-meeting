@@ -66,7 +66,7 @@ fn a_fresh_install_records_lists_and_plays_a_meeting() {
         (t["status"].clone(), t["detail"].clone()),
         (
             json!("no_key"),
-            json!("Import copilot-key-openai.txt in Settings, or add it to MyStyle/SnCopilot")
+            json!("Add copilot-key-openai.txt to MyStyle/SnCopilot")
         )
     );
     assert_eq!(

@@ -86,7 +86,7 @@ object NativeBridge {
      * Transcribes the segments not yet done, then summarises. Blocking for minutes: call it on
      * a job thread, never the UI thread. Progress is in the sidecar (poll [nativeGetMeeting]).
      * `{meeting: <sidecar>}` once a job ran (its status says how it ended), or `{error}` when
-     * nothing started ("meeting is busy", "Import copilot-key-openai.txt in Settings, …").
+     * nothing started ("meeting is busy", "Add copilot-key-openai.txt to MyStyle/SnCopilot").
      */
     external fun nativeTranscribe(id: String): String
 

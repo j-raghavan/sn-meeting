@@ -214,7 +214,7 @@ fn nothing_starts_without_a_key_or_in_the_wrong_status() {
     let fx = fixture("http://127.0.0.1:9", &[]);
     assert_eq!(
         parse(&fx.app.run_job_json(&fx.id, Job::Transcribe)),
-        json!({"error": "Import copilot-key-openai.txt in Settings, or add it to MyStyle/SnCopilot"})
+        json!({"error": "Add copilot-key-openai.txt to MyStyle/SnCopilot"})
     );
     assert_eq!(meeting(&fx)["status"], "recorded", "untouched");
     let fx = fixture("http://127.0.0.1:9", &["openai"]);
