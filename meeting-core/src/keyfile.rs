@@ -119,6 +119,8 @@ pub enum KeyError {
         expected: &'static str,
         found: String,
     },
+    #[error("provider=\"{0}\" isn't openai, gemini or anthropic")]
+    UnknownProvider(String),
     #[error("key file unreadable: {0}")]
     Unreadable(String),
 }
@@ -155,9 +157,9 @@ fn echoable(found: &str) -> String {
     }
 }
 
-/// F4-FR1: parse one file's text for `provider` (keyFiles.ts:104-162).
-pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
-    let normalised = text.replace("\r\n", "\n").replace('\r', "\n");
+/// `key=value` lines of a file already normalised to `\n` (keyFiles.ts:104-130): blank and `#`
+/// lines are skipped, a malformed line is ignored, and a duplicate key's last value wins.
+fn fields(normalised: &str) -> BTreeMap<&str, &str> {
     let mut fields: BTreeMap<&str, &str> = BTreeMap::new();
     for raw in normalised.split('\n') {
         let line = js_trim(raw);
@@ -173,6 +175,30 @@ pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
         }
         fields.insert(k, js_trim(v)); // duplicate: last wins
     }
+    fields
+}
+
+fn normalise(text: &str) -> String {
+    text.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+/// F24-FR1: the provider a file names on its `provider=` line, whatever the file is called.
+/// Only the canonical ids count, as in [`parse`]; anything else is a mismatch that never
+/// echoes an unknown value (it may be the key).
+pub fn provider_of(text: &str) -> Result<Provider, KeyError> {
+    let normalised = normalise(text);
+    let found = fields(&normalised)
+        .get("provider")
+        .copied()
+        .filter(|v| !v.is_empty())
+        .ok_or(KeyError::MissingField("provider"))?;
+    Provider::from_id(found).ok_or_else(|| KeyError::UnknownProvider(echoable(found)))
+}
+
+/// F4-FR1: parse one file's text for `provider` (keyFiles.ts:104-162).
+pub fn parse(text: &str, provider: Provider) -> Result<ProviderKey, KeyError> {
+    let normalised = normalise(text);
+    let fields = fields(&normalised);
     let field = |name: &'static str| {
         fields
             .get(name)
@@ -243,9 +269,32 @@ pub fn load(dir: &Path, provider: Provider) -> Result<ProviderKey, KeyError> {
     Err(first_error.unwrap_or_else(not_found))
 }
 
+/// F24-FR2: [`load`] over several folders, in order: the first good key wins, so an imported
+/// key (Meetings' own folder, first) is used over SN-Copilot's. When none is good, the first
+/// folder's real error is reported (a broken file there), else "not found".
+pub fn load_first(dirs: &[&Path], provider: Provider) -> Result<ProviderKey, KeyError> {
+    let mut first_error = None;
+    let mut vault_present = false;
+    for dir in dirs {
+        match load(dir, provider) {
+            Ok(key) => return Ok(key),
+            Err(KeyError::NotFound {
+                vault_present: v, ..
+            }) => vault_present |= v,
+            Err(e) => {
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or(KeyError::NotFound {
+        provider: provider.id(),
+        vault_present,
+    }))
+}
+
 /// Read at most `MAX_FILE_BYTES`, decoding lossily as sn-copilot's `decodeUtf8` does. Errors
 /// carry the I/O kind only, never the path or contents.
-fn read_capped(path: &Path) -> Result<String, KeyError> {
+pub(crate) fn read_capped(path: &Path) -> Result<String, KeyError> {
     let unreadable = |e: std::io::Error| KeyError::Unreadable(e.kind().to_string());
     if std::fs::metadata(path).map_err(unreadable)?.len() > MAX_FILE_BYTES {
         return Err(KeyError::Unreadable("file too large".into()));

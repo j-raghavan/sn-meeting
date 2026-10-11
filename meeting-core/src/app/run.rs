@@ -66,9 +66,9 @@ impl App {
         s: &Settings,
         role: Role,
     ) -> Result<(ProviderKey, String, settings::ModelSource), String> {
-        let usable = |p| settings::key_status(&self.core.key_dir, p).usable();
+        let usable = |p| self.key_status(p).usable();
         let p = settings::effective_provider(s, role, usable);
-        let key = keyfile::load(&self.core.key_dir, p).map_err(|e| key_problem(p, e))?;
+        let key = self.load_key(p).map_err(|e| key_problem(p, e))?;
         let from_key = Some((key.model.as_str(), key.transcribe_model.as_deref()));
         // Always Some with a key: summarise has the file's model, transcribe a default.
         let (model, source) =

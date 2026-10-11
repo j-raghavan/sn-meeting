@@ -87,6 +87,20 @@ pub fn test_connection_model(
     provider: &str,
     model_override: Option<&str>,
 ) -> String {
+    test_connection_with(core, role, provider, model_override, |p| {
+        keyfile::load(&core.key_dir, p)
+    })
+}
+
+/// [`test_connection_model`] with the key from `load` (`App` reads Meetings' own key folder
+/// before SN-Copilot's, F24-FR2).
+pub(crate) fn test_connection_with(
+    core: &Core,
+    role: &str,
+    provider: &str,
+    model_override: Option<&str>,
+    load: impl FnOnce(Provider) -> Result<keyfile::ProviderKey, keyfile::KeyError>,
+) -> String {
     let Some(p) = Provider::from_id(provider) else {
         return error_json("unknown provider");
     };
@@ -96,7 +110,7 @@ pub fn test_connection_model(
     if !r.providers().contains(&p) {
         return error_json(&format!("{} cannot {}", p.id(), r.id()));
     }
-    let key = match keyfile::load(&core.key_dir, p) {
+    let key = match load(p) {
         Ok(k) => k,
         Err(e) => return key_error_json(p, &settings::key_status_of(p, &Err(e))),
     };
@@ -155,6 +169,21 @@ fn key_error_json(p: Provider, ks: &KeyStatus) -> String {
 /// `nativeGetSettings`.
 pub fn get_settings() -> String {
     with_app(App::get_settings_json)
+}
+
+/// `nativeKeyFiles`: key files Settings can import (F24-FR3).
+pub fn key_files() -> String {
+    with_app(App::key_files_json)
+}
+
+/// `nativeImportKey(path, replace)` (F24-FR4).
+pub fn import_key(path: &str, replace: bool) -> String {
+    with_app(|app| app.import_key_json(path, replace))
+}
+
+/// `nativeDeleteKeySource(path)` (F24-FR5).
+pub fn delete_key_source(path: &str) -> String {
+    with_app(|app| app.delete_key_source_json(path))
 }
 
 /// `nativeSetSettings(json)`: an RFC 7396 merge patch.

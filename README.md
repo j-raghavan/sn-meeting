@@ -58,13 +58,13 @@ Here's what I'm building next:
 ## Quick start
 
 1. **Install.** Download `meetings-<version>.apk` from [Releases](https://github.com/j-raghavan/sn-meeting/releases) and sideload it (`adb install -r meetings-<version>.apk`). Releases are signed with the Meetings release key, so after that Meetings updates itself: it checks for a newer release when it opens (at most every 6 hours) and offers to install it. A copy you build yourself is signed with your own debug key and can't update itself.
-2. **Add a key.** Meetings reads keys from SN-Copilot's key files in `MyStyle/SnCopilot/`, for example `copilot-key-openai.txt`:
+2. **Add a key.** A key is a small text file, for example `copilot-key-openai.txt`:
    ```
    provider=openai
    key=sk-...
    model=gpt-4o-mini
    ```
-   The same format works for `copilot-key-gemini.txt` and `copilot-key-anthropic.txt`. Meetings never writes to these files and never shows the key.
+   The same format works for `copilot-key-gemini.txt` and `copilot-key-anthropic.txt`. On a Supernote that already has SN-Copilot, Meetings reads its keys from `MyStyle/SnCopilot/` and there's nothing to do. On any other tablet, copy the file to Download or Documents, then go to **Settings → Keys → Import key file…** and pick it. Meetings checks it, keeps its own copy in `MyStyle/Meetings/keys/` and offers to delete the one you copied. It never writes SN-Copilot's files and never shows the key.
 3. **Allow access.** On first launch, grant **All files access**, so Meetings can save to `EXPORT/sn-meeting`. It asks for the microphone the first time you record.
 4. **Record.** Plug in a USB microphone (or use a Bluetooth headset, or the tablet's own microphone) and tap **＋ New**. Tap **■ Stop** when the meeting ends.
 5. **Transcribe.** Open the meeting and tap **Transcribe**. Meetings transcribes it, then summarises it with the meeting's template.
