@@ -193,7 +193,7 @@ async fn missing_vaulted_and_broken_key_files() {
     );
     assert_eq!(
         detail(&r),
-        "Add copilot-key-openai.txt to MyStyle/SnCopilot"
+        "Import copilot-key-openai.txt in Settings, or add it to MyStyle/SnCopilot"
     );
     assert_eq!(
         (r["model"].clone(), r["ms"].clone()),

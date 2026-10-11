@@ -16,6 +16,9 @@ fn app_exports() -> Vec<(&'static str, String)> {
         ),
         ("getSettings", api::get_settings()),
         ("setSettings", api::set_settings("{}")),
+        ("keyFiles", api::key_files()),
+        ("importKey", api::import_key("x", false)),
+        ("deleteKeySource", api::delete_key_source("x")),
         ("beginMeeting", api::begin_meeting(0, "{}", "{}")),
         ("addSegment", api::add_segment("x", "y", 0)),
         ("closeSegment", api::close_segment("x", 0, 0)),
@@ -148,7 +151,7 @@ fn init_then_the_app_exports() {
         (r["status"].clone(), r["detail"].clone()),
         (
             json!("no_key"),
-            json!("Add copilot-key-openai.txt to MyStyle/SnCopilot")
+            json!("Import copilot-key-openai.txt in Settings, or add it to MyStyle/SnCopilot")
         )
     );
     assert_eq!(

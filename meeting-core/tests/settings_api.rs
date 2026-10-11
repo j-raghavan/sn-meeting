@@ -77,7 +77,7 @@ fn only_the_openai_key_selects_openai_for_both_roles() {
         assert_eq!(
             s["keys"][p],
             json!({"status": "missing", "file": format!("copilot-key-{p}.txt"),
-                   "detail": format!("Add copilot-key-{p}.txt to MyStyle/SnCopilot")})
+                   "detail": format!("Import copilot-key-{p}.txt in Settings, or add it to MyStyle/SnCopilot")})
         );
     }
     assert_eq!(
@@ -169,7 +169,7 @@ fn choosing_a_provider_needs_its_key() {
     let app = e.app();
     assert_eq!(
         set(&app, json!({"summarise": {"provider": "gemini"}})),
-        json!({"error": "Add copilot-key-gemini.txt to MyStyle/SnCopilot", "field": "summarise.provider"})
+        json!({"error": "Import copilot-key-gemini.txt in Settings, or add it to MyStyle/SnCopilot", "field": "summarise.provider"})
     );
     assert_eq!(
         set(&app, json!({"transcribe": {"provider": "anthropic"}})),

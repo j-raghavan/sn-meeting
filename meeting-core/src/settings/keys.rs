@@ -182,7 +182,7 @@ pub fn key_status_of(p: Provider, r: &Result<ProviderKey, KeyError>) -> KeyStatu
             file,
         },
         Err(KeyError::NotFound { .. }) => KeyStatus::Missing {
-            detail: format!("Add {file} to MyStyle/SnCopilot"),
+            detail: format!("Import {file} in Settings, or add it to MyStyle/SnCopilot"),
             file,
         },
         Err(e) => {

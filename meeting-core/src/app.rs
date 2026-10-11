@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 mod agenda;
 mod calendar;
 mod canvas;
+mod keys;
 mod live;
 mod notes;
 mod run;
@@ -406,7 +407,7 @@ impl App {
     fn key_statuses(&self) -> Vec<(Provider, KeyStatus)> {
         Provider::ALL
             .iter()
-            .map(|p| (*p, settings::key_status(&self.core.key_dir, *p)))
+            .map(|p| (*p, self.key_status(*p)))
             .collect()
     }
 
@@ -475,10 +476,10 @@ impl App {
         {
             return json!({"error": "template not found", "field": "defaultTemplate"}).to_string();
         }
-        let ks = |p| settings::key_status(&self.core.key_dir, p);
+        let ks = |p| self.key_status(p);
         let secrets: Vec<String> = Provider::ALL
             .iter()
-            .filter_map(|p| crate::keyfile::load(&self.core.key_dir, *p).ok())
+            .filter_map(|p| self.load_key(*p).ok())
             .map(|k| k.expose().to_owned())
             .chain(self.link_secrets())
             .collect();
@@ -532,19 +533,21 @@ impl App {
             _ => return api::test_connection_model(&self.core, role, provider, None),
         };
         let (s, _) = self.settings();
-        let usable = |q| settings::key_status(&self.core.key_dir, q).usable();
+        let usable = |q| self.key_status(q).usable();
         let model = (settings::effective_provider(&s, r, usable) == p)
             .then(|| s.role(r).model.clone())
             .flatten();
         if r == Role::Transcribe
             && r.providers().contains(&p)
             && model.is_none()
-            && let Ok(key) = crate::keyfile::load(&self.core.key_dir, p)
+            && let Ok(key) = self.load_key(p)
             && key.transcribe_model.is_none()
         {
             return api::test_connection_auto(&self.core, &key, |ids| self.store_models(p, ids));
         }
-        api::test_connection_model(&self.core, role, provider, model.as_deref())
+        api::test_connection_with(&self.core, role, provider, model.as_deref(), |p| {
+            self.load_key(p)
+        })
     }
 }
 

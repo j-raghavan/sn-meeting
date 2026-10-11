@@ -8,6 +8,7 @@ pub mod chunk;
 pub mod ink;
 pub mod jobs;
 pub mod keyfile;
+pub mod keyimport;
 pub mod library;
 pub mod marks;
 pub mod minutes;

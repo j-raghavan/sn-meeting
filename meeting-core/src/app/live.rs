@@ -54,7 +54,7 @@ impl App {
     /// The transcription model for `key`'s provider as Settings choose it now: an override
     /// (when that provider is the role's), the key file's `transcribe_model`, or the default.
     fn live_model(&self, s: &Settings, key: &ProviderKey) -> (String, ModelSource) {
-        let usable = |p| settings::key_status(&self.core.key_dir, p).usable();
+        let usable = |p| self.key_status(p).usable();
         let role_provider = settings::effective_provider(s, Role::Transcribe, usable);
         let over = (role_provider == key.provider)
             .then(|| s.transcribe.model.clone())
@@ -70,9 +70,10 @@ impl App {
     /// notice declined) the lane stays paused and the chunks wait for Transcribe.
     pub fn start_live_json(&self, id: &str, send: bool) -> String {
         let (s, _) = self.settings();
-        let usable = |p| settings::key_status(&self.core.key_dir, p).usable();
+        let usable = |p| self.key_status(p).usable();
         let provider = settings::effective_provider(&s, Role::Transcribe, usable);
-        let model = keyfile::load(&self.core.key_dir, provider)
+        let model = self
+            .load_key(provider)
             .ok()
             .map(|k| self.live_model(&s, &k))
             .filter(|(_, src)| *src != ModelSource::Default)
@@ -177,7 +178,7 @@ impl App {
                 return reply(json!({"state": "idle"}));
             };
             let live = sc.live.clone().expect("lane_state checked it");
-            let key = match keyfile::load(&self.core.key_dir, live.provider) {
+            let key = match self.load_key(live.provider) {
                 Ok(k) => k,
                 Err(e) => {
                     let r = live::paused_reason(&key_detail(live.provider, e));

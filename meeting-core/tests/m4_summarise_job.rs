@@ -328,11 +328,11 @@ fn without_a_summarise_key_transcription_stops_at_transcribed() {
     assert_eq!(m["status"], "transcribed");
     assert_eq!(
         m["error"],
-        "Add copilot-key-anthropic.txt to MyStyle/SnCopilot"
+        "Import copilot-key-anthropic.txt in Settings, or add it to MyStyle/SnCopilot"
     );
     assert_eq!(
         fx.run(Job::Summarise),
-        json!({"error": "Add copilot-key-anthropic.txt to MyStyle/SnCopilot"})
+        json!({"error": "Import copilot-key-anthropic.txt in Settings, or add it to MyStyle/SnCopilot"})
     );
 }
 

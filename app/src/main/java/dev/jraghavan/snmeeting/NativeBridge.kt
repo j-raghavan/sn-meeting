@@ -30,6 +30,15 @@ object NativeBridge {
     /** An RFC 7396 merge patch; replies as [nativeGetSettings], or `{error, field}`. */
     external fun nativeSetSettings(json: String): String
 
+    /** F24: `{"files":[{path, name, folder}]}`, the key files Settings can import. */
+    external fun nativeKeyFiles(): String
+
+    /** F24: `{"imported": id, "replaced": b}`, `{"exists": id}` or `{"error"}`; the core reads the file, never this side. */
+    external fun nativeImportKey(path: String, replace: Boolean): String
+
+    /** F24: delete the copy just imported, once Meetings' own file matches it. */
+    external fun nativeDeleteKeySource(path: String): String
+
     // Library (F3). The core serialises every sidecar write under one lock, so these may be
     // called from any background thread (CoreJobs in practice).
 
@@ -77,7 +86,7 @@ object NativeBridge {
      * Transcribes the segments not yet done, then summarises. Blocking for minutes: call it on
      * a job thread, never the UI thread. Progress is in the sidecar (poll [nativeGetMeeting]).
      * `{meeting: <sidecar>}` once a job ran (its status says how it ended), or `{error}` when
-     * nothing started ("meeting is busy", "Add copilot-key-openai.txt to MyStyle/SnCopilot").
+     * nothing started ("meeting is busy", "Import copilot-key-openai.txt in Settings, …").
      */
     external fun nativeTranscribe(id: String): String
 
