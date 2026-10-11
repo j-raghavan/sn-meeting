@@ -61,22 +61,22 @@ class ViewportTest { // F13-FR1 / F17-FR1: pan, pinch-zoom 5 %–2000 %, the zoo
         assertNull(WorldRect.of(null))
     }
 
-    @Test fun theMinimapCardSitsAtTheTopCornerAwayFromTheBar() { // F17-FR13
+    @Test fun theMinimapCardSitsAtTheTopCornerBesideTheBar() { // F17-FR13; owner 2026-10-10: only the minimap moves to the top right
         val ink = WorldRect(0.0, 0.0, 5_000.0, 5_000.0)
         val view = Viewport(10_000.0, 10_000.0, 1.0)
         val d = 2.0
-        // A quarter of a wide canvas; never under 200 dp on a narrow one.
+        // A fifth of a wide canvas; never under 160 dp on a narrow one.
         val right = MinimapFrame.of(ink, view, 2_000.0, 2_400.0, barOnLeft = false, d, top = 100.0)!!
-        assertEquals(500.0, right.width, eps)
-        assertEquals(600.0, right.height, eps) // the canvas's shape
-        assertEquals(400.0, MinimapFrame.of(ink, view, 1_200.0, 1_400.0, false, d)!!.width, eps)
-        assertEquals((12.0 + 6.0) * d, right.left, eps)
+        assertEquals(400.0, right.width, eps)
+        assertEquals(480.0, right.height, eps) // the canvas's shape
+        assertEquals(320.0, MinimapFrame.of(ink, view, 1_200.0, 1_400.0, false, d)!!.width, eps)
+        assertEquals(2_000.0 - (12.0 + 6.0) * d, right.left + right.width, eps) // the bar is on the right
         assertEquals(100.0 + 6.0 * d, right.top, eps) // under the zoom pill
         val left = MinimapFrame.of(ink, view, 2_000.0, 2_400.0, barOnLeft = true, d)!!
-        assertEquals(2_000.0 - (12.0 + 6.0) * d, left.left + left.width, eps)
+        assertEquals((12.0 + 6.0) * d, left.left, eps)
         assertEquals((12.0 + 6.0) * d, left.top, eps)
         // The card wraps the thumbnail and the −/+ row.
-        assertEquals(right.left - 12.0, right.cardLeft, eps)
+        assertEquals(right.left - 12.0, right.cardLeft, eps) // pad 6 dp at 2 px/dp
         assertEquals(right.top + right.height + 6.0 * d, right.buttonTop, eps)
         assertEquals(right.buttonTop + 48.0 * d + 12.0, right.cardBottom, eps)
         assertNull(MinimapFrame.of(ink, view, 0.0, 10.0, false))

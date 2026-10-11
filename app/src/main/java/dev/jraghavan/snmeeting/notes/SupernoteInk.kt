@@ -15,13 +15,18 @@ import android.util.Log
  * throws. The contract (service name, token, transaction codes, parcel layout) is the one
  * inkread reproduces from plateaukao's AGPL-3 reimplementation of HandWriteClient.
  */
-class SupernoteInk(private val context: Context) {
+class SupernoteInk(private val context: Context) : PenInk {
     private var cached: IBinder? = null
     private var active = false
     /** Whether the pen inks at all now (the Pen tool); the disabled areas apply only then. */
     private var writable = false
     /** F17-FR4: where the pen must never ink (screen px): every control, not the canvas. */
     private var areas: List<PxRect> = emptyList()
+
+    /** F23-FR4: whether this device has the Supernote pen daemon at all. */
+    fun present(): Boolean = binder() != null
+
+    override var onReady: (() -> Unit)? = null
 
     private fun binder(): IBinder? {
         cached?.let { if (it.isBinderAlive) return it }
@@ -69,7 +74,7 @@ class SupernoteInk(private val context: Context) {
      * disabled areas, the needle pen), except that the disabled areas are the last ones
      * [setDisabledAreas] was given rather than none.
      */
-    fun setup(reason: String = ""): Boolean {
+    override fun setup(reason: String): Boolean {
         val b = binder()
         if (b == null) {
             Log.i(TAG, "SupernoteInk: setup failed ($reason): binder=null")
@@ -86,7 +91,7 @@ class SupernoteInk(private val context: Context) {
     }
 
     /** F21-FR7: the live pen (nib, size, tone); sent now when claimed, and on every [setup]. */
-    var pen: dev.jraghavan.snmeeting.notes.canvas.FirmwarePen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.NEEDLE_BLACK
+    override var pen: dev.jraghavan.snmeeting.notes.canvas.FirmwarePen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.NEEDLE_BLACK
         set(v) {
             if (v == field) return
             field = v
@@ -100,13 +105,13 @@ class SupernoteInk(private val context: Context) {
     }
 
     /** Wipe the overlay (the canvas then redraws its own rendering of every stroke). */
-    fun clearAll() {
+    override fun clearAll() {
         if (active) send(TX_DRAW_BUFFER) { it.writeInt(255); it.writeInt(0) }
     }
 
     /** Firmware ink on (except over [areas]) or off over the whole window (off for Eraser,
      *  Lasso and Listen). */
-    fun setWritable(enable: Boolean) {
+    override fun setWritable(enable: Boolean) {
         if (!active) return
         Log.i(TAG, "SupernoteInk: writable=$enable")
         writable = enable
@@ -121,7 +126,7 @@ class SupernoteInk(private val context: Context) {
      * while the pen inks, and again on every [setup] and [setWritable] (true). [where] is
      * logged with them, e.g. the window offset, so the space can be checked on the device.
      */
-    fun setDisabledAreas(rects: List<PxRect>, where: String = "") {
+    override fun setDisabledAreas(rects: List<PxRect>, where: String) {
         if (rects == areas) return
         areas = rects
         Log.i(TAG, "SupernoteInk: disabled areas ${InkAreas.describe(rects)} $where")
@@ -138,7 +143,7 @@ class SupernoteInk(private val context: Context) {
     }
 
     /** Release the pen when the page goes, ink off (inkread #157: else it inks other apps). */
-    fun teardown() {
+    override fun teardown() {
         if (!active) return
         // F21-FR7: the firmware pen is set back, as sn-canvas does when it closes.
         pen = dev.jraghavan.snmeeting.notes.canvas.FirmwarePen.NEEDLE_BLACK
@@ -150,7 +155,7 @@ class SupernoteInk(private val context: Context) {
     }
 
     /** A full-panel refresh, only when the user asks (the bar's refresh option, F17-FR11). */
-    fun fullRefresh() {
+    override fun fullRefresh() {
         try {
             val e = context.getSystemService("eink") ?: return
             Class.forName("android.os.EinkManager").getDeclaredMethod("sendOneFullFrame").invoke(e)
@@ -161,7 +166,7 @@ class SupernoteInk(private val context: Context) {
 
     /** Hand full touch streams to the canvas: the system gesture service otherwise eats finger
      *  ups (inkread `SupernoteEinkAdapter.setSystemGesturesEnabled`). */
-    fun systemGestures(enabled: Boolean) {
+    override fun systemGestures(enabled: Boolean) {
         eink("setGlobalGuestureEnabled", enabled)
         eink("setStylusGuestureEnabled", enabled)
     }

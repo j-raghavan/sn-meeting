@@ -82,6 +82,16 @@ class SidePanels(
 
     /** Show [content] as [panel] beside the bar, level with [anchor] (kept on screen). */
     fun show(panel: ToolBarModel.Panel, anchor: View, content: View) {
+        // A button the bar has just rebuilt isn't laid out yet: place the panel once it is.
+        if (anchor.isAttachedToWindow && !anchor.isLaidOut) {
+            anchor.viewTreeObserver.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+                override fun onGlobalLayout() {
+                    anchor.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    show(panel, anchor, content)
+                }
+            })
+            return
+        }
         removeView()
         val frame = LinearLayout(a).apply {
             orientation = LinearLayout.VERTICAL
@@ -146,7 +156,7 @@ class SidePanels(
             val on = enabled(i)
             addView(TextView(a).apply {
                 text = label
-                textSize = 17f
+                textSize = 17f * dev.jraghavan.snmeeting.DeviceScale.factor(a.resources.displayMetrics.densityDpi)
                 typeface = ui.serif
                 setTextColor(if (on) ui.ink else ui.textMuted)
                 isEnabled = on
@@ -157,5 +167,11 @@ class SidePanels(
             })
             if (i < labels.size - 1) addView(ui.hairline())
         }
+        // As wide as the longest row: a full-width hairline would otherwise stretch the panel
+        // across the whole canvas.
+        val widest = (0 until childCount).map { getChildAt(it) }.filterIsInstance<TextView>().maxOfOrNull {
+            it.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED); it.measuredWidth
+        } ?: 0
+        (0 until childCount).forEach { k -> getChildAt(k).layoutParams = LinearLayout.LayoutParams(widest, getChildAt(k).layoutParams?.height ?: LinearLayout.LayoutParams.WRAP_CONTENT) }
     }
 }

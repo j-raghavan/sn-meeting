@@ -239,8 +239,9 @@ fn rule_ok(r: &TemplateRule) -> bool {
         && is_template_id(&r.template_id)
 }
 
-/// The remembered mic: `"auto"` (USB first, then Bluetooth), `"usb:<device name>"` or
-/// `"bt:<device name>"`, on disk and over JNI (F10-FR2, F2-FR8). Chosen by device name.
+/// The remembered mic: `"auto"` (USB first, then Bluetooth, then built-in), `"usb:<device name>"`,
+/// `"bt:<device name>"` or `"builtin:<device name>"` (F22-FR1), on disk and over JNI (F10-FR2,
+/// F2-FR8). Chosen by device name.
 #[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub enum MicChoice {
@@ -248,6 +249,7 @@ pub enum MicChoice {
     Auto,
     Usb(String),
     Bluetooth(String),
+    BuiltIn(String),
 }
 
 const MAX_MIC_NAME: usize = 200;
@@ -267,8 +269,10 @@ impl TryFrom<String> for MicChoice {
             Ok(MicChoice::Usb(named(n)?))
         } else if let Some(n) = s.strip_prefix("bt:") {
             Ok(MicChoice::Bluetooth(named(n)?))
+        } else if let Some(n) = s.strip_prefix("builtin:") {
+            Ok(MicChoice::BuiltIn(named(n)?))
         } else {
-            Err("mic must be auto, usb:<name> or bt:<name>".to_owned())
+            Err("mic must be auto, usb:<name>, bt:<name> or builtin:<name>".to_owned())
         }
     }
 }
@@ -279,6 +283,7 @@ impl From<MicChoice> for String {
             MicChoice::Auto => "auto".into(),
             MicChoice::Usb(n) => format!("usb:{n}"),
             MicChoice::Bluetooth(n) => format!("bt:{n}"),
+            MicChoice::BuiltIn(n) => format!("builtin:{n}"),
         }
     }
 }

@@ -47,6 +47,7 @@ import dev.jraghavan.snmeeting.record.MicSelector
 import dev.jraghavan.snmeeting.record.RecState
 import dev.jraghavan.snmeeting.record.deviceRecoverer
 import dev.jraghavan.snmeeting.record.RecordingService
+import dev.jraghavan.snmeeting.record.builtInInputs
 import dev.jraghavan.snmeeting.record.usbInputs
 import dev.jraghavan.snmeeting.update.UpdateGate
 import java.time.LocalDate
@@ -494,7 +495,7 @@ class MainActivity : Activity(), HomeLists.Actions {
     /** The mic a new meeting would use now, or why there is none (F2-FR2). */
     private fun pick(): MicPick {
         val am = getSystemService(AudioManager::class.java)
-        return MicSelector.pick(usbInputs(am), bt?.snapshot() ?: BtSnapshot.NONE, micChoice)
+        return MicSelector.pick(usbInputs(am), bt?.snapshot() ?: BtSnapshot.NONE, micChoice, builtInInputs(am))
     }
 
     /** ＋ New starts the service; ■ Stop asks it to stop. The hub reports what happened. */

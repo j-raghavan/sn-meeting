@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::fs;
 
 #[test]
-fn the_three_forms_round_trip() {
+fn every_form_round_trips() {
     for (text, mic) in [
         ("auto", MicChoice::Auto),
         (
@@ -20,6 +20,11 @@ fn the_three_forms_round_trip() {
         (
             "bt:Name: with colon",
             MicChoice::Bluetooth("Name: with colon".into()),
+        ),
+        // F22-FR1: the device's own mic.
+        (
+            "builtin:Built-In Mic",
+            MicChoice::BuiltIn("Built-In Mic".into()),
         ),
     ] {
         assert_eq!(
@@ -38,7 +43,17 @@ fn the_three_forms_round_trip() {
 
 #[test]
 fn bad_forms_are_rejected() {
-    for bad in ["", "AUTO", "usb", "usb:", "bt:   ", "wifi:x", "bt:a\nb"] {
+    for bad in [
+        "",
+        "AUTO",
+        "usb",
+        "usb:",
+        "bt:   ",
+        "wifi:x",
+        "bt:a\nb",
+        "builtin",
+        "builtin: ",
+    ] {
         assert!(MicChoice::try_from(bad.to_owned()).is_err(), "{bad:?}");
     }
     let long = format!("usb:{}", "n".repeat(201));
@@ -74,7 +89,7 @@ fn set_through_settings_and_persisted() {
     );
     assert_eq!(
         set(&a, json!({"mic": "headset"})),
-        json!({"error": "mic must be auto, usb:<name> or bt:<name>", "field": "mic"})
+        json!({"error": "mic must be auto, usb:<name>, bt:<name> or builtin:<name>", "field": "mic"})
     );
     assert_eq!(
         set(&a, json!({"mic": 3})),

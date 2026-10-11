@@ -52,7 +52,7 @@ class HomeLists(private val a: Activity, private val ui: Inkwell, private val ac
     private val dayColumn = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL }
     /** F20-FR11: the compact Tag Graph (taps only; the full view zooms and pans). */
     private var tagGraph: TagGraph = TagGraph.EMPTY
-    private val tagPanel = TagGraphView(a, a.resources.displayMetrics.density, interactive = false) { i ->
+    private val tagPanel = TagGraphView(a, DeviceScale.density(a.resources), interactive = false) { i ->
         i?.let { tagGraph.nodes.getOrNull(it) }?.let { actions.onTags(it.name) }
     }
     private val tagEmpty = ui.note(TagGraphActivity.EMPTY, 14f, ui.textMuted).apply {

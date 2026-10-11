@@ -26,10 +26,23 @@ data class AudioSpec(val sampleRateHz: Int, val bitrateBps: Int) {
         val USB = AudioSpec(44_100, 96_000)
         val BLUETOOTH = AudioSpec(16_000, 32_000)
         val BLUETOOTH_FALLBACK = AudioSpec(16_000, 48_000)
+        /** F22: the built-in mic records as USB does, falling back to Bluetooth's 16 kHz. */
+        val BUILT_IN = listOf(USB, AudioSpec(16_000, 48_000))
     }
 }
 
-enum class InputSource { MIC, VOICE_COMMUNICATION }
+enum class InputSource {
+    MIC, VOICE_COMMUNICATION,
+    /** F22-FR3: the built-in mic's sources, best first (see [BUILT_IN_SOURCES]). */
+    VOICE_RECOGNITION, UNPROCESSED,
+}
+
+/**
+ * F22-FR3: the built-in mic tries these in order; a device that does better with another source
+ * is a change here. UNPROCESSED only where the platform says it is supported.
+ */
+fun builtInSources(unprocessedSupported: Boolean): List<InputSource> =
+    listOfNotNull(InputSource.UNPROCESSED.takeIf { unprocessedSupported }, InputSource.VOICE_RECOGNITION, InputSource.MIC)
 
 /** What the recorder reports (MediaRecorder OnInfo / OnError / AudioRouting). */
 interface RecorderEvents {

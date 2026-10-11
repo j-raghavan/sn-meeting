@@ -67,14 +67,23 @@ class SegmentedRecorder(
     private fun pathFor(number: Int): String = segmentPath(begun.firstSegmentPath, begun.id, number)
 
     /** [candidates] in order of preference; the first the encoder accepts is used (F2-FR4). */
-    fun start(mic: MicOption, deviceId: Int, source: InputSource, candidates: List<AudioSpec>) {
+    fun start(mic: MicOption, deviceId: Int, source: InputSource, candidates: List<AudioSpec>) =
+        start(mic, deviceId, listOf(source), candidates)
+
+    /**
+     * F22-FR3: [sources] in order of preference as well. The first source with a spec the
+     * recorder accepts is used; each source tries every spec before the next source.
+     */
+    fun start(mic: MicOption, deviceId: Int, sources: List<InputSource>, candidates: List<AudioSpec>) {
         if (phase == Phase.ENDED) return // stopped before it started (Stop while SCO connected)
         check(phase == Phase.IDLE) { "start twice" }
-        this.deviceId = deviceId; this.source = source
+        this.deviceId = deviceId
         phase = Phase.BEGINNING
         // A probe that throws (setAudioSource can) is a spec the encoder won't take.
-        spec = candidates.firstOrNull { runCatching { rec.accepts(it, source, deviceId) }.getOrDefault(false) }
-            ?: return abort(CANT_START)
+        val (s, sp) = sources.firstNotNullOfOrNull { s ->
+            candidates.firstOrNull { runCatching { rec.accepts(it, s, deviceId) }.getOrDefault(false) }?.let { s to it }
+        } ?: return abort(CANT_START)
+        source = s; spec = sp
         core.begin(clock.wallMs(), mic.json(), spec.json()) { r ->
             safely("begin") {
                 when (r) {

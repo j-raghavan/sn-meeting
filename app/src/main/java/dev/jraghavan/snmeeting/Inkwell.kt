@@ -22,7 +22,9 @@ import android.widget.TextView
  */
 class Inkwell(private val activity: Activity) {
 
-    private val density get() = activity.resources.displayMetrics.density
+    /** F23: Android's density times the device factor ([DeviceScale]; 1 on the Manta). */
+    private val density get() = DeviceScale.density(activity.resources)
+    private val factor get() = DeviceScale.factor(activity.resources.displayMetrics.densityDpi)
     fun dp(v: Int) = (v * density).toInt()
     val phi = 1.618f
 
@@ -53,7 +55,9 @@ class Inkwell(private val activity: Activity) {
     }
 
     fun dim(designUnits: Number) = dp((designUnits.toFloat() * scale).toInt()).coerceAtLeast(1)
-    fun fs(designUnits: Number) = designUnits.toFloat() * scale
+    /** Text in sp: [scale] is computed in device-scaled dp, so the factor comes back here and a
+     *  width-driven screen reads the same on every device. */
+    fun fs(designUnits: Number) = designUnits.toFloat() * scale * factor
     private val keyline get() = maxOf(1, dp(1))
 
     // ---- page scaffolding ----
