@@ -8,32 +8,46 @@
 <h1 align="center">Meetings</h1>
 
 <p align="center">
-  <strong>Record meetings on your Supernote, then turn them into a transcript, a summary and a to-do list.</strong>
+  <strong>Record meetings on your e-ink tablet (Supernote, Musnap, Viwoods), then turn them into a transcript, a summary and a to-do list.</strong>
 </p>
 
 <p align="center">
   <a href="https://github.com/j-raghavan/sn-meeting/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/j-raghavan/sn-meeting/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="core: Rust" src="https://img.shields.io/badge/core-Rust-orange?logo=rust&logoColor=white">
-  <img alt="platform: Supernote" src="https://img.shields.io/badge/platform-Supernote-blue">
+  <img alt="platform: Supernote | Musnap | Viwoods" src="https://img.shields.io/badge/platform-Supernote%20%7C%20Musnap%20%7C%20Viwoods-blue">
   <a href="./LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
 </p>
 
 ---
 
-I wanted my Supernote to record a meeting and hand me back a transcript, a summary and the to-dos, without leaving the device. Meetings is the Android app I built for that (the Supernote runs Android 11). Plug in a USB microphone, or connect a Bluetooth headset, and tap **＋ New**. It records in the background while you take notes in another app. Afterwards it transcribes the recording, summarises it with a template you choose, and keeps every open to-do from every meeting on its home screen.
+I wanted my Supernote to record a meeting and hand me back a transcript, a summary and the to-dos, without leaving the device. Meetings is the Android app I built for that. It started on my Supernote Manta, and now runs on my Musnap Aura C too; both are Android e-ink tablets, as is the Viwoods AI Paper. Plug in a USB microphone, connect a Bluetooth headset, or use the tablet's own microphone, and tap **＋ New**. It records in the background while you take notes in another app. Afterwards it transcribes the recording, summarises it with a template you choose, and keeps every open to-do from every meeting on its home screen.
 
 I built it the same way as [inkread](https://github.com/j-raghavan/inkread): a small Kotlin shell for the Android parts, around a Rust core that does everything else and that I can test on my laptop without the device.
 
 ## Why Meetings?
 
 - **A meeting recorder that suits e-ink.** It is black on white with no animations, and it shows explicit cues ("SCROLL FOR MORE ↓") instead of motion. I gave it the same look as inkread.
-- **Your audio stays a file you own.** Recordings, transcripts and to-dos are plain files in `EXPORT/sn-meeting`, which Supernote Partner syncs to your computer. There is no database and no lock-in.
+- **Your audio stays a file you own.** Recordings, transcripts and to-dos are plain files in `EXPORT/sn-meeting`, which Supernote Partner (or whatever sync your tablet uses) copies to your computer. There is no database and no lock-in.
 - **Bring your own AI provider.** Transcribe with OpenAI or Google Gemini, and summarise with OpenAI, Gemini or Anthropic. Meetings reuses the API keys you already keep on the device for SN-Copilot, so there's no second place to paste them.
 - **Built to survive real meetings.** Long recordings are split into 15-minute segments, so a crash loses at most one segment. Unplugging the mic ends the recording cleanly and keeps the audio. A crashed recording is recovered the next time the app opens.
 
 ## Status
 
 Meetings is at **v0.1**. Everything below works, and CI checks it on every pull request. On my Supernote A5 X2 Manta I've tested recording, transcription and summaries, recovery after a crash, and unplugging the mic mid-recording. I've also recorded a 20-minute meeting with the screen asleep for most of it: it carried on recording, rolled over into a second segment with no gap, and both segments came out as clean audio.
+
+On my Musnap Aura C I've tested recording from its built-in microphones, transcription and summaries, and writing notes with its fast pen, in colour.
+
+### Tablets
+
+Each e-ink tablet has its own way of drawing the pen quickly and its own screen, so Meetings looks at what the tablet offers rather than its brand:
+
+| Tablet | Pen | Screen | Microphone |
+|---|---|---|---|
+| **Supernote** (A5 X2 Manta, Nomad) | Supernote's own pen engine | black and white | USB, then Bluetooth (the Manta's built-in microphone records only noise) |
+| **Musnap Aura C** | the system hand-write of its iReader platform | colour | its built-in microphones, or Bluetooth (its kernel has no USB audio) |
+| **Viwoods AI Paper** and other Android e-ink tablets | standard Android drawing | as the tablet reports it | USB, then Bluetooth, then built-in |
+
+Buttons, panels and text are sized from each screen's density, so they come out the same physical size on an 8.2" tablet and a 10.65" one. On a colour screen the style colours show as colours; on a black-and-white one each is its own grey.
 
 ### Roadmap
 
@@ -53,10 +67,10 @@ Here's what I'm building next:
    ```
    The same format works for `copilot-key-gemini.txt` and `copilot-key-anthropic.txt`. Meetings never writes to these files and never shows the key.
 3. **Allow access.** On first launch, grant **All files access**, so Meetings can save to `EXPORT/sn-meeting`. It asks for the microphone the first time you record.
-4. **Record.** Plug in a USB microphone and tap **＋ New**. Tap **■ Stop** when the meeting ends.
+4. **Record.** Plug in a USB microphone (or use a Bluetooth headset, or the tablet's own microphone) and tap **＋ New**. Tap **■ Stop** when the meeting ends.
 5. **Transcribe.** Open the meeting and tap **Transcribe**. Meetings transcribes it, then summarises it with the meeting's template.
 
-On my Manta the built-in microphone records only noise, so Meetings records only from a USB microphone or a Bluetooth headset. The USB-C port can't take a computer and a USB microphone at the same time, so I develop over adb on Wi-Fi (see Building).
+On my Manta the built-in microphone records only noise, so there I use a USB microphone or a Bluetooth headset. On my Musnap the built-in microphones record clean audio. The Manta's USB-C port can't take a computer and a USB microphone at the same time, so I develop over adb on Wi-Fi (see Building).
 
 ## Using Meetings
 
@@ -64,12 +78,12 @@ On my Manta the built-in microphone records only noise, so Meetings records only
 Your five most recent meetings and every open to-do sit side by side. Tick a to-do to close it. The gear opens Settings.
 
 ### Recording
-- **USB first, then Bluetooth,** or the microphone you choose in Settings. USB records at 44.1 kHz; Bluetooth headsets record at 16 kHz.
+- **USB first, then Bluetooth, then the tablet's built-in microphone,** or the microphone you choose in Settings. USB and the built-in microphone record at 44.1 kHz where the tablet allows it; Bluetooth headsets record at 16 kHz. The meeting's Minutes say which kind it was.
 - Recording continues with the screen off or another app open. A notification shows the elapsed time and a Stop button.
 - If the microphone is unplugged or the headset drops out, the recording stops, keeps what it captured, and notes "mic disconnected".
 
 ### Writing notes
-I wanted to write while I listen, and later tap a line of my handwriting to hear what was being said as I wrote it. Supernote's own Notes app can't tell me when a stroke was written, so I write on the meeting's own page in Meetings. Every stroke I write while recording carries its time on the recording.
+I wanted to write while I listen, and later tap a line of my handwriting to hear what was being said as I wrote it. A tablet's own notes app can't tell me when a stroke was written, so I write on the meeting's own page in Meetings. Every stroke I write while recording carries its time on the recording.
 
 - **Notes | Minutes.** The meeting page has two tabs. A meeting I'm recording opens on **Notes**; an earlier one opens on **Minutes**. While recording, the top right shows the timer.
 - **The canvas has no edges.** I write with the pen. A finger never draws: I drag with one finger to move around and pinch to zoom from 5% to 2000%. The pill at the top left has **Fit**, **100%**, **50%** and **25%**, and **MAP** opens the minimap, which shows all my ink and where I am; I tap it, or drag its rectangle, to go there. A resting palm leaves no mark.
@@ -78,11 +92,11 @@ I wanted to write while I listen, and later tap a line of my handwriting to hear
   ![Notes: what every button does](docs/images/notes-buttons.png)
 
   - **Select** taps a stroke or a shape to select it (its group comes with it), drags a box on empty page to select everything it touches, and drags the selection to move it. One thing selected shows handles to resize and rotate it (a line or arrow shows its two ends).
-  - **Pen** writes with Supernote's own pen engine, so it keeps up like native notes, in the colour and size of the current style, as wide as I press. Turning the pen over erases, whatever tool is chosen.
+  - **Pen** writes with the tablet's own fast pen (Supernote's pen engine on the Manta, the system hand-write on the Musnap), so it keeps up like native notes, in the colour and size of the current style, as wide as I press. Turning the pen over erases, whatever tool is chosen.
   - **Highlighter** draws a light band. **Eraser** removes whole strokes and shapes it touches; tapping **Eraser** again offers **Clear canvas**, which asks first, and **Undo** brings everything back. **Lasso** circles ink (and shapes inside the loop) so I can drag it somewhere else.
   - **Shapes ▸** opens rectangle, ellipse, line and arrow beside the bar; I drag with the pen to draw one. An arrow drawn from or to a shape stays attached and follows it.
   - **Insert ▸** opens text box, sticky note, table and image. A pen tap places a text box or note and opens the keyboard; a drag outlines a table (up to 12 × 8), and a tap on a cell types into it. **Image** lists the PNG, JPG and WebP files in Pictures, Download, INBOX, SCREENSHOT and EXPORT; the picture is copied beside the meeting.
-  - **Style ●** opens the colours (twelve, each its own grey on the screen, true colour in the PDF), opacity, fill, outline and size. A pick restyles what is selected and becomes the default.
+  - **Style ●** opens the colours (twelve: true colour on a colour screen like the Musnap's, each its own grey on a black-and-white one, and true colour in the PDF), opacity, fill, outline and size. A pick restyles what is selected and becomes the default.
   - With something selected, the middle of the bar shows its actions instead: **Delete**, **Duplicate**, **Group** or **Ungroup**, **Front**, **Back**, **Link** (to another meeting: a chain badge appears, and tapping it opens that meeting), **Style**, **Table** (add or remove the row or column I am in) and **Done**.
   - **Undo** and **Redo** step back and forward through strokes and shapes alike; each gesture is one step.
   - **Listen** (the speaker) is for afterwards: with it chosen, tapping my ink, a shape or a text box, with the pen or a finger, plays the recording from two seconds before I wrote it, and the transcript strip shows the line being said. It is off while recording.
@@ -158,7 +172,7 @@ Pull requests are welcome. Every pull request runs the full gates in CI, along w
 
 ## About & disclaimer
 
-Meetings is my own independent project. It is not affiliated with or endorsed by Ratta (Supernote), OpenAI, Google or Anthropic. You use your own API keys and are bound by each provider's terms; providers may retain the audio and text you send them under their own policies.
+Meetings is my own independent project. It is not affiliated with or endorsed by Ratta (Supernote), Musnap, iReader, Viwoods, OpenAI, Google or Anthropic. You use your own API keys and are bound by each provider's terms; providers may retain the audio and text you send them under their own policies.
 
 ## License
 
