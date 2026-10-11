@@ -14,7 +14,7 @@
 <p align="center">
   <a href="https://github.com/j-raghavan/sn-meeting/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/j-raghavan/sn-meeting/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="core: Rust" src="https://img.shields.io/badge/core-Rust-orange?logo=rust&logoColor=white">
-  <img alt="platform: Supernote | Musnap | Viwoods" src="https://img.shields.io/badge/platform-Supernote%20%7C%20Musnap%20%7C%20Viwoods-blue">
+  <img alt="platform: Supernote, Musnap, Viwoods" src="https://img.shields.io/badge/platform-Supernote,_Musnap,_Viwoods-blue">
   <a href="./LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
 </p>
 
