@@ -14,9 +14,24 @@ object DeviceScale {
     /** The density the app was designed at on the Manta. */
     const val REFERENCE_DPI = 320
 
-    /** How much smaller to draw on a device that reports [densityDpi]: 1 at or under the reference. */
-    fun factor(densityDpi: Int): Float = if (densityDpi > REFERENCE_DPI) REFERENCE_DPI.toFloat() / densityDpi else 1f
+    /**
+     * The narrowest screen, in dp, that still gets the Manta's layout unscaled. A narrower one
+     * (the 8.2" Viwoods AiPaper Mini: 720 dp at a reported 320 dpi) draws smaller, in proportion
+     * to its width, as the Musnap does (708 dp, scaled by density to 0.762). 900 keeps the
+     * Manta (1024 dp) at 1 and the Musnap at its density factor, with room to spare.
+     */
+    const val REFERENCE_WIDTH_DP = 900
+
+    /** How much smaller to draw on a device that reports [densityDpi] and is [smallestWidthDp]
+     *  wide: 1 on the Manta, never more. A width of 0 (unknown) is ignored. */
+    fun factor(densityDpi: Int, smallestWidthDp: Int = 0): Float {
+        val byDensity = if (densityDpi > REFERENCE_DPI) REFERENCE_DPI.toFloat() / densityDpi else 1f
+        val byWidth = if (smallestWidthDp in 1 until REFERENCE_WIDTH_DP) smallestWidthDp.toFloat() / REFERENCE_WIDTH_DP else 1f
+        return minOf(byDensity, byWidth)
+    }
+
+    fun factor(r: Resources): Float = factor(r.displayMetrics.densityDpi, r.configuration.smallestScreenWidthDp)
 
     /** Pixels per Meetings dp on this device. */
-    fun density(r: Resources): Float = r.displayMetrics.let { it.density * factor(it.densityDpi) }
+    fun density(r: Resources): Float = r.displayMetrics.density * factor(r)
 }

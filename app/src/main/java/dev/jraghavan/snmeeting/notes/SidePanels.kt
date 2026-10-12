@@ -156,7 +156,7 @@ class SidePanels(
             val on = enabled(i)
             addView(TextView(a).apply {
                 text = label
-                textSize = 17f * dev.jraghavan.snmeeting.DeviceScale.factor(a.resources.displayMetrics.densityDpi)
+                textSize = 17f * dev.jraghavan.snmeeting.DeviceScale.factor(a.resources)
                 typeface = ui.serif
                 setTextColor(if (on) ui.ink else ui.textMuted)
                 isEnabled = on
