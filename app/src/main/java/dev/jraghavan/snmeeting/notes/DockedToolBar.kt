@@ -58,7 +58,7 @@ class DockedToolBar(private val a: Activity, private val ui: Inkwell, private va
     /** F21-FR2: the bar is on the canvas's left (flyout markers point right). */
     var onLeft = false
     /** Fixed text sizes on the bar follow the device scale too ([dev.jraghavan.snmeeting.DeviceScale]). */
-    private val tf = dev.jraghavan.snmeeting.DeviceScale.factor(a.resources.displayMetrics.densityDpi)
+    private val tf = dev.jraghavan.snmeeting.DeviceScale.factor(a.resources)
 
     init {
         // A margin under the bottom control (Play, Stop), so it never sits on the screen's edge.

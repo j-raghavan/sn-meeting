@@ -24,7 +24,7 @@ class Inkwell(private val activity: Activity) {
 
     /** F23: Android's density times the device factor ([DeviceScale]; 1 on the Manta). */
     private val density get() = DeviceScale.density(activity.resources)
-    private val factor get() = DeviceScale.factor(activity.resources.displayMetrics.densityDpi)
+    private val factor get() = DeviceScale.factor(activity.resources)
     fun dp(v: Int) = (v * density).toInt()
     val phi = 1.618f
 
