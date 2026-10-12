@@ -124,6 +124,11 @@ class NotesCanvasView(
 
     private val arbiter = TouchArbiter()
     private var buffer: StrokeBuffer? = null
+    /** F23-FR9: on a tablet with no fast ink ([PlainInk]), the stroke just lifted, in screen
+     *  pixels, drawn until the core has it; without it the stroke vanished between the pen
+     *  lifting and the core's copy arriving (Viwoods, owner 2026-10-11). Never set elsewhere. */
+    private var finished: FloatArray? = null
+    private val selfDrawn get() = firmware is PlainInk
     private var gesture = Gesture.NONE
     private var penTool = NoteTool.PEN
     private val path = ArrayList<Float>()
@@ -231,6 +236,8 @@ class NotesCanvasView(
         val selectionMoved = next.selectionBounds != ink.selectionBounds
         ink = next
         if (next.defaultStyle != penStyle) penStyle = next.defaultStyle
+        // F23-FR9: the core has the lifted stroke (or answered otherwise): draw what it holds.
+        if (finished != null) { finished = null; invalidate() }
         if (event != null) bake(event) else if (selectionMoved) invalidate() // F21-FR4: one redraw
     }
 
@@ -578,6 +585,7 @@ class NotesCanvasView(
         when (gesture) {
             Gesture.DRAW -> buffer?.let { b ->
                 b.add(x, y, 1f, at)
+                if (selfDrawn && b.size > 1) finished = b.xy() // before the commit, which may answer at once
                 val width = (host.penWidthPx / viewport.zoom).toFloat()
                 host.commitStroke(penTool, if (penTool == NoteTool.HIGHLIGHTER) width * HIGHLIGHT_FACTOR else width,
                     b.pack { vx, vy -> wx(vx) to wy(vy) })
@@ -633,6 +641,16 @@ class NotesCanvasView(
         if (was != Gesture.DRAW || !overlayInks(was)) invalidate()
     }
 
+    /** A stroke the canvas draws itself, from screen-pixel x,y pairs. */
+    private fun drawLive(canvas: Canvas, xy: FloatArray) {
+        livePath.reset()
+        livePath.moveTo(xy[0], xy[1])
+        var k = 2
+        while (k + 1 < xy.size) { livePath.lineTo(xy[k], xy[k + 1]); k += 2 }
+        inkPaint.color = Color.BLACK; inkPaint.strokeWidth = host.penWidthPx
+        canvas.drawPath(livePath, inkPaint)
+    }
+
     /** F21-FR2: a drag's outline or handles, redrawn at most every [PREVIEW_MS]. */
     private fun preview() {
         val now = SystemClock.uptimeMillis()
@@ -665,16 +683,9 @@ class NotesCanvasView(
                 is DrawEntry.Thing -> painter.draw(canvas, e.item, ctx)
             }
         }
+        finished?.let { drawLive(canvas, it) }
         val live = buffer
-        if (gesture == Gesture.DRAW && !overlayInks() && live != null && live.size > 1) {
-            val xy = live.xy()
-            livePath.reset()
-            livePath.moveTo(xy[0], xy[1])
-            var k = 2
-            while (k + 1 < xy.size) { livePath.lineTo(xy[k], xy[k + 1]); k += 2 }
-            inkPaint.color = Color.BLACK; inkPaint.strokeWidth = host.penWidthPx
-            canvas.drawPath(livePath, inkPaint)
-        }
+        if (gesture == Gesture.DRAW && !overlayInks() && live != null && live.size > 1) drawLive(canvas, live.xy())
         drawBadges(canvas)
         drawBadges(canvas)
         markGlyphs.forEach { (x, y) -> canvas.drawText("◆", v.screenX(x).toFloat(), v.screenY(y).toFloat(), glyphPaint) }

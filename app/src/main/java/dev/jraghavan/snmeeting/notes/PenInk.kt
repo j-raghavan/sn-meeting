@@ -9,8 +9,7 @@ import dev.jraghavan.snmeeting.notes.canvas.FirmwarePen
  * device offers, never by its brand or model:
  * - [SupernoteInk]: the Supernote's pen daemon (the Manta, unchanged);
  * - [IreaderInk]: the iReader platform's system hand-write (the Musnap Aura C);
- * - otherwise [SupernoteInk], which does nothing without its daemon, so the canvas draws the
- *   live stroke itself, as before.
+ * - otherwise [PlainInk]: no fast ink, so the canvas draws every stroke itself (the Viwoods).
  * The canvas still receives every pen event and keeps the strokes; the fast ink only shows them
  * until the canvas redraws ([InkBake]).
  */
@@ -38,7 +37,21 @@ interface PenInk {
         fun forDevice(canvas: View): PenInk {
             val supernote = SupernoteInk(canvas.context)
             if (supernote.present()) return supernote
-            return IreaderInk.create(canvas) ?: supernote
+            IreaderInk.create(canvas)?.let { return it }
+            // A Supernote whose pen service isn't up yet keeps SupernoteInk, which finds it later,
+            // exactly as before; only a tablet without Supernote's framework draws plainly.
+            return if (supernoteFramework()) supernote else PlainInk()
         }
+
+        /** F23-FR11: which fast ink this tablet would get, in words (the diagnostics report). */
+        fun describe(context: android.content.Context): String = when {
+            SupernoteInk(context).present() -> "Supernote pen service"
+            IreaderInk.available() -> "iReader system hand-write"
+            supernoteFramework() -> "Supernote (pen service not up)"
+            else -> "none: the canvas draws every stroke (PlainInk)"
+        }
+
+        private fun supernoteFramework(): Boolean =
+            try { Class.forName("android.os.EinkManager"); true } catch (t: Throwable) { false }
     }
 }

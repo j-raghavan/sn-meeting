@@ -172,6 +172,8 @@ class IreaderInk private constructor(private val canvas: View, private val surfa
         private const val UI_EINK_GC16_FULL_MODE = 98
         private const val AHW_WIDTH_AT_M = 3f
 
+        fun available(): Boolean = try { Class.forName(SURFACE_CLASS); true } catch (t: Throwable) { false }
+
         /** The platform's hand-write, when this device has it (and no Supernote daemon). */
         fun create(canvas: View): IreaderInk? = try {
             IreaderInk(canvas, Class.forName(SURFACE_CLASS))

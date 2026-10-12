@@ -362,6 +362,22 @@ class SettingsActivity : Activity() {
      * F14-FR8, inkread's Settings → Updates in the About card: "Check for updates", the result in
      * place, Install / Skip this version / Later when one is found, and the two toggles.
      */
+    /** F23-FR11: "Save diagnostics" (not on a Supernote, whose adb gives the same and more). */
+    private fun diagnostics(card: LinearLayout) {
+        card.addView(ui.hairline())
+        card.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, ui.dim(12), 0, ui.dim(12))
+            addView(ui.pill("Save diagnostics", size = 15f) {
+                scope.core({ try { "Saved Download/" + Diagnostics.save(this@SettingsActivity) } catch (t: Throwable) { "Couldn't save: ${t.javaClass.simpleName}" } }) { msg ->
+                    InkDialog.info(this@SettingsActivity, "Diagnostics", msg)
+                }
+            }, ui.wrap())
+            addView(ui.note("The screen, the pen and Meetings' own recent log, in a text file in Download. Nothing is sent.", 13f),
+                ui.wrap().apply { topMargin = ui.dim(8) })
+        })
+    }
+
     private fun updates(card: LinearLayout) {
         val prefs = settings?.updates ?: return
         card.addView(ui.hairline())
@@ -602,6 +618,7 @@ class SettingsActivity : Activity() {
                 addView(ui.note("Your templates live in MyStyle/Meetings/templates.", 13f), ui.wrap().apply { topMargin = ui.dim(2) })
             })
             updates(this)
+            if (!onSupernote) diagnostics(this)
             searchIndex(this)
             tagOlder(this)
             if (showSegmentLength || segmentMs != null) segmentLength(this)
