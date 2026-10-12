@@ -1047,7 +1047,7 @@ dependencies = [
 
 [[package]]
 name = "meeting-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "base64 0.22.1",
  "calcard",
