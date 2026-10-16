@@ -30,7 +30,7 @@ thiserror = "2"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 # Template layouts (F11, ADR D6): no default features, so no loader, macros or
 # multi-template (include/extends/import); fuel bounds a hostile layout.
-minijinja = { version = "=2.24.0", default-features = false, features = ["builtins", "serde", "fuel"] }
+minijinja = { version = "=3.0.0", default-features = false, features = ["builtins", "serde", "fuel"] }
 # TODO ids (F5-FR5); already in the graph through rig. v4 only.
 uuid = { version = "1", default-features = false, features = ["v4"] }
 # NFC for the to-do merge key (F5-FR5), so composed and decomposed accents match.
