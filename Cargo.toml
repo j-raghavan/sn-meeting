@@ -46,7 +46,7 @@ rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled
 calcard = { version = "=0.3.14", default-features = false }
 chrono-tz = { version = "=0.10.4", default-features = false }
 # F18-FR2: a calendar link's id is the first 8 hex of its SHA-256; already in the graph via rig.
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 # F18-FR3: "gzip accepted" for calendar feeds, inflated with a cap (EC25); pure Rust backend.
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
 jni = "0.22.4"
